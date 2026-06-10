@@ -41,6 +41,59 @@ def write_result_csv(path: Path, curvature, moment_kn_m) -> None:
             writer.writerow([f"{k:.12g}", f"{m:.12g}"])
 
 
+def hysteresis_loss(curvature, moment_kn_m) -> float:
+    if len(curvature) < 2:
+        return 0.0
+    total = 0.0
+    for i in range(1, len(curvature)):
+        total += 0.5 * (moment_kn_m[i] + moment_kn_m[i - 1]) * (curvature[i] - curvature[i - 1])
+    return abs(total)
+
+
+def enabled_assessment_names(payload: dict):
+    enabled = payload.get("study_scope", {}).get("enabled_assessments", {})
+    return [key for key, is_enabled in enabled.items() if is_enabled]
+
+
+def build_backend_readiness(payload: dict, source: str, mesh_status: dict) -> dict:
+    enabled = set(enabled_assessment_names(payload))
+    mesh_state = mesh_status.get("status", "not_attempted") if isinstance(mesh_status, dict) else "not_attempted"
+    real_abaqus_mesh = mesh_state == "abaqus_mesh_created"
+    return {
+        "bending_stick_slip": {
+            "requested": "bending_stick_slip" in enabled,
+            "status": "placeholder_curve",
+            "next_step": "replace proxy curve with Abaqus cyclic bending solve and ODB extraction",
+        },
+        "contact_friction": {
+            "requested": bool(enabled),
+            "status": "mesh_scaffold_only" if real_abaqus_mesh else "manifest_only",
+            "next_step": "define normal/tangential contact pairs and friction sensitivity sweeps",
+        },
+        "torsion": {
+            "requested": "torsion" in enabled,
+            "status": "proxy_metric_only",
+            "next_step": "add twist-controlled Abaqus load case and report torsional stiffness",
+        },
+        "tension_bending_coupling": {
+            "requested": "tension_bending_coupling" in enabled,
+            "status": "proxy_metric_only",
+            "next_step": "add axial preload sweep before cyclic bending",
+        },
+        "compression_bird_caging": {
+            "requested": "compression_bird_caging" in enabled,
+            "status": "proxy_metric_only",
+            "next_step": "add radial compression or pressure sweep and instability indicator",
+        },
+        "pressure_effect": {
+            "requested": "pressure_effect" in enabled,
+            "status": "proxy_metric_only",
+            "next_step": "calibrate pressure-dependent contact and stiffness softening",
+        },
+        "source": source,
+    }
+
+
 def parse_input_path(argv) -> Path:
     candidates = [arg for arg in argv[1:] if arg != "--" and not arg.startswith("-")]
     return Path(candidates[-1]) if candidates else Path("input_data.json")
@@ -313,16 +366,36 @@ def build_abaqus_mesh_model(payload: dict, job_dir: Path) -> dict:
 
 
 def write_summary(path: Path, source: str, payload: dict, curvature, moment_kn_m, derived: dict, mesh_status: dict = None) -> None:
+    mesh_status = mesh_status or {}
     max_abs = max((abs(x) for x in moment_kn_m), default=0.0)
+    min_moment = min(moment_kn_m, default=0.0)
+    max_moment = max(moment_kn_m, default=0.0)
     study_scope = payload.get("study_scope", {})
     summary = {
         "source": source,
         "status": "completed",
         "max_abs_moment_kn_m": max_abs,
+        "min_moment_kn_m": min_moment,
+        "max_moment_kn_m": max_moment,
+        "hysteresis_loss_kj_per_m_proxy": hysteresis_loss(curvature, moment_kn_m),
         "num_points": len(moment_kn_m),
         "study_scope": study_scope,
-        "mesh_status": mesh_status or {},
+        "mesh_status": mesh_status,
+        "result_contract": {
+            "csv_file": "result_data.csv",
+            "required_columns": ["curvature_1_per_m", "moment_kn_m"],
+            "summary_file": "result_summary.json",
+            "primary_result": "bending moment-curvature loop",
+        },
+        "backend_readiness": build_backend_readiness(payload, source, mesh_status),
+        "enabled_assessments": enabled_assessment_names(payload),
         "derived_placeholder_metrics": derived,
+        "recommended_next_steps": [
+            "open the generated .inp/.cae scaffold in Abaqus/CAE",
+            "add contact/friction definitions and verify convergence",
+            "replace the placeholder curve with ODB-extracted moment-curvature data",
+            "promote proxy torsion, pressure, and bird-caging metrics to Abaqus load cases",
+        ],
         "computed_at": datetime.now().isoformat(timespec="seconds"),
         "note": "Placeholder response curve. Abaqus mesh scaffold is generated when run inside Abaqus/CAE.",
     }

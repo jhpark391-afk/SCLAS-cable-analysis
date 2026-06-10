@@ -397,12 +397,20 @@ Write `result_summary.json` with any backend metrics, for example:
 ```json
 {
   "source": "ABAQUS_BACKEND",
+  "status": "completed",
   "max_abs_moment_kn_m": 123.4,
-  "torsion_stiffness_proxy": 12.3,
-  "tension_bending_coupling_index": 0.002,
-  "bird_caging_risk_index": 0.018,
-  "odb_path": "...",
-  "status": "completed"
+  "hysteresis_loss_kj_per_m_proxy": 0.45,
+  "mesh_status": {"status": "abaqus_mesh_created"},
+  "backend_readiness": {
+    "bending_stick_slip": {"requested": true, "status": "abaqus_solved"},
+    "contact_friction": {"requested": true, "status": "calibrated"}
+  },
+  "derived_placeholder_metrics": {
+    "torsion_proxy_N_m2": 12.3,
+    "tension_bending_coupling_index": 0.002,
+    "bird_caging_risk_index": 0.018
+  },
+  "odb_path": "..."
 }
 ```
 
@@ -1436,10 +1444,28 @@ class SCLASRemoteGUI(QMainWindow):
             f"Status: {data.get('status', 'loaded')}",
             f"Computed: {data.get('computed_at', '-')}",
             f"Peak |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} kN.m",
+            f"Loop loss: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
             f"Points: {data.get('num_points', '-')}",
             f"Mesh status: {mesh_status}",
             f"Enabled scope: {enabled_text}",
         ]
+
+        readiness = data.get("backend_readiness", {})
+        if isinstance(readiness, dict):
+            status_lines = []
+            for key in [
+                "bending_stick_slip",
+                "contact_friction",
+                "torsion",
+                "tension_bending_coupling",
+                "compression_bird_caging",
+                "pressure_effect",
+            ]:
+                item = readiness.get(key)
+                if isinstance(item, dict) and item.get("requested"):
+                    status_lines.append(f"- {key}: {item.get('status', '-')}")
+            if status_lines:
+                lines.extend(["", "Backend readiness:"] + status_lines)
 
         if derived:
             lines.extend([
