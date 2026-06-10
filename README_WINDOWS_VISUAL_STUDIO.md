@@ -98,6 +98,9 @@ sclas_mesh_model.cae
 
 - If `PyQt5` fails to install, check that the selected Python version is a normal
   64-bit CPython install.
+- If `setup_windows.bat` says the existing `.venv` Python cannot start, rename
+  or delete `.venv`, install or select a valid Python 3 interpreter, then run
+  `setup_windows.bat` again.
 - If the GUI opens but the 3D view is blank, update the graphics driver and test
   with the `FAST GUI preview` mode first.
 - If `abaqus` is not recognized, add the Abaqus command folder to PATH or use the

@@ -20,6 +20,8 @@ backend contract already carries a wider research scope:
 
 See `README_LITERATURE_NOTES.md` for how the Chang and Chen 2019 and Menard
 and Cartraud 2023 papers map into the current GUI/backend contract.
+See `docs/SCLAS_RESEARCH_BACKLOG.md` for the current public-reference scan and
+implementation backlog.
 
 ## Main entry point
 
@@ -71,8 +73,8 @@ The backend must write:
 
 - `FAST GUI preview`: GUI-side approximate solver for quick visual checks.
 - `Export job package only`: creates files for another backend developer.
-- `Run local/shared-folder command`: runs `python3 abaqus_runner.py input_data.json`
-  inside the job folder by default.
+- `Run local/shared-folder command`: runs the selected local Python interpreter
+  against `abaqus_runner.py input_data.json` inside the job folder by default.
 - `Run remote computer via SSH/scp`: uploads the job folder contents, runs the
   remote command, then downloads `result_data.csv`.
 

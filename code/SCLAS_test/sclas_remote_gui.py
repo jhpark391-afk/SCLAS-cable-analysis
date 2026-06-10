@@ -180,6 +180,7 @@ def hysteresis_loss(k: np.ndarray, m_knm: np.ndarray) -> float:
 class AnalysisWorker(QThread):
     plot_sig = pyqtSignal(np.ndarray, np.ndarray)
     metrics_sig = pyqtSignal(dict)
+    summary_sig = pyqtSignal(dict)
     log_sig = pyqtSignal(str)
     progress_sig = pyqtSignal(int)
     finished_sig = pyqtSignal(str)
@@ -242,10 +243,11 @@ class AnalysisWorker(QThread):
             m_n_m[i] = ei_slip * k[i] + m_yield_n_m * np.tanh(12.0 * z)
 
         m_kn_m = m_n_m / 1000.0
-        self.write_result_files(k, m_kn_m, source="FAST_GUI_APPROXIMATION")
+        metrics = self.write_result_files(k, m_kn_m, source="FAST_GUI_APPROXIMATION")
         self.progress_sig.emit(100)
         self.plot_sig.emit(k, m_kn_m)
-        self.metrics_sig.emit(make_metrics(k, m_kn_m, source="FAST_GUI_APPROXIMATION"))
+        self.metrics_sig.emit(metrics)
+        self.summary_sig.emit(metrics)
         self.log_sig.emit("[FAST] Finished. This result is for GUI preview, not final Abaqus validation.")
         self.finished_sig.emit(str(self.job_dir))
 
@@ -311,20 +313,27 @@ class AnalysisWorker(QThread):
         if not result_csv.exists():
             raise FileNotFoundError(f"Backend did not produce {result_csv}")
         k, m = read_result_csv(result_csv)
+        metrics = make_metrics(k, m, source="ABAQUS_BACKEND")
+        summary = read_json(self.job_dir / "result_summary.json", metrics)
         self.plot_sig.emit(k, m)
-        self.metrics_sig.emit(make_metrics(k, m, source="ABAQUS_BACKEND"))
+        self.metrics_sig.emit(metrics)
+        self.summary_sig.emit(summary)
         self.progress_sig.emit(100)
         self.log_sig.emit("[RESULT] Loaded result_data.csv successfully.")
+        if (self.job_dir / "result_summary.json").exists():
+            self.log_sig.emit("[RESULT] Loaded result_summary.json successfully.")
         self.finished_sig.emit(str(self.job_dir))
 
-    def write_result_files(self, k: np.ndarray, m_knm: np.ndarray, source: str) -> None:
+    def write_result_files(self, k: np.ndarray, m_knm: np.ndarray, source: str) -> dict:
         result_csv = self.job_dir / "result_data.csv"
         with result_csv.open("w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["curvature_1_per_m", "moment_kn_m"])
             for ki, mi in zip(k, m_knm):
                 writer.writerow([f"{ki:.12g}", f"{mi:.12g}"])
-        write_json(self.job_dir / "result_summary.json", make_metrics(k, m_knm, source=source))
+        metrics = make_metrics(k, m_knm, source=source)
+        write_json(self.job_dir / "result_summary.json", metrics)
+        return metrics
 
 
 def make_metrics(k: np.ndarray, m_knm: np.ndarray, source: str) -> dict:
@@ -866,6 +875,17 @@ class SCLASRemoteGUI(QMainWindow):
         metric_layout.addWidget(self.lbl_points)
         right.addLayout(metric_layout)
 
+        self.summary_text = QTextEdit()
+        self.summary_text.setObjectName("SummaryText")
+        self.summary_text.setReadOnly(True)
+        self.summary_text.setMaximumHeight(190)
+        self.summary_text.setPlainText(
+            "Backend summary will appear here after FAST preview, local Abaqus runner, "
+            "or manual result_data.csv load.\n\n"
+            "Expected contract: result_data.csv plus optional result_summary.json."
+        )
+        right.addWidget(self.summary_text)
+
         left_scroll = QScrollArea()
         left_scroll.setObjectName("PanelScroll")
         left_scroll.setWidgetResizable(True)
@@ -1204,6 +1224,7 @@ class SCLASRemoteGUI(QMainWindow):
             self.worker.progress_sig.connect(self.progress.setValue)
             self.worker.plot_sig.connect(self.update_plot)
             self.worker.metrics_sig.connect(self.update_metrics)
+            self.worker.summary_sig.connect(self.update_summary_panel)
             self.worker.finished_sig.connect(self.analysis_finished)
             self.worker.start()
         except Exception as exc:
@@ -1320,9 +1341,12 @@ class SCLASRemoteGUI(QMainWindow):
         if not path:
             return
         try:
-            k, m = read_result_csv(Path(path))
+            csv_path = Path(path)
+            k, m = read_result_csv(csv_path)
+            metrics = make_metrics(k, m, source="MANUAL_CSV_LOAD")
             self.update_plot(k, m)
-            self.update_metrics(make_metrics(k, m, source="MANUAL_CSV_LOAD"))
+            self.update_metrics(metrics)
+            self.update_summary_panel(read_json(csv_path.with_name("result_summary.json"), metrics))
             self.log(f"[RESULT] Loaded {path}")
         except Exception as exc:
             QMessageBox.critical(self, "CSV load error", str(exc))
@@ -1381,6 +1405,56 @@ class SCLASRemoteGUI(QMainWindow):
         self.lbl_peak.value_label.setText(f"{data['max_abs_moment_kn_m']:.4g} kN.m")
         self.lbl_loss.value_label.setText(f"{data['hysteresis_loss_kj_per_m_proxy']:.4g}")
         self.lbl_points.value_label.setText(str(data["num_points"]))
+
+    def update_summary_panel(self, data: dict) -> None:
+        if not hasattr(self, "summary_text"):
+            return
+        self.summary_text.setPlainText(self.format_summary(data))
+
+    def format_summary(self, data: dict) -> str:
+        if not data:
+            return "No result summary loaded."
+
+        def value(path, default="-"):
+            node = data
+            for key in path:
+                if not isinstance(node, dict) or key not in node:
+                    return default
+                node = node[key]
+            return node
+
+        enabled = value(["study_scope", "enabled_assessments"], {})
+        if isinstance(enabled, dict):
+            enabled_text = ", ".join(key for key, flag in enabled.items() if flag) or "none"
+        else:
+            enabled_text = "-"
+
+        mesh_status = value(["mesh_status", "status"], value(["mesh_status"], "-"))
+        derived = data.get("derived_placeholder_metrics", {})
+        lines = [
+            f"Source: {data.get('source', '-')}",
+            f"Status: {data.get('status', 'loaded')}",
+            f"Computed: {data.get('computed_at', '-')}",
+            f"Peak |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} kN.m",
+            f"Points: {data.get('num_points', '-')}",
+            f"Mesh status: {mesh_status}",
+            f"Enabled scope: {enabled_text}",
+        ]
+
+        if derived:
+            lines.extend([
+                "",
+                "Research proxies:",
+                f"- slip stiffness: {float(derived.get('bending_stiffness_slip_N_m2', 0.0)):.6g} N.m^2",
+                f"- pressure softening: {float(derived.get('pressure_softening_factor', 0.0)):.4g}",
+                f"- bird-caging risk: {float(derived.get('bird_caging_risk_index', 0.0)):.4g}",
+                f"- torsion proxy: {float(derived.get('torsion_proxy_N_m2', 0.0)):.6g} N.m^2",
+            ])
+
+        note = data.get("note")
+        if note:
+            lines.extend(["", f"Note: {note}"])
+        return "\n".join(lines)
 
     def trigger_rebuild(self) -> None:
         if hasattr(self, "debounce"):
@@ -1681,6 +1755,16 @@ class SCLASRemoteGUI(QMainWindow):
                 border-radius: 8px;
                 padding: 8px;
                 font-size: 12px;
+            }
+            QTextEdit#SummaryText {
+                background-color: #fbfcfe;
+                color: #253247;
+                font-family: "Segoe UI", "Malgun Gothic", Arial;
+                border: 1px solid #d7dee8;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 12px;
+                line-height: 1.35;
             }
             QProgressBar {
                 background-color: #edf2f8;
