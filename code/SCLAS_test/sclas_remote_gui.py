@@ -52,6 +52,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QProgressBar,
     QRadioButton,
+    QScrollArea,
     QSpinBox,
     QTabWidget,
     QTableWidget,
@@ -414,8 +415,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.current_k = np.array([])
         self.current_m = np.array([])
         self.last_job_dir = ""
-        self.setWindowTitle(f"SCLAS v10.0 | Cable GUI Frontend + Abaqus Remote Contract")
-        self.resize(1720, 980)
+        self.setWindowTitle(f"SCLAS {APP_VERSION} | Cable GUI Frontend + Abaqus Remote Contract")
+        self.resize(1540, 860)
         self.init_ui()
         self.apply_theme()
         self.load_settings()
@@ -580,7 +581,7 @@ class SCLASRemoteGUI(QMainWindow):
         layout = QHBoxLayout(tab)
         layout.setSpacing(15)
 
-        left_panel = QFrame(); left_panel.setObjectName("Card"); left_panel.setFixedWidth(480)
+        left_panel = QFrame(); left_panel.setObjectName("Card"); left_panel.setMinimumWidth(480)
         left = QVBoxLayout(left_panel)
         left.addWidget(self.header("Analysis Conditions"))
         self.cond = {
@@ -669,8 +670,9 @@ class SCLASRemoteGUI(QMainWindow):
         self.lbl_hw = QLabel("HW: CPU - | RAM -")
         left.addWidget(self.lbl_hw)
         left.addWidget(QLabel("System log"))
-        self.console = QTextEdit(); self.console.setReadOnly(True); self.console.setMaximumHeight(180)
+        self.console = QTextEdit(); self.console.setReadOnly(True); self.console.setMaximumHeight(130)
         left.addWidget(self.console)
+        left.addStretch()
 
         result_panel = QFrame(); result_panel.setObjectName("Card")
         right = QVBoxLayout(result_panel)
@@ -690,7 +692,14 @@ class SCLASRemoteGUI(QMainWindow):
         metric_layout.addWidget(self.lbl_points)
         right.addLayout(metric_layout)
 
-        layout.addWidget(left_panel)
+        left_scroll = QScrollArea()
+        left_scroll.setObjectName("PanelScroll")
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        left_scroll.setWidget(left_panel)
+        left_scroll.setFixedWidth(520)
+
+        layout.addWidget(left_scroll)
         layout.addWidget(result_panel)
         self.tabs.addTab(tab, "3. Analysis / Backend")
 
@@ -1272,6 +1281,12 @@ class SCLASRemoteGUI(QMainWindow):
             QTabBar::tab:selected { background: #00ffcc; color: #0d0d12; }
             QFrame#Card { background-color: #1a1a24; border-radius: 12px; border: 1px solid #2a2a35; padding: 8px; }
             QFrame#MetricBox { background-color: #22222e; border-radius: 8px; border-left: 4px solid #00ffcc; padding: 8px; }
+            QScrollArea#PanelScroll { background-color: transparent; border: none; }
+            QScrollArea#PanelScroll > QWidget > QWidget { background-color: transparent; }
+            QScrollBar:vertical { background: #111118; width: 10px; margin: 0; border-radius: 5px; }
+            QScrollBar::handle:vertical { background: #333344; border-radius: 5px; min-height: 32px; }
+            QScrollBar::handle:vertical:hover { background: #444455; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
             QGroupBox { color: #ddd; border: 1px solid #333344; border-radius: 8px; margin-top: 10px; padding: 10px; font-weight: bold; }
             QLabel { font-size: 14px; color: #ccc; }
             QLineEdit, QSpinBox, QComboBox { background-color: #22222e; border: 1px solid #333344; border-radius: 6px; padding: 8px; color: #fff; font-size: 14px; font-weight: bold; }
