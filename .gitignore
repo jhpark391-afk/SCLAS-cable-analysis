@@ -40,3 +40,6 @@ local_notes/
 # Temporary files
 *.tmp
 *.log
+
+# Local handoff archives
+handoff_packages/
