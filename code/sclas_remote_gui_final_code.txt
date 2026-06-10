@@ -147,7 +147,9 @@ def hysteresis_loss(k: np.ndarray, m_knm: np.ndarray) -> float:
     """Approximate loop work. k is 1/m, m is kN*m, result is kJ per loop-like path."""
     if len(k) < 2:
         return 0.0
-    return float(abs(np.trapz(m_knm, k)))
+    if hasattr(np, "trapezoid"):
+        return float(abs(np.trapezoid(m_knm, k)))
+    return float(abs(np.sum(0.5 * (m_knm[1:] + m_knm[:-1]) * (k[1:] - k[:-1]))))
 
 
 # -----------------------------------------------------------------------------
