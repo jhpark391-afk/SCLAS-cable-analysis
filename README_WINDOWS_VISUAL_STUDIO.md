@@ -41,6 +41,12 @@ You can also run:
 run_sclas.bat
 ```
 
+To verify the local project contract after edits, run:
+
+```bat
+run_self_check.bat
+```
+
 ## Backend command on Windows
 
 For placeholder backend testing, use:

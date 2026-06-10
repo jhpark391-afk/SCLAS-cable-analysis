@@ -44,6 +44,12 @@ the system `python3` may not have `numpy`, `PyQt5`, and `pyqtgraph` installed.
 On Windows, run `setup_windows.bat` first to create `.venv` and install
 `requirements.txt`.
 
+Run the local smoke checks with:
+
+```bat
+run_self_check.bat
+```
+
 ## Job package contract
 
 Each run creates a job folder under:
