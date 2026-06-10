@@ -64,7 +64,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "10.3-research-scope"
+APP_VERSION = "10.4-literature-informed"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -337,9 +337,10 @@ Important sections:
 - `geometry_mm`: raw GUI geometry values in mm.
 - `derived_geometry_mm`: GUI-derived radii and armor center radii in mm.
 - `materials`: layer elastic properties from GUI table.
-- `mesh`: requested element type and preview discretization.
+- `mesh`: requested element type, model strategy, armour representation, preview discretization.
 - `analysis_conditions`: length, pressure, friction, curvature, twist, axial strain, radial compression, cycle count.
 - `study_scope`: enabled local behavior assessments requested by the GUI.
+- `numerical_model`: literature-informed backend modelling recommendations.
 - `equivalent_properties`: GUI-side equivalent EI estimates.
 
 ## Required output
@@ -375,6 +376,19 @@ local behavior evaluations to run:
 - `tension_bending_coupling`: axial load influence on bending response.
 - `compression_bird_caging`: radial/diameter instability risk.
 - `pressure_effect`: hydrostatic pressure influence on stiffness and slip.
+
+## Literature-informed modelling notes
+- Use a periodic/homogenized cell when possible to reduce the 3D FE domain to a
+  helical period while preserving contact interactions.
+- Treat armour layers efficiently with beam elements plus contact surface
+  elements when the backend needs many wires.
+- Use penalty/augmented-Lagrange normal contact and regularized Coulomb
+  tangential contact. `contact_regularization_beta` is included for this.
+- Calibrate friction and residual contact pressure against slip-zone bending
+  stiffness and dissipated energy, then use those values for local stress
+  extraction.
+- For coupled axisymmetric studies, report axial/torsional stiffness and
+  pressure/compression-induced softening in `result_summary.json`.
 
 ## Abaqus command pattern
 A typical backend command may look like:
@@ -520,16 +534,24 @@ class SCLASRemoteGUI(QMainWindow):
         left.addWidget(self.header("Mesh Request for Backend"))
         self.mesh_inputs = {
             "elem_type": QComboBox(),
+            "model_strategy": QComboBox(),
+            "armour_model": QComboBox(),
+            "contact_beta": QLineEdit("0.001"),
             "z_elem": QSpinBox(),
             "c_elem_core": QSpinBox(),
             "c_elem_armour": QSpinBox(),
         }
         self.mesh_inputs["elem_type"].addItems(["C3D8R", "C3D4", "B31"])
+        self.mesh_inputs["model_strategy"].addItems(["periodic_homogenized_cell", "full_3d_segment", "axisymmetric_tension_torsion"])
+        self.mesh_inputs["armour_model"].addItems(["beam_with_contact_surface", "solid_wire", "analytical_equivalent"])
         self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(40)
         self.mesh_inputs["c_elem_core"].setRange(4, 160); self.mesh_inputs["c_elem_core"].setValue(24)
         self.mesh_inputs["c_elem_armour"].setRange(4, 64); self.mesh_inputs["c_elem_armour"].setValue(8)
         form = QFormLayout()
         form.addRow("Abaqus element type", self.mesh_inputs["elem_type"])
+        form.addRow("Model strategy", self.mesh_inputs["model_strategy"])
+        form.addRow("Armour representation", self.mesh_inputs["armour_model"])
+        form.addRow("Contact regularization beta", self.mesh_inputs["contact_beta"])
         form.addRow("Axial divisions", self.mesh_inputs["z_elem"])
         form.addRow("Core circumferential divisions", self.mesh_inputs["c_elem_core"])
         form.addRow("Armour circumferential divisions", self.mesh_inputs["c_elem_armour"])
@@ -564,6 +586,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.cond = {
             "eff_length": QLineEdit("234.20"),
             "pressure": QLineEdit("40.00"),
+            "residual_contact_pressure": QLineEdit("0.30"),
             "friction": QLineEdit("0.22"),
             "curvature": QLineEdit("0.08"),
             "twist": QLineEdit("0.05"),
@@ -577,6 +600,7 @@ class SCLASRemoteGUI(QMainWindow):
         form = QFormLayout()
         form.addRow("Effective length (mm)", self.cond["eff_length"])
         form.addRow("Hydrostatic pressure (MPa)", self.cond["pressure"])
+        form.addRow("Residual contact pressure (MPa)", self.cond["residual_contact_pressure"])
         form.addRow("Friction coefficient", self.cond["friction"])
         form.addRow("Max curvature (1/m)", self.cond["curvature"])
         form.addRow("Max twist (rad/m)", self.cond["twist"])
@@ -779,6 +803,7 @@ class SCLASRemoteGUI(QMainWindow):
                 "curvature": "1/m",
                 "twist": "rad/m",
                 "strain": "dimensionless",
+                "contact_regularization_beta": "dimensionless",
                 "elastic_modulus": "GPa in materials, Pa in equivalent_properties",
                 "moment_output_required": "kN.m",
             },
@@ -807,6 +832,8 @@ class SCLASRemoteGUI(QMainWindow):
             "materials": materials,
             "mesh": {
                 "requested_element_type": self.mesh_inputs["elem_type"].currentText(),
+                "model_strategy": self.mesh_inputs["model_strategy"].currentText(),
+                "armour_model": self.mesh_inputs["armour_model"].currentText(),
                 "axial_divisions": int(self.mesh_inputs["z_elem"].value()),
                 "core_circumferential_divisions": int(self.mesh_inputs["c_elem_core"].value()),
                 "armour_circumferential_divisions": int(self.mesh_inputs["c_elem_armour"].value()),
@@ -815,15 +842,18 @@ class SCLASRemoteGUI(QMainWindow):
             "analysis_conditions": {
                 "effective_length_mm": safe_float(self.cond["eff_length"], 234.2, "Effective length"),
                 "hydrostatic_pressure_mpa": safe_float(self.cond["pressure"], 40.0, "Hydrostatic pressure"),
+                "residual_contact_pressure_mpa": safe_float(self.cond["residual_contact_pressure"], 0.3, "Residual contact pressure"),
                 "friction_coefficient": safe_float(self.cond["friction"], 0.22, "Friction coefficient"),
                 "max_curvature_1_per_m": safe_float(self.cond["curvature"], 0.08, "Max curvature"),
                 "max_twist_rad_per_m": safe_float(self.cond["twist"], 0.05, "Max twist"),
                 "max_axial_strain": safe_float(self.cond["axial_strain"], 0.002, "Max axial strain"),
                 "radial_compression_ratio": safe_float(self.cond["radial_compression"], 0.015, "Radial compression ratio"),
+                "contact_regularization_beta": safe_float(self.mesh_inputs["contact_beta"], 0.001, "Contact regularization beta"),
                 "loading_cycles": int(self.cond["cycles"].value()),
                 "solver_steps": int(self.cond["steps"].value()),
             },
             "study_scope": self.collect_study_scope(),
+            "numerical_model": self.build_numerical_model_notes(),
             "equivalent_properties": eq,
             "backend_output_contract": {
                 "required_csv": "result_data.csv",
@@ -839,6 +869,40 @@ class SCLASRemoteGUI(QMainWindow):
             },
         }
         return payload
+
+    def build_numerical_model_notes(self) -> dict:
+        return {
+            "literature_basis": [
+                {
+                    "id": "Chang2019_OceanEngineering",
+                    "focus": "coupled tensile, torsional, and compressive loads; water-pressure-induced stiffness reduction",
+                    "implementation_hint": "report axial-torsional coupling and compression/pressure softening metrics in result_summary.json",
+                },
+                {
+                    "id": "Menard2023_MarineStructures",
+                    "focus": "periodic homogenized 3D FE cell for cyclic bending with contact, friction, and residual pressure",
+                    "implementation_hint": "use helical-period job domain, periodic boundary conditions, beam/surface armour modelling, and slip-state calibration",
+                },
+            ],
+            "recommended_backend_sequence": [
+                "validate bending moment-curvature loop",
+                "calibrate friction and residual contact pressure using slip-zone stiffness and dissipated energy",
+                "add axial-torsional stiffness matrix under coupled tension/torsion",
+                "add compressive pressure sweep and bird-caging risk metric",
+                "extract local stresses/displacements for fatigue-relevant components",
+            ],
+            "contact_model": {
+                "normal": "penalty_or_augmented_lagrange",
+                "tangential": "coulomb_regularized",
+                "regularization_beta": safe_float(self.mesh_inputs["contact_beta"], 0.001, "Contact regularization beta"),
+            },
+            "periodic_cell": {
+                "effective_length_mm": safe_float(self.cond["eff_length"], 234.2, "Effective length"),
+                "strategy": self.mesh_inputs["model_strategy"].currentText(),
+                "armour_representation": self.mesh_inputs["armour_model"].currentText(),
+                "note": "234.2 mm is consistent with the helical-period style benchmark used in the literature notes.",
+            },
+        }
 
     def collect_study_scope(self) -> dict:
         return {

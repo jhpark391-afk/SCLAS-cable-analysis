@@ -55,6 +55,8 @@ def run_placeholder_solver(payload: dict):
         twist_max = float(analysis.get("max_twist_rad_per_m", 0.05))
         axial_strain = float(analysis.get("max_axial_strain", 0.002))
         radial_compression = float(analysis.get("radial_compression_ratio", 0.015))
+        residual_pressure = float(analysis.get("residual_contact_pressure_mpa", 0.3))
+        beta = float(analysis.get("contact_regularization_beta", 0.001))
         friction = float(analysis["friction_coefficient"])
         pressure = float(analysis["hydrostatic_pressure_mpa"])
         ei_init = float(equivalent["core_equivalent_EI_N_m2"])
@@ -65,12 +67,17 @@ def run_placeholder_solver(payload: dict):
         twist_max = float(payload.get("twist", 0.05))
         axial_strain = float(payload.get("axial_strain", 0.002))
         radial_compression = float(payload.get("radial_compression", 0.015))
+        residual_pressure = float(payload.get("residual_contact_pressure", 0.3))
+        beta = float(payload.get("contact_regularization_beta", 0.001))
         friction = float(payload.get("friction_coeff", payload.get("friction", 0.22)))
         pressure = float(payload.get("pressure", 40.0))
         ei_init = float(payload.get("core_equivalent_EI", 65.0))
 
-    ei_slip = ei_init * (0.28 + 0.10 * friction)
-    m_yield_n_m = (ei_init - ei_slip) * k_max * 0.45 * (1.0 + 2.2 * friction + pressure / 45.0)
+    normal_force_factor = 1.0 + residual_pressure / 0.3 if residual_pressure > 0.0 else 1.0
+    pressure_softening_factor = max(0.0, 1.0 - pressure / 250.0)
+    ei_stick = ei_init * (1.0 + 0.15 * friction * normal_force_factor)
+    ei_slip = ei_init * (0.28 + 0.10 * friction) * pressure_softening_factor
+    m_yield_n_m = (ei_stick - ei_slip) * k_max * 0.45 * (1.0 + 2.2 * friction + residual_pressure / 0.3)
 
     curvature = []
     moment_kn_m = []
@@ -84,18 +91,38 @@ def run_placeholder_solver(payload: dict):
         dk = k - previous_k
         sign = 1.0 if dk >= 0.0 else -1.0
         z += (1.0 - 0.55 * sign * z - 0.45 * abs(z)) * dk
-        m_n_m = ei_slip * k + m_yield_n_m * math.tanh(12.0 * z)
+        transition_sharpness = max(2.0, min(30.0, 0.012 / max(beta, 1.0e-6)))
+        m_n_m = ei_slip * k + m_yield_n_m * math.tanh(transition_sharpness * z)
         curvature.append(k)
         moment_kn_m.append(m_n_m / 1000.0)
         previous_k = k
 
+    axial_stiffness_proxy = max(ei_init * 42.0, 1.0)
+    torsion_stiffness_proxy = ei_init * (0.18 + 0.04 * abs(twist_max))
+    axial_torsion_coupling_proxy = axial_stiffness_proxy * 0.03 * math.sin(math.atan2(twist_max, 1.0))
+    compression_softening = max(0.0, 1.0 - 0.25 * radial_compression - pressure / 400.0)
     derived = {
         "bending_stiffness_initial_N_m2": ei_init,
+        "bending_stiffness_stick_proxy_N_m2": ei_stick,
         "bending_stiffness_slip_N_m2": ei_slip,
-        "torsion_proxy_N_m2": ei_init * (0.18 + 0.04 * abs(twist_max)),
+        "normal_force_factor_proxy": normal_force_factor,
+        "contact_regularization_beta": beta,
+        "axial_torsional_stiffness_matrix_proxy": {
+            "EA_N": axial_stiffness_proxy * compression_softening,
+            "GJ_N_m2": torsion_stiffness_proxy * compression_softening,
+            "K_axial_torsion_N_m": axial_torsion_coupling_proxy,
+            "K_torsion_axial_N_m": axial_torsion_coupling_proxy,
+        },
+        "torsion_proxy_N_m2": torsion_stiffness_proxy,
         "tension_bending_coupling_index": axial_strain * (1.0 + 1.5 * friction),
         "bird_caging_risk_index": radial_compression * (1.0 + pressure / 100.0),
-        "pressure_softening_factor": max(0.0, 1.0 - pressure / 250.0),
+        "pressure_softening_factor": pressure_softening_factor,
+        "compression_softening_factor": compression_softening,
+        "calibration_targets": [
+            "slip-zone bending stiffness",
+            "dissipated hysteresis energy",
+            "stick-to-slip transition curvature",
+        ],
     }
     return curvature, moment_kn_m, derived
 

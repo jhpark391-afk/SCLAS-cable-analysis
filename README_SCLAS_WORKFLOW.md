@@ -18,6 +18,9 @@ backend contract already carries a wider research scope:
 - compression/bird-caging risk
 - hydrostatic pressure effect
 
+See `README_LITERATURE_NOTES.md` for how the Chang and Chen 2019 and Menard
+and Cartraud 2023 papers map into the current GUI/backend contract.
+
 ## Main entry point
 
 Run the GUI on macOS from:
