@@ -2,14 +2,22 @@
 """
 SCLAS Abaqus backend runner template.
 
-This file is intentionally small and dependency-light so it can be copied into
-each job folder. Replace `run_placeholder_solver` with real Abaqus/CAE model
-creation and ODB extraction when the backend model is ready.
+Run with normal Python for a fast placeholder result:
+    python abaqus_runner.py input_data.json
+
+Run inside Abaqus/CAE to convert the GUI mesh contract into Abaqus files:
+    abaqus cae noGUI=abaqus_runner.py -- input_data.json
+
+The Abaqus path creates a mesh scaffold from the GUI geometry/mesh settings,
+writes a CAE database and an input deck, then still writes the lightweight
+result CSV so the GUI can load something immediately.
 """
 
 import csv
 import json
 import math
+import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +28,11 @@ def load_payload(path: Path) -> dict:
         return json.load(f)
 
 
+def write_json(path: Path, data: dict) -> None:
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+
+
 def write_result_csv(path: Path, curvature, moment_kn_m) -> None:
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
@@ -28,7 +41,278 @@ def write_result_csv(path: Path, curvature, moment_kn_m) -> None:
             writer.writerow([f"{k:.12g}", f"{m:.12g}"])
 
 
-def write_summary(path: Path, source: str, payload: dict, curvature, moment_kn_m, derived: dict) -> None:
+def parse_input_path(argv) -> Path:
+    candidates = [arg for arg in argv[1:] if arg != "--" and not arg.startswith("-")]
+    return Path(candidates[-1]) if candidates else Path("input_data.json")
+
+
+def safe_name(text: str, limit: int = 38) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", str(text)).strip("_")
+    return (cleaned or "SCLAS")[:limit]
+
+
+def abaqus_available() -> bool:
+    try:
+        import abaqus  # noqa: F401
+        import abaqusConstants  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def write_mesh_manifest(path: Path, payload: dict, abaqus_created: bool, files=None, error: str = "") -> dict:
+    geometry = payload.get("derived_geometry_mm", {})
+    armour = payload.get("armour", {})
+    analysis = payload.get("analysis_conditions", {})
+    mesh_cfg = payload.get("mesh", {})
+    files = files or []
+    manifest = {
+        "status": "abaqus_mesh_created" if abaqus_created else "mesh_request_only",
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "abaqus_files": files,
+        "error": error,
+        "mesh_settings_from_gui": {
+            "requested_element_type": mesh_cfg.get("requested_element_type", "C3D8R"),
+            "model_strategy": mesh_cfg.get("model_strategy", "periodic_homogenized_cell"),
+            "armour_model": mesh_cfg.get("armour_model", "beam_with_contact_surface"),
+            "axial_divisions": int(mesh_cfg.get("axial_divisions", 40)),
+            "core_circumferential_divisions": int(mesh_cfg.get("core_circumferential_divisions", 24)),
+            "armour_circumferential_divisions": int(mesh_cfg.get("armour_circumferential_divisions", 8)),
+            "contact_regularization_beta": float(analysis.get("contact_regularization_beta", 0.001)),
+        },
+        "components": [
+            {
+                "name": "three_core_equivalent_solids",
+                "count": 3,
+                "type": "solid_cylinder",
+                "radius_mm": geometry.get("core_outer_radius_mm"),
+                "center_radius_mm": geometry.get("core_center_radius_mm"),
+                "element_hint": mesh_cfg.get("requested_element_type", "C3D8R"),
+            },
+            {
+                "name": "inner_armour_helical_beams",
+                "count": armour.get("inner_wire_count"),
+                "type": "beam_helix",
+                "wire_radius_mm": armour.get("inner_wire_radius_mm"),
+                "center_radius_mm": geometry.get("inner_armour_center_radius_mm"),
+                "lay_angle_deg": armour.get("inner_lay_angle_deg"),
+                "element_hint": "B31",
+            },
+            {
+                "name": "outer_armour_helical_beams",
+                "count": armour.get("outer_wire_count"),
+                "type": "beam_helix",
+                "wire_radius_mm": armour.get("outer_wire_radius_mm"),
+                "center_radius_mm": geometry.get("outer_armour_center_radius_mm"),
+                "lay_angle_deg": armour.get("outer_lay_angle_deg"),
+                "element_hint": "B31",
+            },
+            {
+                "name": "outer_sheath_equivalent_solid",
+                "count": 1,
+                "type": "solid_cylinder",
+                "radius_mm": geometry.get("outer_sheath_outer_radius_mm"),
+                "element_hint": mesh_cfg.get("requested_element_type", "C3D8R"),
+            },
+        ],
+        "limitations": [
+            "This is an Abaqus mesh scaffold, not the final contact-calibrated bending model.",
+            "Solids are equivalent visual/mesh bodies; layer subtraction and full contact pairs remain backend work.",
+            "Helical armour wires are represented as B31 beam paths unless the backend replaces them with solid wires.",
+        ],
+    }
+    write_json(path, manifest)
+    return manifest
+
+
+def material_by_name(payload: dict, needle: str, fallback_e=1.0, fallback_nu=0.3, fallback_density=1000.0):
+    for item in payload.get("materials", []):
+        if needle.lower() in item.get("name", "").lower():
+            return {
+                "name": safe_name(item.get("name", needle)),
+                "elastic_modulus_mpa": float(item.get("elastic_modulus_GPa", fallback_e)) * 1000.0,
+                "poisson_ratio": float(item.get("poisson_ratio", fallback_nu)),
+                "density": float(item.get("density_kg_m3", fallback_density)),
+            }
+    return {
+        "name": safe_name(needle),
+        "elastic_modulus_mpa": fallback_e * 1000.0,
+        "poisson_ratio": fallback_nu,
+        "density": fallback_density,
+    }
+
+
+def build_abaqus_mesh_model(payload: dict, job_dir: Path) -> dict:
+    """Create a CAE mesh scaffold when this script is executed by Abaqus/CAE."""
+    from abaqus import mdb
+    from abaqusConstants import (
+        ANALYSIS,
+        B31,
+        CARTESIAN,
+        DEFORMABLE_BODY,
+        DURING_ANALYSIS,
+        IMPRINT,
+        N1_COSINES,
+        OFF,
+        ON,
+        STANDARD,
+        THREE_D,
+    )
+    from mesh import ElemType
+
+    geometry = payload["derived_geometry_mm"]
+    armour = payload["armour"]
+    analysis = payload["analysis_conditions"]
+    mesh_cfg = payload["mesh"]
+
+    length = float(analysis.get("effective_length_mm", 234.2))
+    z_elem = max(2, int(mesh_cfg.get("axial_divisions", 40)))
+    core_circ = max(4, int(mesh_cfg.get("core_circumferential_divisions", 24)))
+    armour_circ = max(4, int(mesh_cfg.get("armour_circumferential_divisions", 8)))
+    requested_elem = str(mesh_cfg.get("requested_element_type", "C3D8R")).upper()
+    model_name = safe_name(payload.get("metadata", {}).get("job_id", "SCLAS_CableMesh"), 32)
+    job_name = safe_name(model_name + "_mesh", 32)
+
+    if "Model-1" in mdb.models and len(mdb.models) == 1:
+        del mdb.models["Model-1"]
+    if model_name in mdb.models:
+        del mdb.models[model_name]
+    model = mdb.Model(name=model_name)
+    assembly = model.rootAssembly
+    assembly.DatumCsysByDefault(CARTESIAN)
+
+    def make_material_section(section_name, mat_info):
+        mat_name = safe_name(mat_info["name"] + "_mat")
+        material = model.Material(name=mat_name)
+        material.Elastic(table=((mat_info["elastic_modulus_mpa"], mat_info["poisson_ratio"]),))
+        material.Density(table=((mat_info["density"],),))
+        model.HomogeneousSolidSection(name=section_name, material=mat_name, thickness=None)
+        return section_name
+
+    steel = material_by_name(payload, "Armour", 210.0, 0.30, 7850.0)
+    copper = material_by_name(payload, "Copper", 108.0, 0.33, 8960.0)
+    sheath = material_by_name(payload, "Sheath", 1.4, 0.45, 1300.0)
+    core_section = make_material_section("CoreSolidSection", copper)
+    sheath_section = make_material_section("OuterSheathSection", sheath)
+
+    steel_mat = model.Material(name="ArmourSteel_mat")
+    steel_mat.Elastic(table=((steel["elastic_modulus_mpa"], steel["poisson_ratio"]),))
+    steel_mat.Density(table=((steel["density"],),))
+
+    def elem_code_for_solid():
+        import abaqusConstants as ac
+
+        return getattr(ac, requested_elem, ac.C3D8R)
+
+    def create_solid_cylinder(name, radius, section_name, seed_circ, offset=(0.0, 0.0, 0.0)):
+        sketch = model.ConstrainedSketch(name=name + "_sketch", sheetSize=max(10.0, radius * 4.0))
+        sketch.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(radius, 0.0))
+        part = model.Part(name=name, dimensionality=THREE_D, type=DEFORMABLE_BODY)
+        part.BaseSolidExtrude(sketch=sketch, depth=length)
+        del model.sketches[sketch.name]
+        region = part.Set(cells=part.cells[:], name="AllCells")
+        part.SectionAssignment(region=region, sectionName=section_name)
+        size_axial = length / float(z_elem)
+        size_circ = max(0.1, 2.0 * math.pi * radius / float(seed_circ))
+        part.seedPart(size=max(0.1, min(size_axial, size_circ)), deviationFactor=0.1, minSizeFactor=0.1)
+        part.setElementType(regions=(part.cells[:],), elemTypes=(ElemType(elemCode=elem_code_for_solid(), elemLibrary=STANDARD),))
+        part.generateMesh()
+        inst = assembly.Instance(name=name + "_1", part=part, dependent=ON)
+        inst.translate(vector=(offset[0], offset[1], -0.5 * length + offset[2]))
+        return part
+
+    def create_armour_layer(name, wire_radius, center_radius, count, lay_angle_deg, hand):
+        profile_name = name + "_profile"
+        section_name = name + "_BeamSection"
+        model.CircularProfile(name=profile_name, r=wire_radius)
+        model.BeamSection(
+            name=section_name,
+            integration=DURING_ANALYSIS,
+            profile=profile_name,
+            material="ArmourSteel_mat",
+            poissonRatio=steel["poisson_ratio"],
+        )
+        part = model.Part(name=name, dimensionality=THREE_D, type=DEFORMABLE_BODY)
+        segments = max(16, z_elem)
+        angle_rad = math.radians(float(lay_angle_deg))
+        angular_rate = hand * math.tan(angle_rad) / max(center_radius, 1.0e-6)
+        wire_segments = []
+        for i in range(int(count)):
+            theta0 = 2.0 * math.pi * i / float(count)
+            points = []
+            for j in range(segments + 1):
+                z = -0.5 * length + length * j / float(segments)
+                theta = theta0 + angular_rate * (z + 0.5 * length)
+                points.append((center_radius * math.cos(theta), center_radius * math.sin(theta), z))
+            wire_segments.extend((points[j], points[j + 1]) for j in range(segments))
+        part.WirePolyLine(points=tuple(wire_segments), mergeType=IMPRINT, meshable=ON)
+        region = part.Set(edges=part.edges[:], name="AllEdges")
+        part.SectionAssignment(region=region, sectionName=section_name)
+        part.assignBeamSectionOrientation(region=region, method=N1_COSINES, n1=(0.0, 0.0, -1.0))
+        part.seedPart(size=max(0.1, length / float(z_elem)), deviationFactor=0.1, minSizeFactor=0.1)
+        part.setElementType(regions=(part.edges[:],), elemTypes=(ElemType(elemCode=B31, elemLibrary=STANDARD),))
+        part.generateMesh()
+        assembly.Instance(name=name + "_1", part=part, dependent=ON)
+        return part
+
+    core_radius = float(geometry["core_outer_radius_mm"])
+    core_center = float(geometry["core_center_radius_mm"])
+    for i in range(3):
+        angle = math.radians(120.0 * i)
+        create_solid_cylinder(
+            "Core_%d" % (i + 1),
+            core_radius,
+            core_section,
+            core_circ,
+            offset=(core_center * math.cos(angle), core_center * math.sin(angle), 0.0),
+        )
+
+    create_solid_cylinder(
+        "OuterSheathEquivalent",
+        float(geometry["outer_sheath_outer_radius_mm"]),
+        sheath_section,
+        core_circ,
+    )
+
+    create_armour_layer(
+        "InnerArmourHelix",
+        float(armour["inner_wire_radius_mm"]),
+        float(geometry["inner_armour_center_radius_mm"]),
+        int(armour["inner_wire_count"]),
+        float(armour["inner_lay_angle_deg"]),
+        hand=1.0,
+    )
+    create_armour_layer(
+        "OuterArmourHelix",
+        float(armour["outer_wire_radius_mm"]),
+        float(geometry["outer_armour_center_radius_mm"]),
+        int(armour["outer_wire_count"]),
+        float(armour["outer_lay_angle_deg"]),
+        hand=-1.0,
+    )
+
+    model.StaticStep(name="MeshOnlyStep", previous="Initial")
+    old_cwd = os.getcwd()
+    os.chdir(str(job_dir))
+    try:
+        mdb.Job(name=job_name, model=model_name, type=ANALYSIS, description="SCLAS GUI generated mesh scaffold")
+        mdb.jobs[job_name].writeInput(consistencyChecking=OFF)
+        cae_path = job_dir / "sclas_mesh_model.cae"
+        mdb.saveAs(pathName=str(cae_path))
+    finally:
+        os.chdir(old_cwd)
+
+    inp_path = job_dir / (job_name + ".inp")
+    files = [str(path.name) for path in [cae_path, inp_path] if path.exists()]
+    return {
+        "job_name": job_name,
+        "model_name": model_name,
+        "files": files,
+        "node_element_note": "See generated .inp/.cae for Abaqus node and element counts.",
+    }
+
+
+def write_summary(path: Path, source: str, payload: dict, curvature, moment_kn_m, derived: dict, mesh_status: dict = None) -> None:
     max_abs = max((abs(x) for x in moment_kn_m), default=0.0)
     study_scope = payload.get("study_scope", {})
     summary = {
@@ -37,12 +321,12 @@ def write_summary(path: Path, source: str, payload: dict, curvature, moment_kn_m
         "max_abs_moment_kn_m": max_abs,
         "num_points": len(moment_kn_m),
         "study_scope": study_scope,
+        "mesh_status": mesh_status or {},
         "derived_placeholder_metrics": derived,
         "computed_at": datetime.now().isoformat(timespec="seconds"),
-        "note": "Placeholder runner. Replace with Abaqus ODB-derived local behavior results.",
+        "note": "Placeholder response curve. Abaqus mesh scaffold is generated when run inside Abaqus/CAE.",
     }
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=4)
+    write_json(path, summary)
 
 
 def run_placeholder_solver(payload: dict):
@@ -128,16 +412,37 @@ def run_placeholder_solver(payload: dict):
 
 
 def main(argv) -> int:
-    input_path = Path(argv[1]) if len(argv) > 1 else Path("input_data.json")
+    input_path = parse_input_path(argv)
     if not input_path.exists():
         print(f"input JSON not found: {input_path}", file=sys.stderr)
         return 2
 
     payload = load_payload(input_path)
     job_dir = input_path.resolve().parent
+
+    mesh_status = {"status": "not_attempted"}
+    if abaqus_available():
+        try:
+            mesh_status = build_abaqus_mesh_model(payload, job_dir)
+            write_mesh_manifest(
+                job_dir / "abaqus_mesh_manifest.json",
+                payload,
+                abaqus_created=True,
+                files=mesh_status.get("files", []),
+            )
+            print(f"Wrote Abaqus mesh scaffold: {', '.join(mesh_status.get('files', []))}")
+        except Exception as exc:
+            mesh_status = {"status": "abaqus_mesh_failed", "error": str(exc)}
+            write_mesh_manifest(job_dir / "abaqus_mesh_manifest.json", payload, abaqus_created=False, error=str(exc))
+            print(f"Abaqus mesh scaffold failed: {exc}", file=sys.stderr)
+    else:
+        write_mesh_manifest(job_dir / "abaqus_mesh_manifest.json", payload, abaqus_created=False)
+        mesh_status = {"status": "abaqus_api_not_available", "manifest": "abaqus_mesh_manifest.json"}
+        print("Abaqus API not available; wrote abaqus_mesh_manifest.json only.")
+
     curvature, moment_kn_m, derived = run_placeholder_solver(payload)
     write_result_csv(job_dir / "result_data.csv", curvature, moment_kn_m)
-    write_summary(job_dir / "result_summary.json", "PLACEHOLDER_BACKEND_RUNNER", payload, curvature, moment_kn_m, derived)
+    write_summary(job_dir / "result_summary.json", "SCLAS_ABAQUS_MESH_BRIDGE", payload, curvature, moment_kn_m, derived, mesh_status)
     print(f"Wrote {job_dir / 'result_data.csv'}")
     return 0
 

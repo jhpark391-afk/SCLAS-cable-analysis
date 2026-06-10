@@ -63,6 +63,9 @@ The backend must write:
 
 - `result_data.csv` with columns `curvature_1_per_m,moment_kn_m`.
 - `result_summary.json` optionally, for status and metrics.
+- `abaqus_mesh_manifest.json` when mesh conversion is attempted.
+- `sclas_mesh_model.cae` and `<job_name>_mesh.inp` when `abaqus_runner.py` is
+  executed inside Abaqus/CAE.
 
 ## Backend modes
 
@@ -75,14 +78,24 @@ The backend must write:
 
 ## Next backend step
 
-Replace `run_placeholder_solver` in `code/abaqus_runner.py` with the real Abaqus
-model generation and ODB extraction. Keep the CSV output header unchanged so the
-GUI continues to load results without modification.
+The current `code/abaqus_runner.py` already creates a first-pass Abaqus mesh
+scaffold from the GUI Mesh tab when run with:
+
+```bash
+abaqus cae noGUI=abaqus_runner.py -- input_data.json
+```
+
+It still uses a placeholder response curve for `result_data.csv`. Keep that CSV
+header unchanged while adding real bending boundary conditions, contact, solve
+submission, and ODB extraction.
 
 Recommended Abaqus development order:
 
-1. Keep bending moment-curvature CSV output stable.
-2. Add contact/friction stick-slip extraction to `result_summary.json`.
-3. Add torsion and axial load cases as separate backend routines.
-4. Add bird-caging/pressure-effect metrics as JSON summaries before expanding
+1. Verify the generated `.cae` and `.inp` mesh scaffold in Abaqus/CAE.
+2. Add contact/friction definitions between armour and adjacent layers.
+3. Add cyclic bending boundary conditions and submit a real analysis job.
+4. Extract bending moment-curvature from the ODB into `result_data.csv`.
+5. Add contact/friction stick-slip extraction to `result_summary.json`.
+6. Add torsion and axial load cases as separate backend routines.
+7. Add bird-caging/pressure-effect metrics as JSON summaries before expanding
    the GUI plots.

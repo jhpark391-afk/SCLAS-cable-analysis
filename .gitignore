@@ -18,7 +18,7 @@ desktop.ini
 
 # Runtime settings and generated jobs
 settings.json
-jobs/SCLAS_jobs/job_*/
+jobs/
 
 # Large or regenerated solver outputs
 *.odb

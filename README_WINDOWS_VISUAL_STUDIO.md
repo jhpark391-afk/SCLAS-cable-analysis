@@ -57,6 +57,19 @@ abaqus cae noGUI=abaqus_runner.py -- input_data.json
 Run this command inside each generated job folder. The GUI's
 `Run local/shared-folder command` mode already does that.
 
+When `abaqus_runner.py` is executed inside Abaqus/CAE, it converts the GUI mesh
+settings into a first-pass Abaqus mesh scaffold:
+
+```text
+abaqus_mesh_manifest.json
+sclas_mesh_model.cae
+<job_name>_mesh.inp
+```
+
+The scaffold uses the Mesh tab's element type and seed counts. Armour wires are
+represented as B31 helical beam paths at this stage; contact pairs, bending
+boundary conditions, and ODB-based result extraction are the next backend tasks.
+
 ## Expected job outputs
 
 Each backend run must create:
@@ -75,6 +88,9 @@ Optional:
 
 ```text
 result_summary.json
+abaqus_mesh_manifest.json
+sclas_mesh_model.cae
+<job_name>_mesh.inp
 ```
 
 ## Common Windows issues

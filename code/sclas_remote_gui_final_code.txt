@@ -358,6 +358,12 @@ curvature_1_per_m,moment_kn_m
 Each following row must contain one result point.
 
 ## Optional output
+Write `abaqus_mesh_manifest.json` when the runner converts the GUI mesh request
+into Abaqus files. When executed inside Abaqus/CAE, the bundled
+`abaqus_runner.py` also attempts to create:
+- `sclas_mesh_model.cae`
+- `<job_name>_mesh.inp`
+
 Write `result_summary.json` with any backend metrics, for example:
 ```json
 {
@@ -400,7 +406,9 @@ A typical backend command may look like:
 abaqus cae noGUI=abaqus_runner.py -- input_data.json
 ```
 
-The GUI does not define your Abaqus model. It only defines the job contract.
+The bundled runner creates a first-pass Abaqus mesh scaffold from the GUI mesh
+settings. Final contact pairs, bending boundary conditions, ODB extraction, and
+paper-calibrated local behavior metrics remain backend development work.
 """
 
 
