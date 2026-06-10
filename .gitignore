@@ -1,0 +1,37 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+90_env/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vs/
+.vscode/
+
+# Runtime settings and generated jobs
+settings.json
+jobs/SCLAS_jobs/job_*/
+
+# Large or regenerated solver outputs
+*.odb
+*.sim
+*.cae
+*.jnl
+*.sta
+*.msg
+*.dat
+*.prt
+*.com
+*.lck
+
+# Temporary files
+*.tmp
+*.log

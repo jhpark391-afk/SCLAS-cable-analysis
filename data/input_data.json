@@ -1,0 +1,14 @@
+{
+    "core_equivalent_EI": 65.14406526483796,
+    "armor_radius_in": 39.96,
+    "armor_radius_out": 45.06,
+    "wire_radius_in": 2.0,
+    "wire_radius_out": 2.0,
+    "num_wires_in": 55,
+    "num_wires_out": 63,
+    "lay_angle": 12.0,
+    "friction_coeff": 0.22,
+    "eff_length": 234.2,
+    "pressure": 40.0,
+    "curvature": 0.08
+}
