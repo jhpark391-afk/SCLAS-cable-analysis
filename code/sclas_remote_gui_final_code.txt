@@ -53,6 +53,7 @@ from PyQt5.QtWidgets import (
     QProgressBar,
     QRadioButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QTableWidget,
@@ -439,6 +440,8 @@ class SCLASRemoteGUI(QMainWindow):
         root.setContentsMargins(14, 14, 14, 14)
         self.setCentralWidget(main)
         self.tabs = QTabWidget()
+        self.tabs.setElideMode(Qt.ElideNone)
+        self.tabs.tabBar().setExpanding(False)
         root.addWidget(self.tabs)
         self.build_design_tab()
         self.build_mesh_tab()
@@ -521,7 +524,7 @@ class SCLASRemoteGUI(QMainWindow):
         layout.addWidget(panel_inputs, 22)
         layout.addWidget(panel_mat, 30)
         layout.addWidget(panel_view, 48)
-        self.tabs.addTab(tab, "1. Design")
+        self.tabs.addTab(tab, "1 Design")
 
         for w in self.inputs.values():
             if isinstance(w, QLineEdit):
@@ -532,8 +535,10 @@ class SCLASRemoteGUI(QMainWindow):
     def build_mesh_tab(self) -> None:
         tab = QWidget()
         layout = QHBoxLayout(tab)
-        panel = QFrame(); panel.setObjectName("Card"); panel.setFixedWidth(420)
+        layout.setSpacing(14)
+        panel = QFrame(); panel.setObjectName("Card"); panel.setFixedWidth(500)
         left = QVBoxLayout(panel)
+        left.setSpacing(12)
         left.addWidget(self.header("Mesh Request for Backend"))
         self.mesh_inputs = {
             "elem_type": QComboBox(),
@@ -545,38 +550,50 @@ class SCLASRemoteGUI(QMainWindow):
             "c_elem_armour": QSpinBox(),
         }
         self.mesh_inputs["elem_type"].addItems(["C3D8R", "C3D4", "B31"])
-        self.mesh_inputs["model_strategy"].addItems(["periodic_homogenized_cell", "full_3d_segment", "axisymmetric_tension_torsion"])
-        self.mesh_inputs["armour_model"].addItems(["beam_with_contact_surface", "solid_wire", "analytical_equivalent"])
+        self.mesh_inputs["model_strategy"].addItems(["Periodic homogenized cell", "Full 3D segment", "Axisymmetric tension/torsion"])
+        self.mesh_inputs["armour_model"].addItems(["Beam + contact surface", "Solid wire", "Analytical equivalent"])
         self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(40)
         self.mesh_inputs["c_elem_core"].setRange(4, 160); self.mesh_inputs["c_elem_core"].setValue(24)
         self.mesh_inputs["c_elem_armour"].setRange(4, 64); self.mesh_inputs["c_elem_armour"].setValue(8)
+        for key in ["elem_type", "model_strategy", "armour_model", "contact_beta"]:
+            self.mesh_inputs[key].setMinimumWidth(250)
         form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignRight)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         form.addRow("Abaqus element type", self.mesh_inputs["elem_type"])
-        form.addRow("Model strategy", self.mesh_inputs["model_strategy"])
-        form.addRow("Armour representation", self.mesh_inputs["armour_model"])
-        form.addRow("Contact regularization beta", self.mesh_inputs["contact_beta"])
+        form.addRow("Strategy", self.mesh_inputs["model_strategy"])
+        form.addRow("Armour model", self.mesh_inputs["armour_model"])
+        form.addRow("Contact beta", self.mesh_inputs["contact_beta"])
         form.addRow("Axial divisions", self.mesh_inputs["z_elem"])
-        form.addRow("Core circumferential divisions", self.mesh_inputs["c_elem_core"])
-        form.addRow("Armour circumferential divisions", self.mesh_inputs["c_elem_armour"])
+        form.addRow("Core divisions", self.mesh_inputs["c_elem_core"])
+        form.addRow("Armour divisions", self.mesh_inputs["c_elem_armour"])
         left.addLayout(form)
         self.btn_mesh = QPushButton("Generate mesh preview")
         self.btn_mesh.setObjectName("RunBtn")
-        self.btn_mesh.setFixedHeight(54)
+        self.btn_mesh.setFixedHeight(50)
         self.btn_mesh.clicked.connect(self.generate_mesh_preview)
         left.addWidget(self.btn_mesh)
-        left.addWidget(QLabel("Note: this is a visual request. Abaqus backend owns actual mesh generation."))
+        note = QLabel("Visual request only. Abaqus backend owns actual mesh generation.")
+        note.setWordWrap(True)
+        left.addWidget(note)
         left.addStretch()
 
         viewer = QFrame(); viewer.setObjectName("Card")
         right = QVBoxLayout(viewer)
+        right.setContentsMargins(18, 18, 18, 18)
+        right.setSpacing(10)
         right.addWidget(self.header("Preview Only"))
         self.view_wire = gl.GLViewWidget()
+        self.view_wire.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.view_wire.setMinimumHeight(620)
         self.view_wire.setBackgroundColor("#0a0a0f")
-        self.view_wire.setCameraPosition(distance=250, elevation=35, azimuth=45)
-        right.addWidget(self.view_wire)
+        self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
+        right.addWidget(self.view_wire, 1)
         layout.addWidget(panel)
-        layout.addWidget(viewer)
-        self.tabs.addTab(tab, "2. Mesh")
+        layout.addWidget(viewer, 1)
+        self.tabs.addTab(tab, "2 Mesh")
 
     def build_analysis_tab(self) -> None:
         tab = QWidget()
@@ -703,7 +720,7 @@ class SCLASRemoteGUI(QMainWindow):
 
         layout.addWidget(left_scroll)
         layout.addWidget(result_panel)
-        self.tabs.addTab(tab, "3. Analysis / Backend")
+        self.tabs.addTab(tab, "3 Analysis")
 
     def header(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -794,6 +811,22 @@ class SCLASRemoteGUI(QMainWindow):
         }
         return self.derived_geom
 
+    def mesh_value(self, key: str) -> str:
+        maps = {
+            "model_strategy": {
+                "Periodic homogenized cell": "periodic_homogenized_cell",
+                "Full 3D segment": "full_3d_segment",
+                "Axisymmetric tension/torsion": "axisymmetric_tension_torsion",
+            },
+            "armour_model": {
+                "Beam + contact surface": "beam_with_contact_surface",
+                "Solid wire": "solid_wire",
+                "Analytical equivalent": "analytical_equivalent",
+            },
+        }
+        text = self.mesh_inputs[key].currentText()
+        return maps.get(key, {}).get(text, text)
+
     def build_payload(self) -> dict:
         dg = self.parse_geometry()
         materials = self.collect_materials()
@@ -843,8 +876,8 @@ class SCLASRemoteGUI(QMainWindow):
             "materials": materials,
             "mesh": {
                 "requested_element_type": self.mesh_inputs["elem_type"].currentText(),
-                "model_strategy": self.mesh_inputs["model_strategy"].currentText(),
-                "armour_model": self.mesh_inputs["armour_model"].currentText(),
+                "model_strategy": self.mesh_value("model_strategy"),
+                "armour_model": self.mesh_value("armour_model"),
                 "axial_divisions": int(self.mesh_inputs["z_elem"].value()),
                 "core_circumferential_divisions": int(self.mesh_inputs["c_elem_core"].value()),
                 "armour_circumferential_divisions": int(self.mesh_inputs["c_elem_armour"].value()),
@@ -909,8 +942,8 @@ class SCLASRemoteGUI(QMainWindow):
             },
             "periodic_cell": {
                 "effective_length_mm": safe_float(self.cond["eff_length"], 234.2, "Effective length"),
-                "strategy": self.mesh_inputs["model_strategy"].currentText(),
-                "armour_representation": self.mesh_inputs["armour_model"].currentText(),
+                "strategy": self.mesh_value("model_strategy"),
+                "armour_representation": self.mesh_value("armour_model"),
                 "note": "234.2 mm is consistent with the helical-period style benchmark used in the literature notes.",
             },
         }
@@ -1058,6 +1091,16 @@ class SCLASRemoteGUI(QMainWindow):
                 widget.setValue(int(value))
             elif isinstance(widget, QComboBox):
                 idx = widget.findText(str(value))
+                if idx < 0:
+                    legacy_labels = {
+                        "periodic_homogenized_cell": "Periodic homogenized cell",
+                        "full_3d_segment": "Full 3D segment",
+                        "axisymmetric_tension_torsion": "Axisymmetric tension/torsion",
+                        "beam_with_contact_surface": "Beam + contact surface",
+                        "solid_wire": "Solid wire",
+                        "analytical_equivalent": "Analytical equivalent",
+                    }
+                    idx = widget.findText(legacy_labels.get(str(value), ""))
                 if idx >= 0:
                     widget.setCurrentIndex(idx)
 
@@ -1264,6 +1307,7 @@ class SCLASRemoteGUI(QMainWindow):
             for i in range(dg["outer_armour_wire_count"]):
                 a = 2 * np.pi * i / dg["outer_armour_wire_count"]
                 add_wire(dg["outer_armour_wire_radius_mm"], dg["outer_armour_center_radius_mm"] * np.cos(a), dg["outer_armour_center_radius_mm"] * np.sin(a), self.mesh_inputs["z_elem"].value(), self.mesh_inputs["c_elem_armour"].value(), (0.6, 0.7, 0.9, 0.9))
+            self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
         except Exception as exc:
             QMessageBox.critical(self, "Mesh preview error", str(exc))
 
@@ -1279,7 +1323,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.setStyleSheet("""
             QMainWindow { background-color: #0d0d12; color: #e0e0e0; font-family: Arial; }
             QTabWidget::pane { border: none; }
-            QTabBar::tab { background: #1a1a24; color: #999; padding: 13px 26px; font-size: 15px; font-weight: bold; border-top-left-radius: 8px; border-top-right-radius: 8px; margin-right: 5px; }
+            QTabBar::tab { background: #1a1a24; color: #999; min-width: 126px; min-height: 42px; padding: 8px 18px; font-size: 14px; font-weight: bold; border-top-left-radius: 8px; border-top-right-radius: 8px; margin-right: 5px; }
             QTabBar::tab:selected { background: #00ffcc; color: #0d0d12; }
             QFrame#Card { background-color: #1a1a24; border-radius: 12px; border: 1px solid #2a2a35; padding: 8px; }
             QFrame#MetricBox { background-color: #22222e; border-radius: 8px; border-left: 4px solid #00ffcc; padding: 8px; }
