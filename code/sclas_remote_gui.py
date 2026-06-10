@@ -66,7 +66,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "10.4-literature-informed"
+APP_VERSION = "10.5-modern-ui"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -445,8 +445,24 @@ class SCLASRemoteGUI(QMainWindow):
     def init_ui(self) -> None:
         main = QWidget()
         root = QVBoxLayout(main)
-        root.setContentsMargins(14, 14, 14, 14)
+        root.setContentsMargins(18, 16, 18, 18)
+        root.setSpacing(12)
         self.setCentralWidget(main)
+        topbar = QHBoxLayout()
+        title_block = QVBoxLayout()
+        title_block.setSpacing(1)
+        title = QLabel("SCLAS Cable Analysis")
+        title.setObjectName("AppTitle")
+        subtitle = QLabel("Submarine cable modelling · GUI mesh bridge · Abaqus backend contract")
+        subtitle.setObjectName("AppSubtitle")
+        title_block.addWidget(title)
+        title_block.addWidget(subtitle)
+        topbar.addLayout(title_block)
+        topbar.addStretch()
+        version = QLabel(APP_VERSION)
+        version.setObjectName("VersionPill")
+        topbar.addWidget(version)
+        root.addLayout(topbar)
         self.tabs = QTabWidget()
         self.tabs.setElideMode(Qt.ElideNone)
         self.tabs.tabBar().setExpanding(False)
@@ -511,6 +527,7 @@ class SCLASRemoteGUI(QMainWindow):
         mid = QVBoxLayout(panel_mat)
         mid.addWidget(self.header("Material Table"))
         self.table = QTableWidget(9, 4)
+        self.table.setAlternatingRowColors(True)
         self.table.setHorizontalHeaderLabels(["Layer", "E_GPa", "Nu", "Density_kg_m3"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.init_material_table()
@@ -525,7 +542,7 @@ class SCLASRemoteGUI(QMainWindow):
         header.addWidget(self.btn_toggle)
         right.addLayout(header)
         self.view_solid = gl.GLViewWidget()
-        self.view_solid.setBackgroundColor("#141419")
+        self.view_solid.setBackgroundColor("#0b1118")
         self.view_solid.setCameraPosition(distance=180, elevation=90, azimuth=0)
         right.addWidget(self.view_solid)
 
@@ -596,7 +613,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_wire = gl.GLViewWidget()
         self.view_wire.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.view_wire.setMinimumHeight(620)
-        self.view_wire.setBackgroundColor("#0a0a0f")
+        self.view_wire.setBackgroundColor("#0b1118")
         self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
         right.addWidget(self.view_wire, 1)
         layout.addWidget(panel)
@@ -704,11 +721,15 @@ class SCLASRemoteGUI(QMainWindow):
         result_panel = QFrame(); result_panel.setObjectName("Card")
         right = QVBoxLayout(result_panel)
         right.addWidget(self.header("Moment-Curvature Result"))
-        self.plot_canvas = pg.PlotWidget(background="#141419")
-        self.plot_canvas.showGrid(x=True, y=True, alpha=0.2)
+        self.plot_canvas = pg.PlotWidget(background="#0b1118")
+        self.plot_canvas.showGrid(x=True, y=True, alpha=0.16)
         self.plot_canvas.setLabel("left", "Bending Moment M", units="kN.m")
         self.plot_canvas.setLabel("bottom", "Curvature kappa", units="1/m")
-        self.curve = self.plot_canvas.plot(pen=pg.mkPen(color="#00ffcc", width=3.2))
+        self.plot_canvas.getAxis("left").setTextPen("#9aa8ba")
+        self.plot_canvas.getAxis("bottom").setTextPen("#9aa8ba")
+        self.plot_canvas.getAxis("left").setPen("#334155")
+        self.plot_canvas.getAxis("bottom").setPen("#334155")
+        self.curve = self.plot_canvas.plot(pen=pg.mkPen(color="#24d3a7", width=3.0))
         right.addWidget(self.plot_canvas, 70)
         metric_layout = QHBoxLayout()
         self.lbl_peak = self.metric_box("Peak |M|", "-")
@@ -732,14 +753,14 @@ class SCLASRemoteGUI(QMainWindow):
 
     def header(self, text: str) -> QLabel:
         label = QLabel(text)
-        label.setStyleSheet("font-size: 18px; font-weight: bold; color: #00ffcc; padding: 4px 0;")
+        label.setStyleSheet("font-size: 17px; font-weight: 700; color: #d9fff5; padding: 2px 0 8px 0;")
         return label
 
     def metric_box(self, title: str, value: str) -> QFrame:
         box = QFrame(); box.setObjectName("MetricBox")
         layout = QVBoxLayout(box)
-        title_label = QLabel(title); title_label.setStyleSheet("color: #aaa; font-size: 14px;")
-        value_label = QLabel(value); value_label.setStyleSheet("color: white; font-size: 25px; font-weight: bold;")
+        title_label = QLabel(title); title_label.setStyleSheet("color: #94a3b8; font-size: 13px;")
+        value_label = QLabel(value); value_label.setStyleSheet("color: #f8fafc; font-size: 23px; font-weight: 700;")
         layout.addWidget(title_label); layout.addWidget(value_label)
         box.value_label = value_label
         return box
@@ -1329,33 +1350,214 @@ class SCLASRemoteGUI(QMainWindow):
 
     def apply_theme(self) -> None:
         self.setStyleSheet("""
-            QMainWindow { background-color: #0d0d12; color: #e0e0e0; font-family: Arial; }
-            QTabWidget::pane { border: none; }
-            QTabBar::tab { background: #1a1a24; color: #999; min-width: 126px; min-height: 42px; padding: 8px 18px; font-size: 14px; font-weight: bold; border-top-left-radius: 8px; border-top-right-radius: 8px; margin-right: 5px; }
-            QTabBar::tab:selected { background: #00ffcc; color: #0d0d12; }
-            QFrame#Card { background-color: #1a1a24; border-radius: 12px; border: 1px solid #2a2a35; padding: 8px; }
-            QFrame#MetricBox { background-color: #22222e; border-radius: 8px; border-left: 4px solid #00ffcc; padding: 8px; }
-            QScrollArea#PanelScroll { background-color: transparent; border: none; }
-            QScrollArea#PanelScroll > QWidget > QWidget { background-color: transparent; }
-            QScrollBar:vertical { background: #111118; width: 10px; margin: 0; border-radius: 5px; }
-            QScrollBar::handle:vertical { background: #333344; border-radius: 5px; min-height: 32px; }
-            QScrollBar::handle:vertical:hover { background: #444455; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            QGroupBox { color: #ddd; border: 1px solid #333344; border-radius: 8px; margin-top: 10px; padding: 10px; font-weight: bold; }
-            QLabel { font-size: 14px; color: #ccc; }
-            QLineEdit, QSpinBox, QComboBox { background-color: #22222e; border: 1px solid #333344; border-radius: 6px; padding: 8px; color: #fff; font-size: 14px; font-weight: bold; }
-            QLineEdit:focus, QSpinBox:focus, QComboBox:focus { border: 1px solid #00ffcc; }
-            QPushButton { background-color: #333344; color: #fff; border-radius: 6px; font-size: 15px; font-weight: bold; padding: 8px; }
-            QPushButton:hover { background-color: #444455; }
-            QPushButton:disabled { background-color: #202028; color: #666; }
-            QPushButton#RunBtn { background-color: #00ffcc; color: #0d0d12; font-size: 18px; }
-            QPushButton#RunBtn:hover { background-color: #33ffdd; }
-            QTableWidget { background-color: #1a1a24; color: #fff; font-size: 13px; border: none; gridline-color: #2a2a35; }
-            QHeaderView::section { background-color: #22222e; color: #00ffcc; font-weight: bold; border: 1px solid #2a2a35; padding: 7px; }
-            QTextEdit { background-color: #0a0a0f; color: #00ffcc; font-family: Menlo, Consolas; border-radius: 6px; padding: 8px; font-size: 13px; }
-            QProgressBar { border: 1px solid #333344; border-radius: 6px; text-align: center; color: white; font-weight: bold; }
-            QProgressBar::chunk { background-color: #00ffcc; border-radius: 5px; }
-            QRadioButton { font-size: 14px; font-weight: bold; color: #fff; padding: 2px; }
+            QMainWindow {
+                background-color: #080c12;
+                color: #e5edf6;
+                font-family: "Segoe UI", "SF Pro Display", Arial;
+            }
+            QWidget {
+                color: #d7e0ea;
+                font-size: 14px;
+            }
+            QLabel {
+                color: #cbd5e1;
+                font-size: 14px;
+            }
+            QLabel#AppTitle {
+                color: #f8fafc;
+                font-size: 20px;
+                font-weight: 800;
+                letter-spacing: 0;
+            }
+            QLabel#AppSubtitle {
+                color: #7f8ea3;
+                font-size: 12px;
+            }
+            QLabel#VersionPill {
+                background-color: #101923;
+                color: #91f2dd;
+                border: 1px solid #1f3d45;
+                border-radius: 8px;
+                padding: 7px 11px;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QTabWidget::pane {
+                border: none;
+                margin-top: 10px;
+            }
+            QTabBar::tab {
+                background: #111822;
+                color: #8ea0b4;
+                min-width: 126px;
+                min-height: 38px;
+                padding: 7px 18px;
+                font-size: 14px;
+                font-weight: 700;
+                border: 1px solid #202b3a;
+                border-radius: 8px;
+                margin-right: 7px;
+            }
+            QTabBar::tab:hover {
+                background: #162131;
+                color: #dbeafe;
+                border-color: #2c3b50;
+            }
+            QTabBar::tab:selected {
+                background: #1c2a37;
+                color: #f8fafc;
+                border: 1px solid #24d3a7;
+            }
+            QFrame#Card {
+                background-color: #111822;
+                border-radius: 8px;
+                border: 1px solid #202b3a;
+                padding: 8px;
+            }
+            QFrame#MetricBox {
+                background-color: #151f2c;
+                border-radius: 8px;
+                border: 1px solid #263449;
+                border-left: 4px solid #24d3a7;
+                padding: 8px;
+            }
+            QScrollArea#PanelScroll {
+                background-color: transparent;
+                border: none;
+            }
+            QScrollArea#PanelScroll > QWidget > QWidget {
+                background-color: transparent;
+            }
+            QScrollBar:vertical {
+                background: #0d131c;
+                width: 10px;
+                margin: 0;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background: #2b3a4f;
+                border-radius: 5px;
+                min-height: 34px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #3b4e67;
+            }
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {
+                height: 0;
+            }
+            QGroupBox {
+                color: #e2e8f0;
+                background-color: #0f1620;
+                border: 1px solid #243247;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding: 12px;
+                font-weight: 700;
+            }
+            QLineEdit, QSpinBox, QComboBox {
+                background-color: #0d141d;
+                border: 1px solid #263449;
+                border-radius: 7px;
+                padding: 8px 10px;
+                color: #f8fafc;
+                font-size: 14px;
+                font-weight: 650;
+                selection-background-color: #1f8f7a;
+            }
+            QLineEdit:hover, QSpinBox:hover, QComboBox:hover {
+                border-color: #33475f;
+                background-color: #101925;
+            }
+            QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
+                border: 1px solid #24d3a7;
+                background-color: #0e1822;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 28px;
+            }
+            QPushButton {
+                background-color: #1a2634;
+                color: #e5edf6;
+                border: 1px solid #2c3b50;
+                border-radius: 7px;
+                font-size: 14px;
+                font-weight: 700;
+                padding: 8px 11px;
+            }
+            QPushButton:hover {
+                background-color: #223247;
+                border-color: #3b516c;
+            }
+            QPushButton:pressed {
+                background-color: #101923;
+            }
+            QPushButton:disabled {
+                background-color: #10151d;
+                color: #556272;
+                border-color: #1c2633;
+            }
+            QPushButton#RunBtn {
+                background-color: #24d3a7;
+                color: #06110f;
+                border: 1px solid #34e6ba;
+                font-size: 16px;
+                font-weight: 800;
+            }
+            QPushButton#RunBtn:hover {
+                background-color: #35e5b8;
+                border-color: #7df5d9;
+            }
+            QTableWidget {
+                background-color: #0d141d;
+                alternate-background-color: #101923;
+                color: #e5edf6;
+                font-size: 13px;
+                border: 1px solid #202b3a;
+                border-radius: 7px;
+                gridline-color: #1e2a39;
+            }
+            QHeaderView::section {
+                background-color: #162131;
+                color: #9eead9;
+                font-weight: 800;
+                border: none;
+                border-right: 1px solid #243247;
+                padding: 8px;
+            }
+            QTextEdit {
+                background-color: #071018;
+                color: #9eead9;
+                font-family: Menlo, Consolas, monospace;
+                border: 1px solid #1f3143;
+                border-radius: 7px;
+                padding: 8px;
+                font-size: 12px;
+            }
+            QProgressBar {
+                background-color: #0d141d;
+                border: 1px solid #263449;
+                border-radius: 7px;
+                text-align: center;
+                color: #dbeafe;
+                font-weight: 700;
+                min-height: 18px;
+            }
+            QProgressBar::chunk {
+                background-color: #24d3a7;
+                border-radius: 6px;
+            }
+            QRadioButton, QCheckBox {
+                font-size: 14px;
+                font-weight: 650;
+                color: #dbe5f1;
+                padding: 3px;
+            }
+            QRadioButton::indicator, QCheckBox::indicator {
+                width: 15px;
+                height: 15px;
+            }
         """)
 
 
