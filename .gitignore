@@ -43,3 +43,6 @@ local_notes/
 
 # Local handoff archives
 handoff_packages/
+
+# Presentation/build scratch output
+outputs/
