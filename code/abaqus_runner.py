@@ -28,15 +28,18 @@ def write_result_csv(path: Path, curvature, moment_kn_m) -> None:
             writer.writerow([f"{k:.12g}", f"{m:.12g}"])
 
 
-def write_summary(path: Path, source: str, curvature, moment_kn_m) -> None:
+def write_summary(path: Path, source: str, payload: dict, curvature, moment_kn_m, derived: dict) -> None:
     max_abs = max((abs(x) for x in moment_kn_m), default=0.0)
+    study_scope = payload.get("study_scope", {})
     summary = {
         "source": source,
         "status": "completed",
         "max_abs_moment_kn_m": max_abs,
         "num_points": len(moment_kn_m),
+        "study_scope": study_scope,
+        "derived_placeholder_metrics": derived,
         "computed_at": datetime.now().isoformat(timespec="seconds"),
-        "note": "Placeholder runner. Replace with Abaqus ODB-derived results.",
+        "note": "Placeholder runner. Replace with Abaqus ODB-derived local behavior results.",
     }
     with path.open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=4)
@@ -49,6 +52,9 @@ def run_placeholder_solver(payload: dict):
         steps = int(analysis.get("solver_steps", 500))
         cycles = int(analysis.get("loading_cycles", 2))
         k_max = float(analysis["max_curvature_1_per_m"])
+        twist_max = float(analysis.get("max_twist_rad_per_m", 0.05))
+        axial_strain = float(analysis.get("max_axial_strain", 0.002))
+        radial_compression = float(analysis.get("radial_compression_ratio", 0.015))
         friction = float(analysis["friction_coefficient"])
         pressure = float(analysis["hydrostatic_pressure_mpa"])
         ei_init = float(equivalent["core_equivalent_EI_N_m2"])
@@ -56,6 +62,9 @@ def run_placeholder_solver(payload: dict):
         steps = int(payload.get("solver_steps", 500))
         cycles = int(payload.get("cycles", 2))
         k_max = float(payload.get("curvature", 0.08))
+        twist_max = float(payload.get("twist", 0.05))
+        axial_strain = float(payload.get("axial_strain", 0.002))
+        radial_compression = float(payload.get("radial_compression", 0.015))
         friction = float(payload.get("friction_coeff", payload.get("friction", 0.22)))
         pressure = float(payload.get("pressure", 40.0))
         ei_init = float(payload.get("core_equivalent_EI", 65.0))
@@ -80,7 +89,15 @@ def run_placeholder_solver(payload: dict):
         moment_kn_m.append(m_n_m / 1000.0)
         previous_k = k
 
-    return curvature, moment_kn_m
+    derived = {
+        "bending_stiffness_initial_N_m2": ei_init,
+        "bending_stiffness_slip_N_m2": ei_slip,
+        "torsion_proxy_N_m2": ei_init * (0.18 + 0.04 * abs(twist_max)),
+        "tension_bending_coupling_index": axial_strain * (1.0 + 1.5 * friction),
+        "bird_caging_risk_index": radial_compression * (1.0 + pressure / 100.0),
+        "pressure_softening_factor": max(0.0, 1.0 - pressure / 250.0),
+    }
+    return curvature, moment_kn_m, derived
 
 
 def main(argv) -> int:
@@ -91,9 +108,9 @@ def main(argv) -> int:
 
     payload = load_payload(input_path)
     job_dir = input_path.resolve().parent
-    curvature, moment_kn_m = run_placeholder_solver(payload)
+    curvature, moment_kn_m, derived = run_placeholder_solver(payload)
     write_result_csv(job_dir / "result_data.csv", curvature, moment_kn_m)
-    write_summary(job_dir / "result_summary.json", "PLACEHOLDER_BACKEND_RUNNER", curvature, moment_kn_m)
+    write_summary(job_dir / "result_summary.json", "PLACEHOLDER_BACKEND_RUNNER", payload, curvature, moment_kn_m, derived)
     print(f"Wrote {job_dir / 'result_data.csv'}")
     return 0
 

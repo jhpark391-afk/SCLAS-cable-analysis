@@ -64,7 +64,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "10.2-remote-contract"
+APP_VERSION = "10.3-research-scope"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -338,7 +338,8 @@ Important sections:
 - `derived_geometry_mm`: GUI-derived radii and armor center radii in mm.
 - `materials`: layer elastic properties from GUI table.
 - `mesh`: requested element type and preview discretization.
-- `analysis_conditions`: length, pressure, friction, curvature, cycle count.
+- `analysis_conditions`: length, pressure, friction, curvature, twist, axial strain, radial compression, cycle count.
+- `study_scope`: enabled local behavior assessments requested by the GUI.
 - `equivalent_properties`: GUI-side equivalent EI estimates.
 
 ## Required output
@@ -357,10 +358,23 @@ Write `result_summary.json` with any backend metrics, for example:
 {
   "source": "ABAQUS_BACKEND",
   "max_abs_moment_kn_m": 123.4,
+  "torsion_stiffness_proxy": 12.3,
+  "tension_bending_coupling_index": 0.002,
+  "bird_caging_risk_index": 0.018,
   "odb_path": "...",
   "status": "completed"
 }
 ```
+
+## Research evaluation scope
+The primary GUI plot remains the bending moment-curvature hysteresis loop.
+The backend should use `study_scope.enabled_assessments` to decide which extra
+local behavior evaluations to run:
+- `bending_stick_slip`: bending stiffness drop and hysteresis loop.
+- `torsion`: torsion stiffness and torsion-bending coupling candidates.
+- `tension_bending_coupling`: axial load influence on bending response.
+- `compression_bird_caging`: radial/diameter instability risk.
+- `pressure_effect`: hydrostatic pressure influence on stiffness and slip.
 
 ## Abaqus command pattern
 A typical backend command may look like:
@@ -552,6 +566,9 @@ class SCLASRemoteGUI(QMainWindow):
             "pressure": QLineEdit("40.00"),
             "friction": QLineEdit("0.22"),
             "curvature": QLineEdit("0.08"),
+            "twist": QLineEdit("0.05"),
+            "axial_strain": QLineEdit("0.002"),
+            "radial_compression": QLineEdit("0.015"),
             "cycles": QSpinBox(),
             "steps": QSpinBox(),
         }
@@ -562,9 +579,27 @@ class SCLASRemoteGUI(QMainWindow):
         form.addRow("Hydrostatic pressure (MPa)", self.cond["pressure"])
         form.addRow("Friction coefficient", self.cond["friction"])
         form.addRow("Max curvature (1/m)", self.cond["curvature"])
+        form.addRow("Max twist (rad/m)", self.cond["twist"])
+        form.addRow("Max axial strain", self.cond["axial_strain"])
+        form.addRow("Radial compression ratio", self.cond["radial_compression"])
         form.addRow("Loading cycles", self.cond["cycles"])
         form.addRow("Result steps", self.cond["steps"])
         left.addLayout(form)
+
+        scope_box = QGroupBox("Research Scope / Local Behavior")
+        scope_layout = QVBoxLayout(scope_box)
+        self.study_checks = {
+            "bending_stick_slip": QCheckBox("Bending: stick-slip / hysteresis"),
+            "torsion": QCheckBox("Torsion stiffness"),
+            "tension_bending_coupling": QCheckBox("Tension-bending coupling"),
+            "compression_bird_caging": QCheckBox("Compression: bird-caging risk"),
+            "pressure_effect": QCheckBox("Hydrostatic pressure effect"),
+        }
+        self.study_checks["bending_stick_slip"].setChecked(True)
+        self.study_checks["pressure_effect"].setChecked(True)
+        for check in self.study_checks.values():
+            scope_layout.addWidget(check)
+        left.addWidget(scope_box)
 
         left.addWidget(self.header("Backend Mode"))
         self.radio_fast = QRadioButton("FAST GUI preview")
@@ -742,6 +777,8 @@ class SCLASRemoteGUI(QMainWindow):
                 "pressure": "MPa",
                 "angle": "deg",
                 "curvature": "1/m",
+                "twist": "rad/m",
+                "strain": "dimensionless",
                 "elastic_modulus": "GPa in materials, Pa in equivalent_properties",
                 "moment_output_required": "kN.m",
             },
@@ -780,17 +817,39 @@ class SCLASRemoteGUI(QMainWindow):
                 "hydrostatic_pressure_mpa": safe_float(self.cond["pressure"], 40.0, "Hydrostatic pressure"),
                 "friction_coefficient": safe_float(self.cond["friction"], 0.22, "Friction coefficient"),
                 "max_curvature_1_per_m": safe_float(self.cond["curvature"], 0.08, "Max curvature"),
+                "max_twist_rad_per_m": safe_float(self.cond["twist"], 0.05, "Max twist"),
+                "max_axial_strain": safe_float(self.cond["axial_strain"], 0.002, "Max axial strain"),
+                "radial_compression_ratio": safe_float(self.cond["radial_compression"], 0.015, "Radial compression ratio"),
                 "loading_cycles": int(self.cond["cycles"].value()),
                 "solver_steps": int(self.cond["steps"].value()),
             },
+            "study_scope": self.collect_study_scope(),
             "equivalent_properties": eq,
             "backend_output_contract": {
                 "required_csv": "result_data.csv",
                 "required_columns": ["curvature_1_per_m", "moment_kn_m"],
                 "optional_summary": "result_summary.json",
+                "primary_result": "bending moment-curvature loop",
+                "additional_requested_assessments": [
+                    "torsion stiffness",
+                    "tension-bending coupling",
+                    "compression bird-caging risk",
+                    "hydrostatic pressure effect",
+                ],
             },
         }
         return payload
+
+    def collect_study_scope(self) -> dict:
+        return {
+            "project_goal": "local behavior evaluation framework for submarine power cable",
+            "enabled_assessments": {
+                key: bool(widget.isChecked())
+                for key, widget in self.study_checks.items()
+            },
+            "primary_gui_output": "moment-curvature hysteresis loop",
+            "backend_note": "Abaqus backend may add extra CSV/JSON outputs for enabled non-bending assessments.",
+        }
 
     def collect_materials(self) -> List[dict]:
         rows = []
@@ -832,7 +891,8 @@ class SCLASRemoteGUI(QMainWindow):
                 f"Outer sheath radius: {payload['derived_geometry_mm']['outer_sheath_outer_radius_mm']:.3f} mm\n"
                 f"Inner armour center radius: {payload['derived_geometry_mm']['inner_armour_center_radius_mm']:.3f} mm\n"
                 f"Outer armour center radius: {payload['derived_geometry_mm']['outer_armour_center_radius_mm']:.3f} mm\n"
-                f"Estimated EI: {payload['equivalent_properties']['core_equivalent_EI_N_m2']:.6g} N.m^2"
+                f"Estimated EI: {payload['equivalent_properties']['core_equivalent_EI_N_m2']:.6g} N.m^2\n"
+                f"Enabled assessments: {', '.join(k for k, v in payload['study_scope']['enabled_assessments'].items() if v)}"
             )
             QMessageBox.information(self, "Validation complete", msg)
         except Exception as exc:
@@ -901,6 +961,7 @@ class SCLASRemoteGUI(QMainWindow):
             "version": APP_VERSION,
             "geometry": {key: widget_value(widget) for key, widget in self.inputs.items()},
             "analysis_conditions": {key: widget_value(widget) for key, widget in self.cond.items()},
+            "study_scope": {key: widget.isChecked() for key, widget in self.study_checks.items()},
             "mesh": {key: widget_value(widget) for key, widget in self.mesh_inputs.items()},
             "backend": {
                 "mode": self.selected_mode(),
@@ -931,6 +992,9 @@ class SCLASRemoteGUI(QMainWindow):
         for key, value in settings.get("analysis_conditions", {}).items():
             if key in self.cond:
                 set_widget(self.cond[key], value)
+        for key, value in settings.get("study_scope", {}).items():
+            if key in self.study_checks:
+                self.study_checks[key].setChecked(bool(value))
         for key, value in settings.get("mesh", {}).items():
             if key in self.mesh_inputs:
                 set_widget(self.mesh_inputs[key], value)

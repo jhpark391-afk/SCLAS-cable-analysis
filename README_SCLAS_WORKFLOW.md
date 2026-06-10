@@ -1,5 +1,23 @@
 # SCLAS Workflow
 
+## Research goal
+
+SCLAS is being developed as an integrated framework for evaluating local
+behavior of submarine power cables. The primary workflow is:
+
+```text
+design variables -> cable section/helix geometry -> Abaqus automation -> local behavior metrics -> GUI visualization
+```
+
+The first GUI output is the bending moment-curvature hysteresis loop, but the
+backend contract already carries a wider research scope:
+
+- bending stick-slip and stiffness degradation
+- torsion stiffness
+- tension-bending coupling
+- compression/bird-caging risk
+- hydrostatic pressure effect
+
 ## Main entry point
 
 Run the GUI on macOS from:
@@ -35,6 +53,8 @@ The GUI writes:
 - `units_manifest.json`: unit conventions for backend developers.
 - `BACKEND_CONTRACT.md`: required input/output contract.
 - `abaqus_runner.py`: placeholder backend runner copied from `code/`.
+- `study_scope`: inside `input_data.json`, tells the backend which local
+  behavior assessments are enabled.
 
 The backend must write:
 
@@ -55,3 +75,11 @@ The backend must write:
 Replace `run_placeholder_solver` in `code/abaqus_runner.py` with the real Abaqus
 model generation and ODB extraction. Keep the CSV output header unchanged so the
 GUI continues to load results without modification.
+
+Recommended Abaqus development order:
+
+1. Keep bending moment-curvature CSV output stable.
+2. Add contact/friction stick-slip extraction to `result_summary.json`.
+3. Add torsion and axial load cases as separate backend routines.
+4. Add bird-caging/pressure-effect metrics as JSON summaries before expanding
+   the GUI plots.
