@@ -22,6 +22,8 @@ See `README_LITERATURE_NOTES.md` for how the Chang and Chen 2019 and Menard
 and Cartraud 2023 papers map into the current GUI/backend contract.
 See `docs/SCLAS_RESEARCH_BACKLOG.md` for the current public-reference scan and
 implementation backlog.
+See `docs/ABAQUS_BACKEND_IMPLEMENTATION_PLAN.md` for the staged Abaqus contact,
+cyclic bending, and ODB extraction plan.
 
 ## Main entry point
 

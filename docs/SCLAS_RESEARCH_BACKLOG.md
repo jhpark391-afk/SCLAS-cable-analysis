@@ -38,6 +38,8 @@ local reference PDFs or private notes.
 
 ## Backend implementation queue
 
+Detailed Abaqus steps are tracked in `docs/ABAQUS_BACKEND_IMPLEMENTATION_PLAN.md`.
+
 1. Preserve the CSV contract:
    `curvature_1_per_m,moment_kn_m`.
 2. Replace the placeholder response with an Abaqus cyclic bending step.

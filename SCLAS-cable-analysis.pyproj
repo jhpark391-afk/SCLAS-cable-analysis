@@ -46,6 +46,8 @@
     <Content Include="data\input_data.json" />
     <Content Include="data\sclas_result.csv" />
     <Content Include="data\케이블 기하 모델링 수치 변수.csv" />
+    <Content Include="docs\ABAQUS_BACKEND_IMPLEMENTATION_PLAN.md" />
+    <Content Include="docs\SCLAS_RESEARCH_BACKLOG.md" />
     <Content Include="docs\🔄 GUI와 아바쿠스의 데이터 교환 방식.docx" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />

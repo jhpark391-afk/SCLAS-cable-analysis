@@ -1,0 +1,126 @@
+# Abaqus Backend Implementation Plan
+
+This plan starts from the current `code/abaqus_runner.py` scaffold and preserves
+the GUI contract:
+
+```csv
+curvature_1_per_m,moment_kn_m
+```
+
+The GUI remains useful as long as every backend iteration writes
+`result_data.csv`; richer research metrics should go to `result_summary.json`.
+
+## Current backend state
+
+- Normal Python path:
+  - reads `input_data.json`
+  - writes placeholder `result_data.csv`
+  - writes `result_summary.json`
+  - writes `abaqus_mesh_manifest.json`
+- Abaqus/CAE path:
+  - creates first-pass core/sheath solids and helical armour beam paths
+  - writes `.cae` and `.inp` mesh scaffold when Abaqus APIs are available
+  - still writes the placeholder result curve
+
+## Phase 1: Mesh scaffold verification
+
+1. Run a GUI-exported job in Abaqus:
+
+   ```bat
+   abaqus cae noGUI=abaqus_runner.py -- input_data.json
+   ```
+
+2. Open `sclas_mesh_model.cae`.
+3. Check:
+   - core positions and radii
+   - inner and outer armour center radii
+   - helical hand/direction of each armour layer
+   - axial seed count from `mesh.axial_divisions`
+   - circumferential seed counts from GUI mesh settings
+
+Acceptance:
+- `.cae` and `.inp` files open without Abaqus errors.
+- `abaqus_mesh_manifest.json` lists all expected components.
+
+## Phase 2: Contact and friction
+
+Start from `numerical_model.contact_interfaces` in `input_data.json`.
+
+Initial contact pairs:
+- inner armour to inner sheath
+- inner armour to bedding
+- outer armour to bedding
+- outer armour to outer sheath
+- cross-layer armour interaction, if represented explicitly
+
+Contact settings:
+- normal behavior: penalty or augmented Lagrange
+- tangential behavior: regularized Coulomb
+- friction coefficient: `analysis_conditions.friction_coefficient`
+- residual pressure: `analysis_conditions.residual_contact_pressure_mpa`
+- regularization: `analysis_conditions.contact_regularization_beta`
+
+Acceptance:
+- write contact status and any convergence warnings into
+  `result_summary.json.backend_readiness.contact_friction`
+- include the exact friction/contact parameters used
+
+## Phase 3: Cyclic bending load case
+
+1. Define a cyclic curvature path using
+   `analysis_conditions.max_curvature_1_per_m` and
+   `analysis_conditions.loading_cycles`.
+2. Apply end rotations/displacements that reproduce the requested curvature
+   over `analysis_conditions.effective_length_mm`.
+3. Submit the Abaqus job.
+4. Extract reaction moment and curvature history.
+
+Acceptance:
+- `result_data.csv` contains the ODB-extracted bending loop.
+- `result_summary.json.source` changes from placeholder/proxy wording to an
+  Abaqus solve source.
+- `backend_readiness.bending_stick_slip.status` is updated to `abaqus_solved`
+  or a more specific status.
+
+## Phase 4: ODB post-processing
+
+Extract and report:
+- peak absolute bending moment
+- minimum and maximum moment
+- loop energy proxy
+- stick/slip transition indicators, if available
+- contact pressure range by interface
+- slip displacement range by interface
+- convergence warnings and failed increments
+
+Keep the CSV narrow. Put extra arrays or scalar metrics in JSON unless the GUI
+explicitly needs a new plot.
+
+## Phase 5: Coupled studies
+
+Add separate routines after bending is stable:
+
+1. Torsion:
+   - use `analysis_conditions.max_twist_rad_per_m`
+   - report torsional stiffness in `result_summary.json`
+2. Tension-bending:
+   - use `analysis_conditions.max_axial_strain`
+   - sweep axial preload before bending
+3. Pressure/compression:
+   - use `analysis_conditions.hydrostatic_pressure_mpa`
+   - use `analysis_conditions.radial_compression_ratio`
+   - report pressure softening and bird-caging risk
+
+## Phase 6: GUI promotion criteria
+
+Only add new GUI plots when the backend has stable output for them.
+
+Good candidates:
+- contact pressure vs curvature
+- slip displacement vs curvature
+- torsion moment vs twist
+- axial force vs axial strain
+- pressure sweep summary
+
+Do not overload `result_data.csv`; create additional CSV files only when a new
+plot genuinely needs a vector result.
