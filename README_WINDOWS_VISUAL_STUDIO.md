@@ -14,7 +14,7 @@ Windows. Create a fresh Windows virtual environment instead.
 ## Visual Studio setup
 
 1. Open Visual Studio.
-2. Open this folder as a Python project.
+2. Open `SCLAS-cable-analysis.sln`.
 3. Create a new virtual environment at:
 
 ```text
@@ -34,7 +34,8 @@ Windows. Create a fresh Windows virtual environment instead.
 code\sclas_remote_gui.py
 ```
 
-or run:
+The included `SCLAS-cable-analysis.pyproj` already sets this startup file.
+You can also run:
 
 ```bat
 run_sclas.bat

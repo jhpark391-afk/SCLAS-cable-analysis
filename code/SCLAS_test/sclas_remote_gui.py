@@ -33,7 +33,7 @@ os.environ.setdefault("PYQTGRAPH_QT_LIB", "PyQt5")
 import numpy as np
 import psutil
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QIcon, QPixmap
+from PyQt5.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -73,6 +73,26 @@ PROJECT_DIR = APP_DIR.parent
 DEFAULT_JOB_ROOT = PROJECT_DIR / "jobs" / "SCLAS_jobs"
 SETTINGS_PATH = PROJECT_DIR / "settings.json"
 BACKEND_RUNNER_TEMPLATE = APP_DIR / "abaqus_runner.py"
+
+
+def quote_command_path(path: str) -> str:
+    if sys.platform.startswith("win"):
+        return f'"{path}"'
+    return shlex.quote(path)
+
+
+def default_local_backend_command() -> str:
+    return f"{quote_command_path(sys.executable)} abaqus_runner.py input_data.json"
+
+
+def normalize_local_backend_command(command: str) -> str:
+    old_defaults = {
+        "python abaqus_runner.py input_data.json",
+        "python3 abaqus_runner.py input_data.json",
+    }
+    if command.strip() in old_defaults:
+        return default_local_backend_command()
+    return command
 
 
 # -----------------------------------------------------------------------------
@@ -426,8 +446,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.current_k = np.array([])
         self.current_m = np.array([])
         self.last_job_dir = ""
-        self.setWindowTitle(f"SCLAS {APP_VERSION} | Cable GUI Frontend + Abaqus Remote Contract")
-        self.setMinimumSize(1120, 650)
+        self.setWindowTitle("SCLAS Cable Analysis")
+        self.setMinimumSize(1280, 720)
         self.init_ui()
         self.apply_theme()
         self.load_settings()
@@ -446,11 +466,11 @@ class SCLASRemoteGUI(QMainWindow):
     def fit_to_screen(self) -> None:
         screen = QApplication.primaryScreen()
         if screen is None:
-            self.resize(1360, 760)
+            self.resize(1440, 820)
             return
         available = screen.availableGeometry()
-        width = min(1460, max(1120, available.width() - 90))
-        height = min(780, max(650, available.height() - 120))
+        width = min(1680, max(1280, available.width() - 36))
+        height = min(940, max(720, available.height() - 60))
         self.resize(width, height)
         self.move(
             available.x() + max(16, (available.width() - width) // 2),
@@ -470,7 +490,7 @@ class SCLASRemoteGUI(QMainWindow):
         content = QFrame()
         content.setObjectName("ContentPane")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(22, 16, 22, 18)
+        content_layout.setContentsMargins(18, 14, 18, 16)
         content_layout.setSpacing(12)
 
         topbar = QHBoxLayout()
@@ -479,21 +499,15 @@ class SCLASRemoteGUI(QMainWindow):
         title_block.setSpacing(0)
         title = QLabel("SCLAS Cable Analysis")
         title.setObjectName("AppTitle")
-        subtitle = QLabel("Submarine cable modelling · mesh bridge · nonlinear response")
+        subtitle = QLabel("Submarine cable modelling | mesh bridge | nonlinear response")
         subtitle.setObjectName("AppSubtitle")
         title_block.addWidget(title)
         title_block.addWidget(subtitle)
         topbar.addLayout(title_block)
         topbar.addStretch()
-        bridge = QLabel("ABAQUS BRIDGE")
-        bridge.setObjectName("StatusPill")
-        topbar.addWidget(bridge)
-        mode = QLabel("ENGINEERING MODE")
-        mode.setObjectName("ModePill")
-        topbar.addWidget(mode)
-        version = QLabel(APP_VERSION)
-        version.setObjectName("VersionPill")
-        topbar.addWidget(version)
+        session = QLabel("Local project")
+        session.setObjectName("TopbarMeta")
+        topbar.addWidget(session)
         content_layout.addLayout(topbar)
 
         self.pages = QStackedWidget()
@@ -509,20 +523,10 @@ class SCLASRemoteGUI(QMainWindow):
     def build_sidebar(self) -> QFrame:
         sidebar = QFrame()
         sidebar.setObjectName("Sidebar")
-        sidebar.setFixedWidth(260)
+        sidebar.setFixedWidth(220)
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(14, 16, 14, 14)
+        layout.setContentsMargins(14, 20, 14, 14)
         layout.setSpacing(8)
-
-        traffic = QHBoxLayout()
-        traffic.setSpacing(8)
-        for name in ["CloseDot", "MinDot", "MaxDot"]:
-            dot = QLabel()
-            dot.setObjectName(name)
-            dot.setFixedSize(12, 12)
-            traffic.addWidget(dot)
-        traffic.addStretch()
-        layout.addLayout(traffic)
 
         brand = QLabel("SCLAS")
         brand.setObjectName("SidebarBrand")
@@ -532,11 +536,11 @@ class SCLASRemoteGUI(QMainWindow):
         layout.addWidget(brand_sub)
         layout.addSpacing(14)
 
-        nav_label = QLabel("Workspace")
+        nav_label = QLabel("Workflow")
         nav_label.setObjectName("SidebarSection")
         layout.addWidget(nav_label)
 
-        nav_items = [("Design", "Geometry and materials"), ("Mesh", "Preview and Abaqus bridge"), ("Analysis", "Backend and results")]
+        nav_items = [("Design", "Geometry inputs"), ("Mesh", "Abaqus bridge"), ("Analysis", "Results")]
         for index, (title, subtitle) in enumerate(nav_items):
             btn = QPushButton(f"{title}\n{subtitle}")
             btn.setObjectName("NavButton")
@@ -547,7 +551,7 @@ class SCLASRemoteGUI(QMainWindow):
             layout.addWidget(btn)
 
         layout.addStretch()
-        status = QLabel("Ready · Local session")
+        status = QLabel("Ready | Local session")
         status.setObjectName("SidebarStatus")
         layout.addWidget(status)
         return sidebar
@@ -566,12 +570,15 @@ class SCLASRemoteGUI(QMainWindow):
         tab = QWidget()
         layout = QHBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(14)
 
         panel_inputs = QFrame(); panel_inputs.setObjectName("Card")
+        panel_inputs.setMinimumWidth(430)
         left = QVBoxLayout(panel_inputs)
+        left.setContentsMargins(18, 16, 18, 16)
+        left.setSpacing(10)
         left.addWidget(self.header("Cable Geometry Inputs"))
-        self.btn_load_csv = QPushButton("Load key,value CSV")
+        self.btn_load_csv = QPushButton("Import key,value CSV")
         self.btn_load_csv.setFixedHeight(42)
         self.btn_load_csv.clicked.connect(self.load_csv)
         left.addWidget(self.btn_load_csv)
@@ -594,7 +601,11 @@ class SCLASRemoteGUI(QMainWindow):
         self.inputs["no_ia"].setRange(1, 300); self.inputs["no_ia"].setValue(55)
         self.inputs["no_oa"].setRange(1, 300); self.inputs["no_oa"].setValue(63)
 
-        form = QFormLayout(); form.setVerticalSpacing(10)
+        form = QFormLayout()
+        form.setVerticalSpacing(9)
+        form.setHorizontalSpacing(16)
+        form.setLabelAlignment(Qt.AlignRight)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         labels = [
             ("Conductor radius r_cond (mm)", "r_cond"),
             ("Insulation radius r_insu (mm)", "r_insu"),
@@ -611,6 +622,7 @@ class SCLASRemoteGUI(QMainWindow):
             ("Outer armour lay angle (deg)", "outer_lay_angle"),
         ]
         for label, key in labels:
+            self.inputs[key].setMinimumWidth(112)
             form.addRow(label, self.inputs[key])
         left.addLayout(form)
         left.addStretch()
@@ -618,20 +630,33 @@ class SCLASRemoteGUI(QMainWindow):
         input_scroll.setObjectName("PanelScroll")
         input_scroll.setWidgetResizable(True)
         input_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        input_scroll.setMinimumWidth(430)
+        input_scroll.setMaximumWidth(520)
         input_scroll.setWidget(panel_inputs)
 
         panel_mat = QFrame(); panel_mat.setObjectName("Card")
+        panel_mat.setMinimumWidth(360)
+        panel_mat.setMaximumWidth(440)
         mid = QVBoxLayout(panel_mat)
+        mid.setContentsMargins(18, 16, 18, 16)
         mid.addWidget(self.header("Material Table"))
         self.table = QTableWidget(9, 4)
         self.table.setAlternatingRowColors(True)
-        self.table.setHorizontalHeaderLabels(["Layer", "E_GPa", "Nu", "Density_kg_m3"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setHorizontalHeaderLabels(["Layer", "E (GPa)", "Nu", "Density"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setMinimumHeight(430)
+        self.table.horizontalHeader().setStretchLastSection(False)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.init_material_table()
         mid.addWidget(self.table)
 
         panel_view = QFrame(); panel_view.setObjectName("Card")
+        panel_view.setMinimumWidth(380)
         right = QVBoxLayout(panel_view)
+        right.setContentsMargins(18, 16, 18, 16)
         header = QHBoxLayout()
         header.addWidget(self.header("Digital Twin View"))
         self.btn_toggle = QPushButton("Toggle 2D / 3D")
@@ -641,13 +666,13 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_solid = gl.GLViewWidget()
         self.view_solid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.view_solid.setMinimumHeight(360)
-        self.view_solid.setBackgroundColor("#1e1e1e")
+        self.view_solid.setBackgroundColor("#f7f8fa")
         self.view_solid.setCameraPosition(distance=180, elevation=90, azimuth=0)
         right.addWidget(self.view_solid, 1)
 
-        layout.addWidget(input_scroll, 22)
-        layout.addWidget(panel_mat, 30)
-        layout.addWidget(panel_view, 48)
+        layout.addWidget(input_scroll, 38)
+        layout.addWidget(panel_mat, 31)
+        layout.addWidget(panel_view, 39)
         self.add_page(tab)
 
         for w in self.inputs.values():
@@ -783,7 +808,7 @@ class SCLASRemoteGUI(QMainWindow):
         remote_box = QGroupBox("Remote / Backend Settings")
         remote_form = QFormLayout(remote_box)
         self.job_root_input = QLineEdit(str(DEFAULT_JOB_ROOT))
-        self.local_command_input = QLineEdit("python3 abaqus_runner.py input_data.json")
+        self.local_command_input = QLineEdit(default_local_backend_command())
         self.remote_target_input = QLineEdit("user@remote-host")
         self.remote_root_input = QLineEdit("~/SCLAS_jobs")
         self.remote_command_input = QLineEdit("abaqus cae noGUI=abaqus_runner.py -- input_data.json")
@@ -854,14 +879,14 @@ class SCLASRemoteGUI(QMainWindow):
 
     def header(self, text: str) -> QLabel:
         label = QLabel(text)
-        label.setStyleSheet("font-size: 17px; font-weight: 800; color: #f2f2f2; padding: 2px 0 8px 0;")
+        label.setStyleSheet("font-size: 17px; font-weight: 700; color: #17202a; padding: 2px 0 8px 0;")
         return label
 
     def metric_box(self, title: str, value: str) -> QFrame:
         box = QFrame(); box.setObjectName("MetricBox")
         layout = QVBoxLayout(box)
-        title_label = QLabel(title); title_label.setStyleSheet("color: #9e9e9e; font-size: 13px;")
-        value_label = QLabel(value); value_label.setStyleSheet("color: #f4f4f4; font-size: 23px; font-weight: 800;")
+        title_label = QLabel(title); title_label.setStyleSheet("color: #5f6b7a; font-size: 13px;")
+        value_label = QLabel(value); value_label.setStyleSheet("color: #132033; font-size: 23px; font-weight: 750;")
         layout.addWidget(title_label); layout.addWidget(value_label)
         box.value_label = value_label
         return box
@@ -1251,7 +1276,7 @@ class SCLASRemoteGUI(QMainWindow):
         if backend.get("job_root"):
             self.job_root_input.setText(str(backend["job_root"]))
         if backend.get("local_command"):
-            self.local_command_input.setText(str(backend["local_command"]))
+            self.local_command_input.setText(normalize_local_backend_command(str(backend["local_command"])))
         if backend.get("remote_target"):
             self.remote_target_input.setText(str(backend["remote_target"]))
         if backend.get("remote_root"):
@@ -1452,137 +1477,98 @@ class SCLASRemoteGUI(QMainWindow):
     def apply_theme(self) -> None:
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #151515;
-                color: #f2f2f2;
-                font-family: "Segoe UI", "SF Pro Display", Arial;
+                background-color: #eef2f6;
+                color: #18212d;
+                font-family: "Segoe UI", "Malgun Gothic", Arial;
             }
             QWidget {
-                color: #e8e8e8;
-                font-size: 14px;
+                color: #18212d;
+                font-size: 13px;
             }
             QLabel {
-                color: #d6d6d6;
-                font-size: 14px;
+                color: #243244;
+                font-size: 13px;
             }
             QFrame#Sidebar {
-                background-color: #252825;
-                border-right: 1px solid #363936;
+                background-color: #f6f8fb;
+                border-right: 1px solid #d7dee8;
             }
             QFrame#ContentPane {
-                background-color: #151515;
-            }
-            QLabel#CloseDot {
-                background-color: #ff5f57;
-                border-radius: 6px;
-            }
-            QLabel#MinDot {
-                background-color: #ffbd2e;
-                border-radius: 6px;
-            }
-            QLabel#MaxDot {
-                background-color: #28c840;
-                border-radius: 6px;
+                background-color: #eef2f6;
             }
             QLabel#SidebarBrand {
-                color: #f3f3f3;
-                font-size: 22px;
-                font-weight: 800;
-                padding-top: 14px;
+                color: #132033;
+                font-size: 24px;
+                font-weight: 750;
+                padding-top: 2px;
             }
             QLabel#SidebarSub {
-                color: #9d9d9d;
+                color: #64748b;
                 font-size: 12px;
-                padding-bottom: 8px;
+                padding-bottom: 12px;
             }
             QLabel#SidebarSection {
-                color: #8c8c8c;
-                font-size: 12px;
+                color: #738196;
+                font-size: 11px;
                 font-weight: 700;
                 padding: 8px 8px 4px 8px;
             }
             QLabel#SidebarStatus {
-                color: #a3a3a3;
-                background-color: #303230;
-                border: 1px solid #3b3d3b;
-                border-radius: 10px;
-                padding: 10px;
+                color: #405066;
+                background-color: #ffffff;
+                border: 1px solid #d9e1ea;
+                border-radius: 8px;
+                padding: 9px 10px;
                 font-size: 12px;
             }
             QLabel#AppTitle {
-                color: #f5f5f5;
-                font-size: 20px;
-                font-weight: 800;
-                letter-spacing: 0;
+                color: #111827;
+                font-size: 22px;
+                font-weight: 750;
             }
             QLabel#AppSubtitle {
-                color: #9a9a9a;
+                color: #65758b;
                 font-size: 12px;
             }
-            QLabel#VersionPill {
-                background-color: #2b2b2b;
-                color: #cfcfcf;
-                border: 1px solid #3a3a3a;
-                border-radius: 10px;
-                padding: 7px 11px;
+            QLabel#TopbarMeta {
+                color: #405066;
+                background-color: #ffffff;
+                border: 1px solid #d7dee8;
+                border-radius: 8px;
+                padding: 6px 10px;
                 font-size: 12px;
-                font-weight: 700;
-            }
-            QLabel#StatusPill {
-                background-color: #20312c;
-                color: #b8f1df;
-                border: 1px solid #314c43;
-                border-radius: 10px;
-                padding: 7px 11px;
-                font-size: 12px;
-                font-weight: 800;
-            }
-            QLabel#ModePill {
-                background-color: #252d3a;
-                color: #cadcff;
-                border: 1px solid #3a465a;
-                border-radius: 10px;
-                padding: 7px 11px;
-                font-size: 12px;
-                font-weight: 800;
-            }
-            QStackedWidget#PageStack {
-                background-color: transparent;
+                font-weight: 650;
             }
             QPushButton#NavButton {
                 background-color: transparent;
-                color: #cfcfcf;
-                border: none;
-                border-radius: 10px;
-                padding: 8px 12px;
+                color: #334155;
+                border: 1px solid transparent;
+                border-radius: 8px;
+                padding: 8px 10px;
                 text-align: left;
-                font-size: 14px;
-                font-weight: 700;
+                font-size: 13px;
+                font-weight: 650;
             }
             QPushButton#NavButton:hover {
-                background-color: #313331;
-                color: #ffffff;
+                background-color: #e8eef6;
+                border-color: #d6deea;
             }
             QPushButton#NavButton:checked {
-                background-color: #3a3c3a;
-                color: #ffffff;
-                border: 1px solid #474947;
-            }
-            QPushButton#NavButton:pressed {
-                background-color: #444744;
-                padding-top: 9px;
-                padding-left: 13px;
+                background-color: #dfeafb;
+                color: #0f3a72;
+                border: 1px solid #b9cdea;
             }
             QFrame#Card {
-                background-color: #2a2a2a;
-                border-radius: 12px;
-                border: 1px solid #3b3b3b;
+                background-color: #ffffff;
+                border-radius: 8px;
+                border: 1px solid #d7dee8;
                 padding: 8px;
             }
             QFrame#MetricBox {
-                background-color: #303030;
-                border-radius: 12px;
-                border: 1px solid #424242;
-                border-left: 4px solid #8ab4ff;
+                background-color: #ffffff;
+                border-radius: 8px;
+                border: 1px solid #d7dee8;
+                border-left: 4px solid #1f6feb;
                 padding: 8px;
             }
             QScrollArea#PanelScroll {
@@ -1593,131 +1579,126 @@ class SCLASRemoteGUI(QMainWindow):
                 background-color: transparent;
             }
             QScrollBar:vertical {
-                background: #202020;
-                width: 9px;
+                background: #eef2f6;
+                width: 10px;
                 margin: 0;
-                border-radius: 4px;
+                border-radius: 5px;
             }
             QScrollBar::handle:vertical {
-                background: #555555;
-                border-radius: 4px;
+                background: #b7c2d0;
+                border-radius: 5px;
                 min-height: 34px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #747474;
             }
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {
                 height: 0;
             }
             QGroupBox {
-                color: #eeeeee;
-                background-color: #262626;
-                border: 1px solid #3c3c3c;
-                border-radius: 12px;
+                color: #1f2937;
+                background-color: #ffffff;
+                border: 1px solid #d7dee8;
+                border-radius: 8px;
                 margin-top: 10px;
                 padding: 12px;
-                font-weight: 700;
+                font-weight: 650;
             }
             QLineEdit, QSpinBox, QComboBox {
-                background-color: #202020;
-                border: 1px solid #3d3d3d;
-                border-radius: 10px;
-                padding: 8px 10px;
-                color: #f4f4f4;
-                font-size: 14px;
-                font-weight: 650;
-                selection-background-color: #3d6aa8;
+                background-color: #fbfcfe;
+                border: 1px solid #cbd5e1;
+                border-radius: 7px;
+                padding: 7px 9px;
+                color: #111827;
+                font-size: 13px;
+                font-weight: 500;
+                selection-background-color: #bcd7ff;
             }
             QLineEdit:hover, QSpinBox:hover, QComboBox:hover {
-                border-color: #555555;
-                background-color: #242424;
+                border-color: #98a7bb;
+                background-color: #ffffff;
             }
             QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
-                border: 1px solid #8ab4ff;
-                background-color: #252525;
+                border: 1px solid #1f6feb;
+                background-color: #ffffff;
             }
             QComboBox::drop-down {
                 border: none;
                 width: 28px;
             }
             QPushButton {
-                background-color: #303030;
-                color: #f2f2f2;
-                border: 1px solid #464646;
-                border-radius: 10px;
-                font-size: 14px;
-                font-weight: 700;
+                background-color: #ffffff;
+                color: #1f2937;
+                border: 1px solid #cbd5e1;
+                border-radius: 7px;
+                font-size: 13px;
+                font-weight: 650;
                 padding: 8px 11px;
             }
             QPushButton:hover {
-                background-color: #3a3a3a;
-                border-color: #5a5a5a;
+                background-color: #f5f8fc;
+                border-color: #9fb0c4;
             }
             QPushButton:pressed {
-                background-color: #444444;
+                background-color: #e8eef6;
                 padding-top: 9px;
                 padding-left: 12px;
             }
-            QPushButton:disabled {
-                background-color: #252525;
-                color: #696969;
-                border-color: #343434;
-            }
             QPushButton#RunBtn {
-                background-color: #f2f2f2;
-                color: #191919;
-                border: 1px solid #ffffff;
-                font-size: 15px;
-                font-weight: 800;
+                background-color: #1f6feb;
+                color: #ffffff;
+                border: 1px solid #1f6feb;
+                font-size: 14px;
+                font-weight: 700;
             }
             QPushButton#RunBtn:hover {
-                background-color: #ffffff;
-                border-color: #ffffff;
+                background-color: #185fc9;
+                border-color: #185fc9;
             }
             QTableWidget {
-                background-color: #222222;
-                alternate-background-color: #262626;
-                color: #ededed;
-                font-size: 13px;
-                border: 1px solid #3d3d3d;
-                border-radius: 10px;
-                gridline-color: #353535;
+                background-color: #ffffff;
+                alternate-background-color: #f7f9fc;
+                color: #172033;
+                font-size: 12px;
+                border: 1px solid #d7dee8;
+                border-radius: 8px;
+                gridline-color: #e5eaf1;
+                selection-background-color: #dbeafe;
+                selection-color: #0f172a;
             }
             QHeaderView::section {
-                background-color: #303030;
-                color: #dcdcdc;
-                font-weight: 800;
+                background-color: #edf2f8;
+                color: #1f2937;
+                font-weight: 700;
                 border: none;
-                border-right: 1px solid #444444;
-                padding: 8px;
+                border-right: 1px solid #d7dee8;
+                border-bottom: 1px solid #d7dee8;
+                padding: 7px;
             }
             QTextEdit {
-                background-color: #1e1e1e;
-                color: #d7d7d7;
-                font-family: Menlo, Consolas, monospace;
-                border: 1px solid #3a3a3a;
-                border-radius: 10px;
+                background-color: #0f172a;
+                color: #dbeafe;
+                font-family: Consolas, "Cascadia Mono", monospace;
+                border: 1px solid #233148;
+                border-radius: 8px;
                 padding: 8px;
                 font-size: 12px;
             }
             QProgressBar {
-                background-color: #202020;
-                border: 1px solid #3f3f3f;
-                border-radius: 8px;
+                background-color: #edf2f8;
+                border: 1px solid #cbd5e1;
+                border-radius: 7px;
                 text-align: center;
-                color: #eeeeee;
-                font-weight: 700;
+                color: #1f2937;
+                font-weight: 650;
                 min-height: 18px;
             }
             QProgressBar::chunk {
-                background-color: #8ab4ff;
-                border-radius: 7px;
+                background-color: #1f6feb;
+                border-radius: 6px;
             }
             QRadioButton, QCheckBox {
-                font-size: 14px;
-                font-weight: 650;
-                color: #dddddd;
+                font-size: 13px;
+                font-weight: 500;
+                color: #243244;
                 padding: 3px;
             }
             QRadioButton::indicator, QCheckBox::indicator {
@@ -1726,14 +1707,20 @@ class SCLASRemoteGUI(QMainWindow):
             }
         """)
 
-
 def main() -> int:
     app = QApplication(sys.argv)
+    app.setFont(QFont("Segoe UI", 10))
     pg.setConfigOptions(antialias=True)
     window = SCLASRemoteGUI()
     window.show()
+    smoke_ms = os.environ.get("SCLAS_GUI_SMOKE_EXIT_MS", "").strip()
+    if smoke_ms:
+        QTimer.singleShot(max(int(smoke_ms), 1), app.quit)
     return app.exec_()
 
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+

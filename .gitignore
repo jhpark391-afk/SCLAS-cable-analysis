@@ -5,6 +5,7 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv*/
 venv/
 env/
 90_env/
@@ -19,6 +20,10 @@ desktop.ini
 # Runtime settings and generated jobs
 settings.json
 jobs/
+
+# Local/private reference material
+references/
+local_notes/
 
 # Large or regenerated solver outputs
 *.odb

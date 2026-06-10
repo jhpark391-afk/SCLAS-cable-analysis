@@ -5,3 +5,6 @@
 *.csv text
 *.bat text eol=crlf
 *.sh text eol=lf
+*.sln text eol=crlf
+*.pyproj text eol=crlf
+*.docx binary
