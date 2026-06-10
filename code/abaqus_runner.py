@@ -118,6 +118,7 @@ def write_mesh_manifest(path: Path, payload: dict, abaqus_created: bool, files=N
     armour = payload.get("armour", {})
     analysis = payload.get("analysis_conditions", {})
     mesh_cfg = payload.get("mesh", {})
+    numerical_model = payload.get("numerical_model", {})
     files = files or []
     manifest = {
         "status": "abaqus_mesh_created" if abaqus_created else "mesh_request_only",
@@ -133,6 +134,14 @@ def write_mesh_manifest(path: Path, payload: dict, abaqus_created: bool, files=N
             "armour_circumferential_divisions": int(mesh_cfg.get("armour_circumferential_divisions", 8)),
             "contact_regularization_beta": float(analysis.get("contact_regularization_beta", 0.001)),
         },
+        "contact_interfaces": numerical_model.get("contact_interfaces", []),
+        "contact_interface_defaults": numerical_model.get("contact_interface_defaults", {
+            "normal": "penalty_or_augmented_lagrange",
+            "tangential": "regularized_coulomb",
+            "friction_coefficient": analysis.get("friction_coefficient"),
+            "residual_contact_pressure_mpa": analysis.get("residual_contact_pressure_mpa"),
+            "regularization_beta": analysis.get("contact_regularization_beta"),
+        }),
         "components": [
             {
                 "name": "three_core_equivalent_solids",

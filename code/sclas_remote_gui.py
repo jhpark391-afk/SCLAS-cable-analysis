@@ -374,6 +374,8 @@ Important sections:
 - `analysis_conditions`: length, pressure, friction, curvature, twist, axial strain, radial compression, cycle count.
 - `study_scope`: enabled local behavior assessments requested by the GUI.
 - `numerical_model`: literature-informed backend modelling recommendations.
+  `numerical_model.contact_interfaces` lists the first contact pairs to define
+  in Abaqus.
 - `equivalent_properties`: GUI-side equivalent EI estimates.
 
 ## Required output
@@ -1098,6 +1100,9 @@ class SCLASRemoteGUI(QMainWindow):
         return payload
 
     def build_numerical_model_notes(self) -> dict:
+        friction = safe_float(self.cond["friction"], 0.22, "Friction coefficient")
+        residual_pressure = safe_float(self.cond["residual_contact_pressure"], 0.3, "Residual contact pressure")
+        contact_beta = safe_float(self.mesh_inputs["contact_beta"], 0.001, "Contact regularization beta")
         return {
             "literature_basis": [
                 {
@@ -1121,7 +1126,48 @@ class SCLASRemoteGUI(QMainWindow):
             "contact_model": {
                 "normal": "penalty_or_augmented_lagrange",
                 "tangential": "coulomb_regularized",
-                "regularization_beta": safe_float(self.mesh_inputs["contact_beta"], 0.001, "Contact regularization beta"),
+                "friction_coefficient": friction,
+                "residual_contact_pressure_mpa": residual_pressure,
+                "regularization_beta": contact_beta,
+            },
+            "contact_interfaces": [
+                {
+                    "name": "inner_armour_to_inner_sheath",
+                    "master": "inner_armour_helical_beams_or_surfaces",
+                    "slave": "inner_sheath_outer_surface",
+                    "priority": "high",
+                },
+                {
+                    "name": "inner_armour_to_bedding",
+                    "master": "inner_armour_helical_beams_or_surfaces",
+                    "slave": "bedding_inner_surface",
+                    "priority": "high",
+                },
+                {
+                    "name": "outer_armour_to_bedding",
+                    "master": "outer_armour_helical_beams_or_surfaces",
+                    "slave": "bedding_outer_surface",
+                    "priority": "high",
+                },
+                {
+                    "name": "outer_armour_to_outer_sheath",
+                    "master": "outer_armour_helical_beams_or_surfaces",
+                    "slave": "outer_sheath_inner_surface",
+                    "priority": "high",
+                },
+                {
+                    "name": "armour_cross_layer_interaction",
+                    "master": "outer_armour_layer",
+                    "slave": "inner_armour_layer",
+                    "priority": "medium",
+                },
+            ],
+            "contact_interface_defaults": {
+                "normal": "penalty_or_augmented_lagrange",
+                "tangential": "regularized_coulomb",
+                "friction_coefficient": friction,
+                "residual_contact_pressure_mpa": residual_pressure,
+                "regularization_beta": contact_beta,
             },
             "periodic_cell": {
                 "effective_length_mm": safe_float(self.cond["eff_length"], 234.2, "Effective length"),

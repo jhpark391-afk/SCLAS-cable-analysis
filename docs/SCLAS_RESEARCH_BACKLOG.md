@@ -42,6 +42,7 @@ local reference PDFs or private notes.
    `curvature_1_per_m,moment_kn_m`.
 2. Replace the placeholder response with an Abaqus cyclic bending step.
 3. Add contact/friction definitions between armour wires and adjacent layers.
+   Start from the generated `numerical_model.contact_interfaces` list.
 4. Sweep residual contact pressure, friction coefficient, and contact penalty
    stiffness; report convergence and sensitivity in `result_summary.json`.
 5. Extract stick/slip state indicators and loop energy from the ODB.
