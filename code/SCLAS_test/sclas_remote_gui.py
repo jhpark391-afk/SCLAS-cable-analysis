@@ -66,7 +66,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "11.3-helix-logo"
+APP_VERSION = "11.4-advanced-gui-refinement"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -74,6 +74,7 @@ DEFAULT_JOB_ROOT = PROJECT_DIR / "jobs" / "SCLAS_jobs"
 SETTINGS_PATH = PROJECT_DIR / "settings.json"
 BACKEND_RUNNER_TEMPLATE = APP_DIR / "abaqus_runner.py"
 TEAM_LOGO_PATH = PROJECT_DIR / "assets" / "helix_logo.png"
+TEAM_ICON_PATH = PROJECT_DIR / "assets" / "helix_icon.png"
 
 
 def quote_command_path(path: str) -> str:
@@ -465,7 +466,9 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_mode = "2D"
         self.current_k = np.array([])
         self.current_m = np.array([])
+        self.current_metrics: dict = {}
         self.compare_items: List[pg.PlotDataItem] = []
+        self.compare_metrics: List[dict] = []
         self.job_history_paths: List[Path] = []
         self.ui_language = "EN"
         self.last_summary_data: dict = {}
@@ -516,6 +519,11 @@ class SCLASRemoteGUI(QMainWindow):
             "Cable Geometry Inputs": "케이블 형상 입력",
             "Import key,value CSV": "key,value CSV 불러오기",
             "Visible Layers": "표시 레이어",
+            "Layer Presets": "레이어 프리셋",
+            "All": "전체",
+            "Armour only": "아머만",
+            "Core only": "코어만",
+            "Sheath only": "시스만",
             "Outer sheath": "외부 시스",
             "Outer armour": "외부 아머",
             "Bedding": "베딩",
@@ -536,11 +544,18 @@ class SCLASRemoteGUI(QMainWindow):
             "Armour divisions": "아머 분할",
             "Generate mesh preview": "메시 프리뷰 생성",
             "Visual request only. Abaqus backend owns actual mesh generation.": "시각화 요청입니다. 실제 메시 생성은 Abaqus 백엔드가 담당합니다.",
+            "Mesh Readiness": "메시 준비도",
+            "Ready state": "준비 상태",
+            "Est. elements": "예상 요소 수",
+            "Contact pairs": "접촉 쌍",
+            "Not generated": "생성 전",
+            "Preview ready": "프리뷰 준비됨",
             "Preview Only": "프리뷰 전용",
             "Top": "상단",
             "Iso": "등각",
             "Reset": "초기화",
             "Analysis Conditions": "해석 조건",
+            "Conditions": "조건",
             "Effective length (mm)": "유효 길이 (mm)",
             "Hydrostatic pressure (MPa)": "정수압 (MPa)",
             "Residual contact pressure (MPa)": "잔류 접촉압 (MPa)",
@@ -563,6 +578,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Run local/shared-folder command": "로컬/공유폴더 명령 실행",
             "Run remote computer via SSH/scp": "SSH/scp로 원격 컴퓨터 실행",
             "Remote / Backend Settings": "원격 / 백엔드 설정",
+            "Run Controls": "실행 제어",
             "Local job root": "로컬 작업 폴더",
             "Local command": "로컬 명령",
             "SSH target": "SSH 대상",
@@ -574,6 +590,12 @@ class SCLASRemoteGUI(QMainWindow):
             "Load result CSV": "결과 CSV 불러오기",
             "System log": "시스템 로그",
             "Moment-Curvature Result": "모멘트-곡률 결과",
+            "Comparison": "비교",
+            "Primary": "기준",
+            "Compared": "비교",
+            "Delta peak": "최대값 차이",
+            "Delta loss": "손실 차이",
+            "None": "없음",
             "Focus Plot": "그래프 확대",
             "Show Details": "상세 보기",
             "Export PNG": "PNG 저장",
@@ -616,6 +638,11 @@ class SCLASRemoteGUI(QMainWindow):
         reverse = {ko: en for en, ko in self.translations().items()}
         for widget in self.findChildren(QWidget):
             if widget.property("no_translate"):
+                continue
+            if widget.objectName() == "SectionToggle":
+                title = str(widget.property("section_title") or "")
+                prefix = "[-]" if widget.isChecked() else "[+]"
+                widget.setText(f"{prefix} {self.ui_text(title)}")
                 continue
             if not isinstance(widget, (QLabel, QPushButton, QCheckBox, QRadioButton, QGroupBox)):
                 continue
@@ -731,10 +758,10 @@ class SCLASRemoteGUI(QMainWindow):
         logo_label.setObjectName("TeamLogo")
         logo_label.setProperty("no_translate", True)
         logo_label.setAlignment(Qt.AlignCenter)
-        logo_label.setFixedHeight(132)
-        logo_pixmap = QPixmap(str(TEAM_LOGO_PATH))
+        logo_label.setFixedHeight(104)
+        logo_pixmap = QPixmap(str(TEAM_ICON_PATH if TEAM_ICON_PATH.exists() else TEAM_LOGO_PATH))
         if not logo_pixmap.isNull():
-            logo_label.setPixmap(logo_pixmap.scaled(156, 124, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            logo_label.setPixmap(logo_pixmap.scaled(92, 92, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             layout.addWidget(logo_label)
 
         brand = QLabel("HELIX")
@@ -790,6 +817,31 @@ class SCLASRemoteGUI(QMainWindow):
         scroll.setWidget(widget)
         return scroll
 
+    def collapsible_section(self, title: str, content: QWidget, *, expanded: bool = True) -> QFrame:
+        wrapper = QFrame()
+        wrapper.setObjectName("CollapsibleSection")
+        layout = QVBoxLayout(wrapper)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        toggle = QPushButton()
+        toggle.setObjectName("SectionToggle")
+        toggle.setCheckable(True)
+        toggle.setChecked(expanded)
+        toggle.setProperty("section_title", title)
+        content.setVisible(expanded)
+
+        def update_label(checked: bool) -> None:
+            prefix = "[-]" if checked else "[+]"
+            toggle.setText(f"{prefix} {self.ui_text(title)}")
+
+        toggle.toggled.connect(content.setVisible)
+        toggle.toggled.connect(update_label)
+        update_label(expanded)
+        layout.addWidget(toggle)
+        layout.addWidget(content)
+        return wrapper
+
     def show_page(self, index: int) -> None:
         if not hasattr(self, "pages"):
             return
@@ -816,6 +868,49 @@ class SCLASRemoteGUI(QMainWindow):
     def layer_visible(self, key: str) -> bool:
         checks = getattr(self, "layer_checks", {})
         return key not in checks or checks[key].isChecked()
+
+    def apply_layer_preset(self, mode: str) -> None:
+        if not hasattr(self, "layer_checks"):
+            return
+        presets = {
+            "all": {
+                "outer_sheath": True,
+                "outer_armour": True,
+                "bedding": True,
+                "inner_armour": True,
+                "inner_sheath": True,
+                "cores": True,
+            },
+            "armour": {
+                "outer_sheath": False,
+                "outer_armour": True,
+                "bedding": False,
+                "inner_armour": True,
+                "inner_sheath": False,
+                "cores": False,
+            },
+            "core": {
+                "outer_sheath": False,
+                "outer_armour": False,
+                "bedding": False,
+                "inner_armour": False,
+                "inner_sheath": False,
+                "cores": True,
+            },
+            "sheath": {
+                "outer_sheath": True,
+                "outer_armour": False,
+                "bedding": True,
+                "inner_armour": False,
+                "inner_sheath": True,
+                "cores": False,
+            },
+        }
+        for key, visible in presets.get(mode, presets["all"]).items():
+            self.layer_checks[key].blockSignals(True)
+            self.layer_checks[key].setChecked(visible)
+            self.layer_checks[key].blockSignals(False)
+        self.trigger_rebuild()
 
     def build_design_tab(self) -> None:
         tab = QWidget()
@@ -881,6 +976,19 @@ class SCLASRemoteGUI(QMainWindow):
 
         layer_box = QGroupBox("Visible Layers")
         layer_layout = QGridLayout(layer_box)
+        layer_layout.addWidget(QLabel("Layer Presets"), 0, 0, 1, 2)
+        preset_specs = [
+            ("All", "all"),
+            ("Armour only", "armour"),
+            ("Core only", "core"),
+            ("Sheath only", "sheath"),
+        ]
+        for idx, (text, mode) in enumerate(preset_specs):
+            btn = QPushButton(text)
+            btn.setFixedHeight(32)
+            btn.setToolTip("Apply a quick visibility preset to the digital twin layers.")
+            btn.clicked.connect(lambda checked=False, m=mode: self.apply_layer_preset(m))
+            layer_layout.addWidget(btn, 1 + idx // 2, idx % 2)
         self.layer_checks = {
             "outer_sheath": QCheckBox("Outer sheath"),
             "outer_armour": QCheckBox("Outer armour"),
@@ -893,7 +1001,7 @@ class SCLASRemoteGUI(QMainWindow):
             check.setChecked(True)
             check.setToolTip("Toggle this layer in the digital twin view.")
             check.toggled.connect(self.trigger_rebuild)
-            layer_layout.addWidget(check, idx // 2, idx % 2)
+            layer_layout.addWidget(check, 3 + idx // 2, idx % 2)
         left.addWidget(layer_box)
         left.addStretch()
         input_scroll = self.scroll_panel(panel_inputs, min_width=430, max_width=520)
@@ -1017,6 +1125,15 @@ class SCLASRemoteGUI(QMainWindow):
         note = QLabel("Visual request only. Abaqus backend owns actual mesh generation.")
         note.setWordWrap(True)
         left.addWidget(note)
+        mesh_ready_box = QGroupBox("Mesh Readiness")
+        mesh_ready_layout = QGridLayout(mesh_ready_box)
+        self.lbl_mesh_ready = self.metric_box("Ready state", "Not generated")
+        self.lbl_mesh_elements = self.metric_box("Est. elements", "-")
+        self.lbl_mesh_contacts = self.metric_box("Contact pairs", "5")
+        mesh_ready_layout.addWidget(self.lbl_mesh_ready, 0, 0)
+        mesh_ready_layout.addWidget(self.lbl_mesh_elements, 1, 0)
+        mesh_ready_layout.addWidget(self.lbl_mesh_contacts, 2, 0)
+        left.addWidget(mesh_ready_box)
         left.addStretch()
 
         viewer = QFrame(); viewer.setObjectName("Card")
@@ -1062,7 +1179,6 @@ class SCLASRemoteGUI(QMainWindow):
         left_panel = QFrame(); left_panel.setObjectName("Card"); left_panel.setMinimumWidth(430)
         left = QVBoxLayout(left_panel)
         left.setContentsMargins(18, 16, 18, 16)
-        left.addWidget(self.header("Analysis Conditions"))
         self.cond = {
             "eff_length": QLineEdit("234.20"),
             "pressure": QLineEdit("40.00"),
@@ -1091,7 +1207,8 @@ class SCLASRemoteGUI(QMainWindow):
         }
         for key, tip in analysis_tips.items():
             self.cond[key].setToolTip(tip)
-        form = QFormLayout()
+        conditions_box = QFrame()
+        form = QFormLayout(conditions_box)
         form.addRow("Effective length (mm)", self.cond["eff_length"])
         form.addRow("Hydrostatic pressure (MPa)", self.cond["pressure"])
         form.addRow("Residual contact pressure (MPa)", self.cond["residual_contact_pressure"])
@@ -1102,9 +1219,9 @@ class SCLASRemoteGUI(QMainWindow):
         form.addRow("Radial compression ratio", self.cond["radial_compression"])
         form.addRow("Loading cycles", self.cond["cycles"])
         form.addRow("Result steps", self.cond["steps"])
-        left.addLayout(form)
+        left.addWidget(self.collapsible_section("Conditions", conditions_box, expanded=True))
 
-        scope_box = QGroupBox("Research Scope / Local Behavior")
+        scope_box = QFrame()
         scope_layout = QVBoxLayout(scope_box)
         self.study_checks = {
             "bending_stick_slip": QCheckBox("Bending: stick-slip / hysteresis"),
@@ -1118,9 +1235,11 @@ class SCLASRemoteGUI(QMainWindow):
         for check in self.study_checks.values():
             check.setToolTip("Enable this assessment in the exported backend contract.")
             scope_layout.addWidget(check)
-        left.addWidget(scope_box)
+        left.addWidget(self.collapsible_section("Research Scope / Local Behavior", scope_box, expanded=True))
 
-        left.addWidget(self.header("Backend Mode"))
+        backend_box = QFrame()
+        backend_layout = QVBoxLayout(backend_box)
+        backend_layout.setContentsMargins(0, 0, 0, 0)
         self.radio_fast = QRadioButton("FAST GUI preview")
         self.radio_package = QRadioButton("Export job package only")
         self.radio_local = QRadioButton("Run local/shared-folder command")
@@ -1128,9 +1247,10 @@ class SCLASRemoteGUI(QMainWindow):
         self.radio_fast.setChecked(True)
         for r in [self.radio_fast, self.radio_package, self.radio_local, self.radio_remote]:
             r.setToolTip("Choose how the current input package should be handled.")
-            left.addWidget(r)
+            backend_layout.addWidget(r)
+        left.addWidget(self.collapsible_section("Backend Mode", backend_box, expanded=True))
 
-        remote_box = QGroupBox("Remote / Backend Settings")
+        remote_box = QFrame()
         remote_form = QFormLayout(remote_box)
         self.job_root_input = QLineEdit(str(DEFAULT_JOB_ROOT))
         self.local_command_input = QLineEdit(default_local_backend_command())
@@ -1148,8 +1268,11 @@ class SCLASRemoteGUI(QMainWindow):
         remote_form.addRow("SSH target", self.remote_target_input)
         remote_form.addRow("Remote job root", self.remote_root_input)
         remote_form.addRow("Remote command", self.remote_command_input)
-        left.addWidget(remote_box)
+        left.addWidget(self.collapsible_section("Remote / Backend Settings", remote_box, expanded=False))
 
+        run_box = QFrame()
+        run_layout = QVBoxLayout(run_box)
+        run_layout.setContentsMargins(0, 0, 0, 0)
         buttons = QGridLayout()
         self.btn_validate = QPushButton("Validate inputs")
         self.btn_json = QPushButton("Export JSON")
@@ -1168,15 +1291,16 @@ class SCLASRemoteGUI(QMainWindow):
         buttons.addWidget(self.btn_json, 0, 1)
         buttons.addWidget(self.btn_run, 1, 0, 1, 2)
         buttons.addWidget(self.btn_load_result, 2, 0, 1, 2)
-        left.addLayout(buttons)
+        run_layout.addLayout(buttons)
 
         self.progress = QProgressBar(); self.progress.setValue(0)
-        left.addWidget(self.progress)
+        run_layout.addWidget(self.progress)
         self.lbl_hw = QLabel("HW: CPU - | RAM -")
-        left.addWidget(self.lbl_hw)
-        left.addWidget(QLabel("System log"))
+        run_layout.addWidget(self.lbl_hw)
+        run_layout.addWidget(QLabel("System log"))
         self.console = QTextEdit(); self.console.setReadOnly(True); self.console.setMaximumHeight(130)
-        left.addWidget(self.console)
+        run_layout.addWidget(self.console)
+        left.addWidget(self.collapsible_section("Run Controls", run_box, expanded=True))
         left.addStretch()
 
         result_panel = QFrame(); result_panel.setObjectName("Card")
@@ -1225,6 +1349,20 @@ class SCLASRemoteGUI(QMainWindow):
         metric_layout.addWidget(self.lbl_loss)
         metric_layout.addWidget(self.lbl_points)
         right.addWidget(self.metric_panel)
+
+        self.compare_panel = QFrame()
+        self.compare_panel.setObjectName("MetricStrip")
+        compare_layout = QHBoxLayout(self.compare_panel)
+        compare_layout.setContentsMargins(0, 0, 0, 0)
+        self.lbl_compare_primary = self.metric_box("Primary", "FAST")
+        self.lbl_compare_count = self.metric_box("Compared", "None")
+        self.lbl_compare_peak_delta = self.metric_box("Delta peak", "-")
+        self.lbl_compare_loss_delta = self.metric_box("Delta loss", "-")
+        compare_layout.addWidget(self.lbl_compare_primary)
+        compare_layout.addWidget(self.lbl_compare_count)
+        compare_layout.addWidget(self.lbl_compare_peak_delta)
+        compare_layout.addWidget(self.lbl_compare_loss_delta)
+        right.addWidget(self.compare_panel)
 
         self.summary_text = QTextEdit()
         self.summary_text.setObjectName("SummaryText")
@@ -1870,9 +2008,39 @@ class SCLASRemoteGUI(QMainWindow):
         self.plot_canvas.autoRange()
 
     def update_metrics(self, data: dict) -> None:
+        self.current_metrics = dict(data)
         self.lbl_peak.value_label.setText(f"{data['max_abs_moment_kn_m']:.4g} kN.m")
         self.lbl_loss.value_label.setText(f"{data['hysteresis_loss_kj_per_m_proxy']:.4g}")
         self.lbl_points.value_label.setText(str(data["num_points"]))
+        self.update_compare_panel()
+
+    def update_compare_panel(self) -> None:
+        if not hasattr(self, "lbl_compare_count"):
+            return
+        source = str(self.current_metrics.get("source", "FAST")).replace("_GUI_APPROXIMATION", "")
+        self.lbl_compare_primary.value_label.setText(source[:14] if source else "FAST")
+        if not self.compare_metrics:
+            self.lbl_compare_count.value_label.setText(self.ui_text("None"))
+            self.lbl_compare_peak_delta.value_label.setText("-")
+            self.lbl_compare_loss_delta.value_label.setText("-")
+            return
+
+        latest = self.compare_metrics[-1]
+        count_text = f"{len(self.compare_metrics)} CSV"
+        self.lbl_compare_count.value_label.setText(count_text)
+
+        primary_peak = float(self.current_metrics.get("max_abs_moment_kn_m", 0.0))
+        compare_peak = float(latest.get("max_abs_moment_kn_m", 0.0))
+        primary_loss = float(self.current_metrics.get("hysteresis_loss_kj_per_m_proxy", 0.0))
+        compare_loss = float(latest.get("hysteresis_loss_kj_per_m_proxy", 0.0))
+
+        def pct_delta(new: float, base: float) -> str:
+            if abs(base) < 1e-12:
+                return "-"
+            return f"{((new - base) / abs(base)) * 100.0:+.1f}%"
+
+        self.lbl_compare_peak_delta.value_label.setText(pct_delta(compare_peak, primary_peak))
+        self.lbl_compare_loss_delta.value_label.setText(pct_delta(compare_loss, primary_loss))
 
     def export_plot_png(self) -> None:
         if not hasattr(self, "plot_canvas"):
@@ -1894,6 +2062,7 @@ class SCLASRemoteGUI(QMainWindow):
             return
         try:
             k, m = read_result_csv(Path(path))
+            metrics = make_metrics(k, m, source=Path(path).parent.name or "COMPARE_CSV")
             color_cycle = ["#e08f3e", "#10b981", "#d946ef", "#f43f5e"]
             color = color_cycle[len(self.compare_items) % len(color_cycle)]
             item = self.plot_canvas.plot(
@@ -1903,8 +2072,10 @@ class SCLASRemoteGUI(QMainWindow):
                 name=Path(path).parent.name,
             )
             self.compare_items.append(item)
+            self.compare_metrics.append(metrics)
             self.plot_canvas.autoRange()
             self.log(f"[RESULT] Comparison curve added: {path}")
+            self.update_compare_panel()
             compare_text = (
                 f"결과: 비교 {len(self.compare_items)}개"
                 if self.ui_language == "KO"
@@ -1926,7 +2097,9 @@ class SCLASRemoteGUI(QMainWindow):
             except Exception:
                 pass
         self.compare_items.clear()
+        self.compare_metrics.clear()
         self.plot_canvas.autoRange()
+        self.update_compare_panel()
         self.set_badge(self.lbl_result_status, "Result: ready", "good" if len(self.current_k) else "neutral")
         self.log("[RESULT] Comparison curves cleared.")
 
@@ -1934,7 +2107,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_focus_plot.setProperty("en_text", "Show Details" if enabled else "Focus Plot")
         self.btn_focus_plot.setText(self.ui_text("Show Details" if enabled else "Focus Plot"))
         self.plot_canvas.setMinimumHeight(700 if enabled else 520)
-        for widget_name in ["metric_panel", "summary_text", "history_box"]:
+        for widget_name in ["metric_panel", "compare_panel", "summary_text", "history_box"]:
             widget = getattr(self, widget_name, None)
             if widget is not None:
                 widget.setVisible(not enabled)
@@ -2122,6 +2295,25 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_solid.addItem(item)
         self.mesh_cache_solid.append(item)
 
+    def estimate_mesh_elements(self, dg: dict) -> int:
+        z_elem = int(self.mesh_inputs["z_elem"].value())
+        core_div = int(self.mesh_inputs["c_elem_core"].value())
+        armour_div = int(self.mesh_inputs["c_elem_armour"].value())
+        core_solids = 3 * z_elem * core_div * 2
+        sheath_solids = z_elem * core_div * 3
+        armour_beams = z_elem * armour_div * (
+            int(dg["inner_armour_wire_count"]) + int(dg["outer_armour_wire_count"])
+        )
+        return int(core_solids + sheath_solids + armour_beams)
+
+    def update_mesh_readiness(self, dg: dict) -> None:
+        if not hasattr(self, "lbl_mesh_ready"):
+            return
+        estimated = self.estimate_mesh_elements(dg)
+        self.lbl_mesh_ready.value_label.setText(self.ui_text("Preview ready"))
+        self.lbl_mesh_elements.value_label.setText(f"{estimated:,}")
+        self.lbl_mesh_contacts.value_label.setText("5")
+
     def generate_mesh_preview(self) -> None:
         for item in self.mesh_cache_wire:
             try:
@@ -2145,6 +2337,7 @@ class SCLASRemoteGUI(QMainWindow):
                 a = 2 * np.pi * i / dg["outer_armour_wire_count"]
                 add_wire(dg["outer_armour_wire_radius_mm"], dg["outer_armour_center_radius_mm"] * np.cos(a), dg["outer_armour_center_radius_mm"] * np.sin(a), self.mesh_inputs["z_elem"].value(), self.mesh_inputs["c_elem_armour"].value(), (0.63, 0.72, 0.92, 0.86))
             self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
+            self.update_mesh_readiness(dg)
         except Exception as exc:
             QMessageBox.critical(self, "Mesh preview error", str(exc))
 
@@ -2276,6 +2469,29 @@ class SCLASRemoteGUI(QMainWindow):
                 border: 1px solid #d7dee8;
                 border-left: 4px solid #1f6feb;
                 padding: 8px;
+            }
+            QFrame#MetricStrip {
+                background-color: transparent;
+                border: none;
+            }
+            QFrame#CollapsibleSection {
+                background-color: transparent;
+                border: none;
+                margin-bottom: 4px;
+            }
+            QPushButton#SectionToggle {
+                background-color: #f8fafc;
+                color: #1f2937;
+                border: 1px solid #d7dee8;
+                border-radius: 8px;
+                padding: 8px 10px;
+                text-align: left;
+                font-size: 13px;
+                font-weight: 750;
+            }
+            QPushButton#SectionToggle:hover {
+                background-color: #eef4fb;
+                border-color: #b8c7da;
             }
             QScrollArea#PanelScroll {
                 background-color: transparent;
