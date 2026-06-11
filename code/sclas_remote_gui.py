@@ -66,13 +66,14 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "11.2-helix-language-toggle"
+APP_VERSION = "11.3-helix-logo"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
 DEFAULT_JOB_ROOT = PROJECT_DIR / "jobs" / "SCLAS_jobs"
 SETTINGS_PATH = PROJECT_DIR / "settings.json"
 BACKEND_RUNNER_TEMPLATE = APP_DIR / "abaqus_runner.py"
+TEAM_LOGO_PATH = PROJECT_DIR / "assets" / "helix_logo.png"
 
 
 def quote_command_path(path: str) -> str:
@@ -725,6 +726,16 @@ class SCLASRemoteGUI(QMainWindow):
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(14, 20, 14, 14)
         layout.setSpacing(8)
+
+        logo_label = QLabel()
+        logo_label.setObjectName("TeamLogo")
+        logo_label.setProperty("no_translate", True)
+        logo_label.setAlignment(Qt.AlignCenter)
+        logo_label.setFixedHeight(132)
+        logo_pixmap = QPixmap(str(TEAM_LOGO_PATH))
+        if not logo_pixmap.isNull():
+            logo_label.setPixmap(logo_pixmap.scaled(156, 124, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            layout.addWidget(logo_label)
 
         brand = QLabel("HELIX")
         brand.setObjectName("SidebarBrand")
@@ -2181,6 +2192,13 @@ class SCLASRemoteGUI(QMainWindow):
                 color: #64748b;
                 font-size: 12px;
                 padding-bottom: 12px;
+            }
+            QLabel#TeamLogo {
+                background-color: #ffffff;
+                border: 1px solid #d9e1ea;
+                border-radius: 8px;
+                padding: 8px;
+                margin-bottom: 6px;
             }
             QLabel#SidebarSection {
                 color: #738196;
