@@ -578,6 +578,27 @@ class SCLASRemoteGUI(QMainWindow):
     def add_page(self, page: QWidget) -> None:
         self.pages.addWidget(page)
 
+    def scroll_panel(
+        self,
+        widget: QWidget,
+        *,
+        fixed_width: Optional[int] = None,
+        min_width: Optional[int] = None,
+        max_width: Optional[int] = None,
+    ) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setObjectName("PanelScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        if fixed_width is not None:
+            scroll.setFixedWidth(fixed_width)
+        if min_width is not None:
+            scroll.setMinimumWidth(min_width)
+        if max_width is not None:
+            scroll.setMaximumWidth(max_width)
+        scroll.setWidget(widget)
+        return scroll
+
     def show_page(self, index: int) -> None:
         if not hasattr(self, "pages"):
             return
@@ -645,13 +666,7 @@ class SCLASRemoteGUI(QMainWindow):
             form.addRow(label, self.inputs[key])
         left.addLayout(form)
         left.addStretch()
-        input_scroll = QScrollArea()
-        input_scroll.setObjectName("PanelScroll")
-        input_scroll.setWidgetResizable(True)
-        input_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        input_scroll.setMinimumWidth(430)
-        input_scroll.setMaximumWidth(520)
-        input_scroll.setWidget(panel_inputs)
+        input_scroll = self.scroll_panel(panel_inputs, min_width=430, max_width=520)
 
         panel_mat = QFrame(); panel_mat.setObjectName("Card")
         panel_mat.setMinimumWidth(360)
@@ -695,8 +710,9 @@ class SCLASRemoteGUI(QMainWindow):
         workspace_layout.setSpacing(14)
         workspace_layout.addWidget(panel_view, 3)
         workspace_layout.addWidget(panel_mat, 2)
+        workspace_scroll = self.scroll_panel(workspace)
 
-        layout.addWidget(workspace, 1)
+        layout.addWidget(workspace_scroll, 1)
         layout.addWidget(input_scroll)
         self.add_page(tab)
 
@@ -767,8 +783,10 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_wire.setBackgroundColor("#1e1e1e")
         self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
         right.addWidget(self.view_wire, 1)
-        layout.addWidget(viewer, 1)
-        layout.addWidget(panel)
+        viewer_scroll = self.scroll_panel(viewer)
+        mesh_scroll = self.scroll_panel(panel, fixed_width=450)
+        layout.addWidget(viewer_scroll, 1)
+        layout.addWidget(mesh_scroll)
         self.add_page(tab)
 
     def build_analysis_tab(self) -> None:
@@ -904,14 +922,10 @@ class SCLASRemoteGUI(QMainWindow):
         )
         right.addWidget(self.summary_text)
 
-        left_scroll = QScrollArea()
-        left_scroll.setObjectName("PanelScroll")
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        left_scroll.setWidget(left_panel)
-        left_scroll.setFixedWidth(460)
+        left_scroll = self.scroll_panel(left_panel, fixed_width=460)
+        result_scroll = self.scroll_panel(result_panel)
 
-        layout.addWidget(result_panel, 1)
+        layout.addWidget(result_scroll, 1)
         layout.addWidget(left_scroll)
         self.add_page(tab)
 
