@@ -24,9 +24,10 @@ b2c17a1 Document Windows HELIX GUI verification
 
 ## Current Focus
 
-Continue HELIX GUI refinement while preparing the Abaqus backend to move from a
-placeholder/scaffold runner toward a literature-informed nonlinear bending
-workflow.
+Continue preparing the Abaqus backend to move from a placeholder/scaffold
+runner toward a literature-informed nonlinear bending workflow. The GUI is
+currently usable enough; the immediate next work is lab-PC Abaqus solver smoke
+testing of the generated `.inp` after the latest coupling fallback fix.
 
 Windows home-computer GUI verification has now passed for the current
 `11.5-resizable-panels` baseline.
@@ -121,6 +122,83 @@ Windows home-computer GUI verification has now passed for the current
   lab PC solver smoke test should check whether any remaining fatal errors are
   reference-node/surface syntax issues rather than keyword placement.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
+
+## End-of-Day Handoff - 2026-06-12 KST
+
+Latest pushed commit:
+
+```text
+ba9ce36 Keep Abaqus coupling fallback inside assembly
+```
+
+What was verified today:
+
+- Lab PC RDP/ZeroTier access worked.
+- Git and Python were made usable enough on the lab PC to pull and run the
+  repository.
+- The GUI launched on the lab PC.
+- Abaqus/CAE 2019 noGUI ran `code/abaqus_runner.py` and checked out a CAE
+  license successfully.
+- The generated job folder produced `result_data.csv`, `result_summary.json`,
+  `abaqus_mesh_manifest.json`, `sclas_mesh_model.cae`, and a large generated
+  `.inp`.
+- Visual CAE inspection confirmed a meshed cable scaffold exists.
+- CAE model tree checks confirmed the expected scaffold objects were present:
+  parts, contact property, contact/general-contact or pair scaffold objects,
+  cyclic bending step, amplitude, reference points, and BC scaffolding.
+- Abaqus/Standard solver submission reached input processing.
+
+Most recent solver issue:
+
+- The generated `.inp` failed because `*Coupling` had been moved after
+  `*End Assembly`.
+- Abaqus reported:
+  `***ERROR: in keyword *COUPLING ... The keyword is misplaced. It can be
+  suboption for ... assembly, instance, part`.
+- Commit `ba9ce36` fixes this by placing `*Coupling` / `*Kinematic` inside the
+  assembly block before `*End Assembly`, together with the node sets and
+  node-based end surfaces.
+
+Important context:
+
+- The lab PC's Abaqus 2019 noGUI Python behaves like Python 2, so keep
+  `code/abaqus_runner.py` compatible with Python 2-era syntax.
+- Do not commit generated job folders, `.cae`, `.odb`, `.inp`, `.prt`, `.sim`,
+  `.dat`, or large reference files.
+- The repository may contain unrelated local dirty files on the home Codex
+  machine. Only stage files intentionally changed for the task.
+
+Immediate next lab-PC command sequence:
+
+```powershell
+cd $env:USERPROFILE\Documents\SCLAS-cable-analysis
+git pull
+
+$JobDir = "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e"
+Copy-Item code\abaqus_runner.py $JobDir\abaqus_runner.py -Force
+
+Push-Location $JobDir
+cmd /c "abaqus cae noGUI=abaqus_runner.py -- input_data.json > abaqus_stdout.txt 2>&1"
+Pop-Location
+
+$Inp = Get-ChildItem $JobDir -Filter "*_mes.inp" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$JobName = [IO.Path]::GetFileNameWithoutExtension($Inp.Name)
+
+Push-Location $JobDir
+cmd /c "abaqus job=$JobName input=$($Inp.Name) interactive > solver_stdout.txt 2>&1"
+Pop-Location
+
+Get-Content "$JobDir\solver_stdout.txt" -Raw
+Select-String -Path "$JobDir\$JobName.dat" -Pattern "FATAL|ERROR|UNKNOWN|INVALID|COUPLING|KINEMATIC|REF NODE|SURFACE" -Context 2,3 | Select-Object -First 100
+```
+
+Expected next result:
+
+- If the old placement error is gone, inspect any new `.dat` fatal lines. The
+  next likely class of issues is reference-node or node-surface syntax, not GUI
+  wiring.
+- If solver input processing proceeds further, start reducing model size for a
+  faster real smoke solve before implementing ODB extraction.
 
 ## Important Files
 
@@ -240,14 +318,13 @@ Still needed for a paper-level implementation:
 
 ## Next Recommended Tasks
 
-1. Re-run the lab Abaqus/CAE noGUI smoke test and inspect
-   `contact_pair_scaffold_status`.
-2. If explicit pair records are `failed` or `skipped`, use their warnings to
-   tune B31 beam surface creation or fall back to a documented general-contact
-   workflow.
-3. Verify `boundary_condition_scaffold_status`; if it is
-   `created_with_keyword_coupling_fallback`, run a solver smoke test on the
-   generated `.inp` or submit the generated Abaqus job and inspect errors.
+1. On the lab PC, pull commit `ba9ce36` and re-run the Abaqus noGUI generation
+   plus solver smoke command sequence above.
+2. If the solver still fails during input processing, capture the first
+   `FATAL` / `ERROR` block from the `.dat` file and fix only that Abaqus input
+   issue.
+3. If input processing succeeds, make a reduced-size smoke model so Abaqus
+   solve iterations are fast enough for backend development.
 4. Preserve the GUI contract:
    - `input_data.json` as backend input
    - `result_data.csv` with `curvature_1_per_m,moment_kn_m`
@@ -260,7 +337,7 @@ Still needed for a paper-level implementation:
 
 ## Home Codex Start Prompt
 
-Use this prompt when starting work on the home computer:
+Use this prompt when starting work on the home or Mac Codex computer:
 
 ```text
 This is the HELIX / SCLAS submarine cable analysis repository.
@@ -272,7 +349,9 @@ Before editing, tell me which files you will touch. After editing, run the
 project verification commands. If code/sclas_remote_gui.py changes, sync it to
 code/SCLAS_test/sclas_remote_gui.py and code/sclas_remote_gui_final_code.txt.
 
-The immediate priority is to verify the GUI on Windows, then continue preparing
-code/abaqus_runner.py for real Abaqus contact, periodic boundary conditions,
-cyclic bending, job submission, and ODB result extraction.
+The GUI is currently usable. The immediate priority is to continue the lab-PC
+Abaqus solver smoke test after commit ba9ce36, inspect the next .dat error if
+any, and continue preparing code/abaqus_runner.py for real Abaqus contact,
+periodic boundary conditions, cyclic bending, job submission, and ODB result
+extraction.
 ```
