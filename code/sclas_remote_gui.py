@@ -66,7 +66,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "10.8-backend-summary"
+APP_VERSION = "10.9-workspace-inspector"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -655,7 +655,6 @@ class SCLASRemoteGUI(QMainWindow):
 
         panel_mat = QFrame(); panel_mat.setObjectName("Card")
         panel_mat.setMinimumWidth(360)
-        panel_mat.setMaximumWidth(440)
         mid = QVBoxLayout(panel_mat)
         mid.setContentsMargins(18, 16, 18, 16)
         mid.addWidget(self.header("Material Table"))
@@ -689,9 +688,16 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_solid.setCameraPosition(distance=180, elevation=90, azimuth=0)
         right.addWidget(self.view_solid, 1)
 
-        layout.addWidget(input_scroll, 38)
-        layout.addWidget(panel_mat, 31)
-        layout.addWidget(panel_view, 39)
+        workspace = QFrame()
+        workspace.setObjectName("WorkspaceFrame")
+        workspace_layout = QVBoxLayout(workspace)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setSpacing(14)
+        workspace_layout.addWidget(panel_view, 3)
+        workspace_layout.addWidget(panel_mat, 2)
+
+        layout.addWidget(workspace, 1)
+        layout.addWidget(input_scroll)
         self.add_page(tab)
 
         for w in self.inputs.values():
@@ -705,8 +711,9 @@ class SCLASRemoteGUI(QMainWindow):
         layout = QHBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
-        panel = QFrame(); panel.setObjectName("Card"); panel.setFixedWidth(500)
+        panel = QFrame(); panel.setObjectName("Card"); panel.setFixedWidth(430)
         left = QVBoxLayout(panel)
+        left.setContentsMargins(18, 16, 18, 16)
         left.setSpacing(12)
         left.addWidget(self.header("Mesh Request for Backend"))
         self.mesh_inputs = {
@@ -760,8 +767,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_wire.setBackgroundColor("#1e1e1e")
         self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
         right.addWidget(self.view_wire, 1)
-        layout.addWidget(panel)
         layout.addWidget(viewer, 1)
+        layout.addWidget(panel)
         self.add_page(tab)
 
     def build_analysis_tab(self) -> None:
@@ -770,8 +777,9 @@ class SCLASRemoteGUI(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        left_panel = QFrame(); left_panel.setObjectName("Card"); left_panel.setMinimumWidth(480)
+        left_panel = QFrame(); left_panel.setObjectName("Card"); left_panel.setMinimumWidth(430)
         left = QVBoxLayout(left_panel)
+        left.setContentsMargins(18, 16, 18, 16)
         left.addWidget(self.header("Analysis Conditions"))
         self.cond = {
             "eff_length": QLineEdit("234.20"),
@@ -901,10 +909,10 @@ class SCLASRemoteGUI(QMainWindow):
         left_scroll.setWidgetResizable(True)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         left_scroll.setWidget(left_panel)
-        left_scroll.setFixedWidth(520)
+        left_scroll.setFixedWidth(460)
 
+        layout.addWidget(result_panel, 1)
         layout.addWidget(left_scroll)
-        layout.addWidget(result_panel)
         self.add_page(tab)
 
     def header(self, text: str) -> QLabel:
@@ -1642,6 +1650,10 @@ class SCLASRemoteGUI(QMainWindow):
             QFrame#ContentPane {
                 background-color: #eef2f6;
             }
+            QFrame#WorkspaceFrame {
+                background-color: transparent;
+                border: none;
+            }
             QLabel#SidebarBrand {
                 color: #132033;
                 font-size: 24px;
@@ -1877,6 +1889,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-

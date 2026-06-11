@@ -30,6 +30,10 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def project_path(include: str) -> Path:
+    return PROJECT_DIR.joinpath(*include.replace("\\", "/").split("/"))
+
+
 def check_pyproj_references() -> None:
     pyproj = PROJECT_DIR / "SCLAS-cable-analysis.pyproj"
     root = ET.parse(pyproj).getroot()
@@ -37,7 +41,7 @@ def check_pyproj_references() -> None:
     missing = []
     for item in root.findall(".//msb:Compile", ns) + root.findall(".//msb:Content", ns):
         include = item.attrib.get("Include", "")
-        if include and not (PROJECT_DIR / include).exists():
+        if include and not project_path(include).exists():
             missing.append(include)
     if missing:
         fail("Missing .pyproj references: " + ", ".join(missing))
