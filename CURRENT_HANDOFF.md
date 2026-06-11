@@ -19,7 +19,7 @@ main
 Latest completed GUI baseline commit:
 
 ```text
-bdafbfb Add resizable HELIX GUI panels
+f926c95 Add direct Windows launcher and GitHub helpers
 ```
 
 ## Current Focus
@@ -27,6 +27,9 @@ bdafbfb Add resizable HELIX GUI panels
 Continue HELIX GUI refinement while preparing the Abaqus backend to move from a
 placeholder/scaffold runner toward a literature-informed nonlinear bending
 workflow.
+
+Windows home-computer GUI verification has now passed for the current
+`11.5-resizable-panels` baseline.
 
 ## Current Working State
 
@@ -40,8 +43,18 @@ workflow.
 - FAST GUI preview produces a moment-curvature hysteresis loop.
 - CSV comparison, PNG export, result summary, and recent job loading exist.
 - Mesh preview exists and exports mesh/backend request settings.
+- Windows GUI startup was verified through `run_sclas.bat` using the existing
+  Windows-ready `.venv`.
+- Design, Mesh, and Analysis pages were screenshot-checked at 1366x768.
+- The three main pages expose horizontal splitters and vertical scroll areas;
+  no blocking text/control clipping was observed in the captured views.
+- Mesh preview generation was exercised and produced 119 preview items with
+  readiness state changing to preview ready.
 - The backend contract is established through `input_data.json`,
   `result_data.csv`, and optional `result_summary.json`.
+- `code/abaqus_runner.py` placeholder summaries now include
+  `result_contract`, `backend_readiness`, and
+  `hysteresis_loss_kj_per_m_proxy` so `code/sclas_self_check.py` passes.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files
@@ -92,6 +105,15 @@ python -m py_compile code\sclas_remote_gui.py code\SCLAS_test\sclas_remote_gui.p
 python code\sclas_self_check.py
 ```
 
+Latest Windows verification performed with:
+
+```bat
+python -m py_compile code\sclas_remote_gui.py code\SCLAS_test\sclas_remote_gui.py code\abaqus_runner.py code\SCLAS_test\abaqus_runner.py
+python code\sclas_self_check.py
+```
+
+Result: both passed using the Windows-ready virtual environment.
+
 ## Research Implementation Status
 
 The papers are not fully implemented yet.
@@ -122,15 +144,15 @@ Still needed for a paper-level implementation:
 
 ## Next Recommended Tasks
 
-1. On the home Windows computer, run `git pull` and verify the GUI opens.
-2. Check that splitters, scroll panels, and font sizing behave correctly on the
-   Windows display.
-3. If the GUI breaks on Windows, fix layout/runtime issues first.
-4. Start backend work in `code/abaqus_runner.py`.
-5. Preserve the GUI contract:
+1. Start backend work in `code/abaqus_runner.py`.
+2. Preserve the GUI contract:
    - `input_data.json` as backend input
    - `result_data.csv` with `curvature_1_per_m,moment_kn_m`
    - `result_summary.json` for optional metrics
+3. Implement real Abaqus contact/friction definitions.
+4. Add periodic boundary conditions and cyclic bending boundary conditions.
+5. Add Abaqus job submission/status handling and ODB extraction into
+   `result_data.csv`.
 6. After each meaningful task, update this file, commit, and push.
 
 ## Home Codex Start Prompt
