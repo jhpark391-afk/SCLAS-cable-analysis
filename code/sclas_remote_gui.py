@@ -55,6 +55,7 @@ from PyQt5.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QSplitter,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -66,7 +67,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "11.4-advanced-gui-refinement"
+APP_VERSION = "11.5-resizable-panels"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -474,7 +475,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.last_summary_data: dict = {}
         self.last_job_dir = ""
         self.setWindowTitle("HELIX Cable Analysis")
-        self.setMinimumSize(1280, 720)
+        self.setMinimumSize(1100, 620)
         self.init_ui()
         self.apply_theme()
         self.load_settings()
@@ -497,8 +498,8 @@ class SCLASRemoteGUI(QMainWindow):
             self.resize(1440, 820)
             return
         available = screen.availableGeometry()
-        width = min(1680, max(1280, available.width() - 36))
-        height = min(940, max(720, available.height() - 60))
+        width = min(1680, max(1100, available.width() - 36))
+        height = min(940, max(620, available.height() - 60))
         self.resize(width, height)
         self.move(
             available.x() + max(16, (available.width() - width) // 2),
@@ -641,7 +642,7 @@ class SCLASRemoteGUI(QMainWindow):
                 continue
             if widget.objectName() == "SectionToggle":
                 title = str(widget.property("section_title") or "")
-                prefix = "[-]" if widget.isChecked() else "[+]"
+                prefix = "▾" if widget.isChecked() else "▸"
                 widget.setText(f"{prefix} {self.ui_text(title)}")
                 continue
             if not isinstance(widget, (QLabel, QPushButton, QCheckBox, QRadioButton, QGroupBox)):
@@ -817,6 +818,18 @@ class SCLASRemoteGUI(QMainWindow):
         scroll.setWidget(widget)
         return scroll
 
+    def panel_splitter(self, first: QWidget, second: QWidget, sizes: List[int]) -> QSplitter:
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setObjectName("PanelSplitter")
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(10)
+        splitter.addWidget(first)
+        splitter.addWidget(second)
+        splitter.setSizes(sizes)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        return splitter
+
     def collapsible_section(self, title: str, content: QWidget, *, expanded: bool = True) -> QFrame:
         wrapper = QFrame()
         wrapper.setObjectName("CollapsibleSection")
@@ -828,11 +841,12 @@ class SCLASRemoteGUI(QMainWindow):
         toggle.setObjectName("SectionToggle")
         toggle.setCheckable(True)
         toggle.setChecked(expanded)
+        toggle.setMinimumHeight(38)
         toggle.setProperty("section_title", title)
         content.setVisible(expanded)
 
         def update_label(checked: bool) -> None:
-            prefix = "[-]" if checked else "[+]"
+            prefix = "▾" if checked else "▸"
             toggle.setText(f"{prefix} {self.ui_text(title)}")
 
         toggle.toggled.connect(content.setVisible)
@@ -919,7 +933,7 @@ class SCLASRemoteGUI(QMainWindow):
         layout.setSpacing(14)
 
         panel_inputs = QFrame(); panel_inputs.setObjectName("Card")
-        panel_inputs.setMinimumWidth(430)
+        panel_inputs.setMinimumWidth(360)
         left = QVBoxLayout(panel_inputs)
         left.setContentsMargins(18, 16, 18, 16)
         left.setSpacing(10)
@@ -1004,7 +1018,7 @@ class SCLASRemoteGUI(QMainWindow):
             layer_layout.addWidget(check, 3 + idx // 2, idx % 2)
         left.addWidget(layer_box)
         left.addStretch()
-        input_scroll = self.scroll_panel(panel_inputs, min_width=430, max_width=520)
+        input_scroll = self.scroll_panel(panel_inputs, min_width=360)
 
         panel_mat = QFrame(); panel_mat.setObjectName("Card")
         panel_mat.setMinimumWidth(360)
@@ -1055,8 +1069,7 @@ class SCLASRemoteGUI(QMainWindow):
         workspace_layout.addWidget(panel_mat, 2)
         workspace_scroll = self.scroll_panel(workspace)
 
-        layout.addWidget(workspace_scroll, 1)
-        layout.addWidget(input_scroll)
+        layout.addWidget(self.panel_splitter(workspace_scroll, input_scroll, [980, 420]), 1)
         self.add_page(tab)
 
         for w in self.inputs.values():
@@ -1070,7 +1083,8 @@ class SCLASRemoteGUI(QMainWindow):
         layout = QHBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
-        panel = QFrame(); panel.setObjectName("Card"); panel.setFixedWidth(430)
+        panel = QFrame(); panel.setObjectName("Card")
+        panel.setMinimumWidth(360)
         left = QVBoxLayout(panel)
         left.setContentsMargins(18, 16, 18, 16)
         left.setSpacing(12)
@@ -1165,9 +1179,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
         right.addWidget(self.view_wire, 1)
         viewer_scroll = self.scroll_panel(viewer)
-        mesh_scroll = self.scroll_panel(panel, fixed_width=450)
-        layout.addWidget(viewer_scroll, 1)
-        layout.addWidget(mesh_scroll)
+        mesh_scroll = self.scroll_panel(panel, min_width=360)
+        layout.addWidget(self.panel_splitter(viewer_scroll, mesh_scroll, [980, 420]), 1)
         self.add_page(tab)
 
     def build_analysis_tab(self) -> None:
@@ -1176,7 +1189,7 @@ class SCLASRemoteGUI(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        left_panel = QFrame(); left_panel.setObjectName("Card"); left_panel.setMinimumWidth(430)
+        left_panel = QFrame(); left_panel.setObjectName("Card"); left_panel.setMinimumWidth(360)
         left = QVBoxLayout(left_panel)
         left.setContentsMargins(18, 16, 18, 16)
         self.cond = {
@@ -1209,6 +1222,10 @@ class SCLASRemoteGUI(QMainWindow):
             self.cond[key].setToolTip(tip)
         conditions_box = QFrame()
         form = QFormLayout(conditions_box)
+        form.setLabelAlignment(Qt.AlignRight)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(9)
         form.addRow("Effective length (mm)", self.cond["eff_length"])
         form.addRow("Hydrostatic pressure (MPa)", self.cond["pressure"])
         form.addRow("Residual contact pressure (MPa)", self.cond["residual_contact_pressure"])
@@ -1252,6 +1269,10 @@ class SCLASRemoteGUI(QMainWindow):
 
         remote_box = QFrame()
         remote_form = QFormLayout(remote_box)
+        remote_form.setLabelAlignment(Qt.AlignRight)
+        remote_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        remote_form.setHorizontalSpacing(12)
+        remote_form.setVerticalSpacing(9)
         self.job_root_input = QLineEdit(str(DEFAULT_JOB_ROOT))
         self.local_command_input = QLineEdit(default_local_backend_command())
         self.remote_target_input = QLineEdit("user@remote-host")
@@ -1386,11 +1407,10 @@ class SCLASRemoteGUI(QMainWindow):
         history_layout.addWidget(self.btn_load_job, 1, 1)
         right.addWidget(self.history_box)
 
-        left_scroll = self.scroll_panel(left_panel, fixed_width=460)
+        left_scroll = self.scroll_panel(left_panel, min_width=360)
         result_scroll = self.scroll_panel(result_panel)
 
-        layout.addWidget(result_scroll, 1)
-        layout.addWidget(left_scroll)
+        layout.addWidget(self.panel_splitter(result_scroll, left_scroll, [980, 430]), 1)
         self.add_page(tab)
 
     def header(self, text: str) -> QLabel:
@@ -2480,18 +2500,32 @@ class SCLASRemoteGUI(QMainWindow):
                 margin-bottom: 4px;
             }
             QPushButton#SectionToggle {
-                background-color: #f8fafc;
-                color: #1f2937;
+                background-color: #ffffff;
+                color: #18212d;
                 border: 1px solid #d7dee8;
                 border-radius: 8px;
-                padding: 8px 10px;
+                padding: 9px 12px;
                 text-align: left;
                 font-size: 13px;
                 font-weight: 750;
             }
             QPushButton#SectionToggle:hover {
-                background-color: #eef4fb;
-                border-color: #b8c7da;
+                background-color: #f5f8fc;
+                border-color: #9fb0c4;
+                color: #0f3a72;
+            }
+            QSplitter#PanelSplitter {
+                background-color: transparent;
+            }
+            QSplitter#PanelSplitter::handle {
+                background-color: #dbe3ee;
+                border: 1px solid #cfdae7;
+                border-radius: 4px;
+                margin: 38px 1px;
+            }
+            QSplitter#PanelSplitter::handle:hover {
+                background-color: #9fb0c4;
+                border-color: #8aa0ba;
             }
             QScrollArea#PanelScroll {
                 background-color: transparent;
