@@ -1,5 +1,8 @@
 # Home GUI Handoff
 
+> Current handoff source: read `AGENTS.md` and `CURRENT_HANDOFF.md` first.
+> This file is kept as an extra Windows/home-computer quick reference.
+
 This document is for continuing SCLAS GUI work on the home Windows desktop with
 Codex, Visual Studio Code, Python, and eventually Abaqus.
 
@@ -14,7 +17,7 @@ https://github.com/jhpark391-afk/SCLAS-cable-analysis
 Latest known handoff commit:
 
 ```text
-e2be89d Adopt Codex style sidebar UI
+bdafbfb Add resizable HELIX GUI panels
 ```
 
 ## First setup on the home computer
@@ -80,7 +83,7 @@ no bottom clipping on laptop screens
 Current GUI version string:
 
 ```text
-10.7-codex-ui
+11.5-resizable-panels
 ```
 
 ## Files for backend work
@@ -147,18 +150,18 @@ python -m py_compile code\abaqus_runner.py code\SCLAS_test\abaqus_runner.py
 Copy this prompt into Codex on the home computer:
 
 ```text
-이 저장소는 SCLAS submarine cable analysis GUI/ABAQUS bridge 프로젝트야.
+이 저장소는 HELIX / SCLAS submarine cable analysis GUI/ABAQUS bridge 프로젝트야.
 
-먼저 git status를 확인하고, 최신 main 기준인지 확인해줘.
+먼저 git pull, git status를 실행하고 AGENTS.md와 CURRENT_HANDOFF.md를 읽어줘.
 주요 GUI 파일은 code/sclas_remote_gui.py야.
-현재 UI 방향은 Codex/Apple dark UI 느낌의 왼쪽 사이드바 구조이고,
+현재 UI 방향은 Codex/Apple 느낌의 왼쪽 사이드바 구조이고,
 영어 라벨을 유지하면서 깔끔하고 세련된 엔지니어링 프로그램처럼 다듬는 거야.
 
 수정할 때는:
 1. code/sclas_remote_gui.py를 먼저 수정
 2. 같은 내용을 code/SCLAS_test/sclas_remote_gui.py와 code/sclas_remote_gui_final_code.txt에 동기화
 3. python -m py_compile로 문법 체크
-4. run_sclas.bat로 GUI 실행 확인
+4. run_self_check.bat 또는 run_sclas.bat로 확인
 5. 필요하면 git commit 후 push
 
 주의:
@@ -167,7 +170,7 @@ Copy this prompt into Codex on the home computer:
 - 백엔드 연동은 code/abaqus_runner.py에서 시작돼 있고,
   Abaqus에서는 abaqus cae noGUI=abaqus_runner.py -- input_data.json 형식으로 실행할 예정이야.
 
-우선 현재 GUI 구조와 스타일을 읽고, 내가 요청하는 디자인 수정부터 이어서 도와줘.
+우선 현재 GUI 구조와 스타일을 읽고, Windows에서 화면/스크롤/splitter가 정상인지 확인한 뒤 이어서 도와줘.
 ```
 
 ## Suggested next GUI tasks
@@ -178,4 +181,3 @@ Copy this prompt into Codex on the home computer:
 4. Improve Mesh preview framing and empty-state appearance.
 5. Polish Analysis page layout so logs, controls, and plot all remain visible.
 6. Add a simple theme constants section if the stylesheet gets too large.
-
