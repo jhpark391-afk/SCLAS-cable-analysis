@@ -134,13 +134,39 @@ def contact_defaults_from_payload(payload):
     }
 
 
-def write_mesh_manifest(path, payload, abaqus_created, files=None, error="", contact_property=None):
+def contact_binding_scaffold(payload):
+    numerical_model = payload.get("numerical_model", {})
+    bindings = []
+    for interface in numerical_model.get("contact_interfaces", []):
+        bindings.append(
+            {
+                "name": interface.get("name"),
+                "master": interface.get("master"),
+                "slave": interface.get("slave"),
+                "priority": interface.get("priority"),
+                "contact_property": "SCLAS_RegularizedContact",
+                "status": "declared_not_bound_to_interaction",
+                "next_step": "resolve conceptual master/slave names to assembly surfaces or edge sets",
+            }
+        )
+    return bindings
+
+
+def write_mesh_manifest(path, payload, abaqus_created, files=None, error="", contact_property=None, contact_regions=None):
     geometry = payload.get("derived_geometry_mm", {})
     armour = payload.get("armour", {})
     analysis = payload.get("analysis_conditions", {})
     mesh_cfg = payload.get("mesh", {})
     numerical_model = payload.get("numerical_model", {})
     files = files or []
+    contact_regions = contact_regions or []
+    contact_region_status = "not_created"
+    if contact_regions:
+        contact_region_status = "created"
+        for region in contact_regions:
+            if region.get("status") != "created":
+                contact_region_status = "partial"
+                break
     manifest = {
         "status": "abaqus_mesh_created" if abaqus_created else "mesh_request_only",
         "created_at": timestamp_seconds(),
@@ -157,11 +183,14 @@ def write_mesh_manifest(path, payload, abaqus_created, files=None, error="", con
         },
         "contact_interfaces": numerical_model.get("contact_interfaces", []),
         "contact_interface_defaults": contact_defaults_from_payload(payload),
+        "contact_binding_scaffold": contact_binding_scaffold(payload),
         "contact_property_scaffold": contact_property or {
             "status": "not_created",
             "reason": "Abaqus API not available or mesh scaffold failed before contact property creation.",
             "next_step": "create assembly surfaces/sets and bind the declared contact interfaces to this property",
         },
+        "contact_region_scaffold_status": contact_region_status,
+        "contact_region_scaffold": contact_regions,
         "components": [
             {
                 "name": "three_core_equivalent_solids",
@@ -359,6 +388,88 @@ def build_abaqus_mesh_model(payload, job_dir):
     steel_mat.Elastic(table=((steel["elastic_modulus_mpa"], steel["poisson_ratio"]),))
     steel_mat.Density(table=((steel["density"],),))
     contact_property = create_contact_property_scaffold(model, payload)
+    contact_regions = []
+
+    def append_contact_region(record, created_count, expected_count):
+        if created_count >= expected_count:
+            record["status"] = "created"
+        elif created_count > 0:
+            record["status"] = "partial"
+        else:
+            record["status"] = "failed"
+        contact_regions.append(record)
+
+    def create_solid_contact_regions(part, inst, component_name):
+        record = {
+            "component": component_name,
+            "region_type": "solid_face_surface",
+            "part": part.name,
+            "assembly_instance": inst.name,
+            "part_face_set": "ContactFaces",
+            "part_surface": "ContactSurface",
+            "assembly_face_set": component_name + "_ContactFaces",
+            "assembly_surface": component_name + "_ContactSurface",
+            "created_regions": [],
+            "warnings": [],
+            "notes": [
+                "Solid scaffold uses all exterior faces until layer-specific inner/outer contact surfaces are implemented."
+            ],
+        }
+        created = 0
+        try:
+            part.Set(faces=part.faces[:], name=record["part_face_set"])
+            record["created_regions"].append("part_face_set")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("part face set failed: {0}".format(exc))
+        try:
+            part.Surface(side1Faces=part.faces[:], name=record["part_surface"])
+            record["created_regions"].append("part_surface")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("part surface failed: {0}".format(exc))
+        try:
+            assembly.Set(faces=inst.faces[:], name=record["assembly_face_set"])
+            record["created_regions"].append("assembly_face_set")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("assembly face set failed: {0}".format(exc))
+        try:
+            assembly.Surface(side1Faces=inst.faces[:], name=record["assembly_surface"])
+            record["created_regions"].append("assembly_surface")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("assembly surface failed: {0}".format(exc))
+        append_contact_region(record, created, 4)
+
+    def create_beam_contact_regions(part, inst, component_name):
+        record = {
+            "component": component_name,
+            "region_type": "beam_edge_set",
+            "part": part.name,
+            "assembly_instance": inst.name,
+            "part_edge_set": "ContactEdges",
+            "assembly_edge_set": component_name + "_ContactEdges",
+            "created_regions": [],
+            "warnings": [],
+            "notes": [
+                "B31 armour scaffold exposes edge sets; true beam/solid contact assignment is still pending."
+            ],
+        }
+        created = 0
+        try:
+            part.Set(edges=part.edges[:], name=record["part_edge_set"])
+            record["created_regions"].append("part_edge_set")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("part edge set failed: {0}".format(exc))
+        try:
+            assembly.Set(edges=inst.edges[:], name=record["assembly_edge_set"])
+            record["created_regions"].append("assembly_edge_set")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("assembly edge set failed: {0}".format(exc))
+        append_contact_region(record, created, 2)
 
     def elem_code_for_solid():
         import abaqusConstants as ac
@@ -380,6 +491,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         part.generateMesh()
         inst = assembly.Instance(name=name + "_1", part=part, dependent=ON)
         inst.translate(vector=(offset[0], offset[1], -0.5 * length + offset[2]))
+        create_solid_contact_regions(part, inst, name)
         return part
 
     def create_armour_layer(name, wire_radius, center_radius, count, lay_angle_deg, hand):
@@ -413,7 +525,8 @@ def build_abaqus_mesh_model(payload, job_dir):
         part.seedPart(size=max(0.1, length / float(z_elem)), deviationFactor=0.1, minSizeFactor=0.1)
         part.setElementType(regions=(part.edges[:],), elemTypes=(ElemType(elemCode=B31, elemLibrary=STANDARD),))
         part.generateMesh()
-        assembly.Instance(name=name + "_1", part=part, dependent=ON)
+        inst = assembly.Instance(name=name + "_1", part=part, dependent=ON)
+        create_beam_contact_regions(part, inst, name)
         return part
 
     core_radius = float(geometry["core_outer_radius_mm"])
@@ -470,6 +583,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         "model_name": model_name,
         "files": files,
         "contact_property_scaffold": contact_property,
+        "contact_region_scaffold": contact_regions,
         "node_element_note": "See generated .inp/.cae for Abaqus node and element counts.",
     }
 
@@ -612,6 +726,7 @@ def main(argv):
                 abaqus_created=True,
                 files=mesh_status.get("files", []),
                 contact_property=mesh_status.get("contact_property_scaffold"),
+                contact_regions=mesh_status.get("contact_region_scaffold"),
             )
             print("Wrote Abaqus mesh scaffold: {0}".format(", ".join(mesh_status.get("files", []))))
         except Exception as exc:

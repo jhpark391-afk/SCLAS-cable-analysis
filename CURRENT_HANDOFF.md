@@ -63,6 +63,12 @@ Windows home-computer GUI verification has now passed for the current
   now creates an Abaqus `ContactProperty` named `SCLAS_RegularizedContact`
   with normal/tangential behavior parameters from the GUI payload. Real
   surface-to-surface interaction pairs are still pending.
+- The Abaqus mesh scaffold now also creates stable contact region placeholders:
+  solid parts expose `ContactFaces` / `ContactSurface` at part level plus
+  assembly-level `*_ContactFaces` / `*_ContactSurface`; B31 armour parts expose
+  `ContactEdges` plus assembly-level `*_ContactEdges`. The manifest records
+  these under `contact_region_scaffold` and keeps declared interface bindings
+  under `contact_binding_scaffold` until real interactions are implemented.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files
@@ -134,7 +140,10 @@ Expected minimum outputs remain `result_data.csv`, `result_summary.json`, and
 
 For the contact scaffold check, open the generated `.cae` and verify that
 `Interaction Properties` contains `SCLAS_RegularizedContact`. The manifest
-should also include `contact_property_scaffold`.
+should also include `contact_property_scaffold`, `contact_region_scaffold`, and
+`contact_binding_scaffold`. In the CAE model tree, check the generated part and
+assembly Sets/Surfaces for `ContactFaces`, `ContactSurface`, and
+`ContactEdges`.
 
 ## Research Implementation Status
 
@@ -166,9 +175,12 @@ Still needed for a paper-level implementation:
 
 ## Next Recommended Tasks
 
-1. Verify `SCLAS_RegularizedContact` appears in the lab Abaqus/CAE model tree.
-2. Add stable assembly surface/set creation for the declared contact interfaces.
-3. Bind actual surface-to-surface contact pairs to `SCLAS_RegularizedContact`.
+1. Re-run the lab Abaqus/CAE noGUI smoke test and verify the new
+   `contact_region_scaffold` entries.
+2. Open the generated `.cae` and verify `ContactSurface` / `ContactEdges`
+   appear in the expected part and assembly Sets/Surfaces.
+3. Bind actual surface-to-surface or beam-to-surface contact pairs to
+   `SCLAS_RegularizedContact`.
 4. Preserve the GUI contract:
    - `input_data.json` as backend input
    - `result_data.csv` with `curvature_1_per_m,moment_kn_m`
