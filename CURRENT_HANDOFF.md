@@ -1,6 +1,6 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-06-11
+Last updated: 2026-06-12
 
 ## Repository
 
@@ -112,12 +112,14 @@ Windows home-computer GUI verification has now passed for the current
   `created_with_keyword_coupling_fallback`. This affects the generated input
   deck; the CAE model tree may still show only the Python-created reference
   points and BCs.
-- A solver smoke submit reached input processing and generated an `.odb`, then
-  stopped with two fatal errors. The likely cause was the two `*Coupling`
-  keyword blocks being placed inside the assembly block. The fallback now keeps
-  generated `*Nset` and node-based `*Surface` data before `*End Assembly`, but
-  injects `*Coupling` / `*Kinematic` as model data immediately after
-  `*End Assembly`.
+- A solver smoke submit with `*Coupling` / `*Kinematic` placed after
+  `*End Assembly` stopped during Abaqus input processing with:
+  `***ERROR: in keyword *COUPLING ... The keyword is misplaced. It can be
+  suboption for ... assembly, instance, part`. The fallback now injects the
+  end-node `*Nset`s, node-based `*Surface`s, and both coupling blocks before
+  `*End Assembly` so all coupling data stays inside assembly scope. The next
+  lab PC solver smoke test should check whether any remaining fatal errors are
+  reference-node/surface syntax issues rather than keyword placement.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files

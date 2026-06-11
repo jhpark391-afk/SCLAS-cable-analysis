@@ -1100,12 +1100,10 @@ def build_abaqus_mesh_model(payload, job_dir):
         assembly_block_lines.extend(left_surface_lines)
         assembly_block_lines.append("*Surface, type=NODE, name={0}".format(fallback["right_node_surface"]))
         assembly_block_lines.extend(right_surface_lines)
-        assembly_block_lines.append("** End SCLAS assembly-scoped end coupling fallback data")
-        assembly_block_lines.append("**")
-        model_block_lines = [
+        coupling_block_lines = [
             "**",
             "** SCLAS Abaqus 2019 end-coupling keyword fallback constraints",
-            "** Coupling keywords must be model data, after *End Assembly.",
+            "** Abaqus input processing requires *Coupling in assembly/instance/part scope.",
             "*Coupling, constraint name={0}, ref node={1}, surface={2}".format(
                 fallback["left_coupling"],
                 boundary_record.get("left_reference_point_set", "SCLAS_RP_LeftEnd"),
@@ -1123,6 +1121,9 @@ def build_abaqus_mesh_model(payload, job_dir):
             "** End SCLAS Abaqus 2019 end-coupling keyword fallback constraints",
             "**",
         ]
+        assembly_block_lines.extend(coupling_block_lines)
+        assembly_block_lines.append("** End SCLAS assembly-scoped end coupling fallback data")
+        assembly_block_lines.append("**")
 
         try:
             with open(inp_path, "r") as f:
@@ -1136,12 +1137,12 @@ def build_abaqus_mesh_model(payload, job_dir):
                 fallback["status"] = "failed"
                 fallback["warnings"].append("*End Assembly marker not found")
                 return fallback
-            new_lines = lines[:insert_index] + assembly_block_lines + [lines[insert_index]] + model_block_lines + lines[insert_index + 1 :]
+            new_lines = lines[:insert_index] + assembly_block_lines + lines[insert_index:]
             with open(inp_path, "w") as f:
                 f.write("\n".join(new_lines) + "\n")
             fallback["status"] = "injected"
             fallback["assembly_line_count"] = len(assembly_block_lines)
-            fallback["model_line_count"] = len(model_block_lines)
+            fallback["coupling_line_count"] = len(coupling_block_lines)
         except Exception as exc:
             fallback["status"] = "failed"
             fallback["warnings"].append("keyword injection failed: {0}".format(exc))
