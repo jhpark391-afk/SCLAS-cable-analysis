@@ -90,6 +90,13 @@ Windows home-computer GUI verification has now passed for the current
   Abaqus 2019 beam/surface contact support must be checked on the lab PC; pair
   records may be `created`, `partial`, `skipped`, or `failed` without changing
   the placeholder CSV contract.
+- The runner now creates a cyclic bending boundary-condition scaffold:
+  `SCLAS_CyclicBendingStep`, `SCLAS_CyclicBendingAmplitude`,
+  `SCLAS_RP_LeftEnd`, `SCLAS_RP_RightEnd`, end-face surfaces, kinematic
+  couplings, and a right-end cyclic rotation BC derived from GUI max curvature
+  and effective length. Results are recorded under
+  `boundary_condition_scaffold`. This is still a setup scaffold; no real Abaqus
+  solve or ODB moment extraction is performed yet.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files
@@ -171,7 +178,10 @@ also verify that `Parts` includes `InnerSheathEquivalent`, `BeddingEquivalent`,
 and `OuterSheathEquivalent`, and that assembly Surfaces include the six
 contract-named layer surfaces above. For explicit contact-pair checks, inspect
 `contact_pair_scaffold` in the manifest and verify any created `Pair_*`
-interactions in the CAE tree.
+interactions in the CAE tree. For cyclic bending setup checks, inspect
+`boundary_condition_scaffold` and verify `SCLAS_CyclicBendingStep`,
+`SCLAS_CyclicBendingAmplitude`, end reference point sets, couplings, and BCs in
+the CAE model tree.
 
 ## Research Implementation Status
 
@@ -208,13 +218,14 @@ Still needed for a paper-level implementation:
 2. If explicit pair records are `failed` or `skipped`, use their warnings to
    tune B31 beam surface creation or fall back to a documented general-contact
    workflow.
-3. Once pair creation is stable, add periodic boundary conditions and cyclic
-   bending boundary conditions.
+3. Verify `boundary_condition_scaffold_status`; if it is `partial`, use the
+   warnings to tune end-face probing/coupling creation.
 4. Preserve the GUI contract:
    - `input_data.json` as backend input
    - `result_data.csv` with `curvature_1_per_m,moment_kn_m`
    - `result_summary.json` for optional metrics
-5. Add periodic boundary conditions and cyclic bending boundary conditions.
+5. Add true periodic boundary equations or a documented equivalent-cell
+   approximation.
 6. Add Abaqus job submission/status handling and ODB extraction into
    `result_data.csv`.
 7. After each meaningful task, update this file, commit, and push.

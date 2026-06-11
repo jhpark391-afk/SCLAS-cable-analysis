@@ -219,6 +219,7 @@ def write_mesh_manifest(
     contact_regions=None,
     contact_interactions=None,
     contact_pairs=None,
+    boundary_conditions=None,
 ):
     geometry = payload.get("derived_geometry_mm", {})
     armour = payload.get("armour", {})
@@ -250,6 +251,8 @@ def write_mesh_manifest(
             if contact_pair.get("status") != "created":
                 contact_pair_status = "partial"
                 break
+    boundary_conditions = boundary_conditions or {}
+    boundary_condition_status = boundary_conditions.get("status", "not_created")
     manifest = {
         "status": "abaqus_mesh_created" if abaqus_created else "mesh_request_only",
         "created_at": timestamp_seconds(),
@@ -278,6 +281,8 @@ def write_mesh_manifest(
         "contact_interaction_scaffold": contact_interactions,
         "contact_pair_scaffold_status": contact_pair_status,
         "contact_pair_scaffold": contact_pairs,
+        "boundary_condition_scaffold_status": boundary_condition_status,
+        "boundary_condition_scaffold": boundary_conditions,
         "components": [
             {
                 "name": "three_core_equivalent_solids",
@@ -498,6 +503,7 @@ def build_abaqus_mesh_model(payload, job_dir):
     steel_mat.Density(table=((steel["density"],),))
     contact_property = create_contact_property_scaffold(model, payload)
     contact_regions = []
+    solid_end_face_specs = []
 
     def append_contact_region(record, created_count, expected_count):
         if created_count >= expected_count:
@@ -507,6 +513,16 @@ def build_abaqus_mesh_model(payload, job_dir):
         else:
             record["status"] = "failed"
         contact_regions.append(record)
+
+    def append_solid_end_face_spec(component_name, instance_name, left_probe, right_probe):
+        solid_end_face_specs.append(
+            {
+                "component": component_name,
+                "assembly_instance": instance_name,
+                "left_probe": left_probe,
+                "right_probe": right_probe,
+            }
+        )
 
     def region_sequence(found):
         try:
@@ -804,6 +820,162 @@ def build_abaqus_mesh_model(payload, job_dir):
                 record["status"] = "failed"
         return records
 
+    def create_boundary_condition_scaffold():
+        record = {
+            "status": "not_created",
+            "step": "SCLAS_CyclicBendingStep",
+            "amplitude": "SCLAS_CyclicBendingAmplitude",
+            "left_reference_point_set": "SCLAS_RP_LeftEnd",
+            "right_reference_point_set": "SCLAS_RP_RightEnd",
+            "left_end_surface": "SCLAS_LeftEndSurface",
+            "right_end_surface": "SCLAS_RightEndSurface",
+            "target_curvature_1_per_m": float(analysis.get("max_curvature_1_per_m", 0.08)),
+            "effective_length_mm": length,
+            "target_rotation_rad": float(analysis.get("max_curvature_1_per_m", 0.08)) * (length / 1000.0),
+            "created_regions": [],
+            "warnings": [],
+            "notes": [
+                "Boundary conditions are a cyclic bending scaffold; moment extraction from ODB is still pending.",
+                "End faces are coupled to reference points using available solid end-face probes.",
+            ],
+        }
+        created = 0
+        expected = 8
+        try:
+            model.StaticStep(name=record["step"], previous="Initial", nlgeom=ON)
+            record["created_regions"].append("cyclic_bending_step")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("cyclic bending step failed: {0}".format(exc))
+
+        try:
+            import abaqusConstants as ac
+
+            model.TabularAmplitude(
+                name=record["amplitude"],
+                timeSpan=getattr(ac, "STEP"),
+                data=((0.0, 0.0), (0.25, 1.0), (0.5, 0.0), (0.75, -1.0), (1.0, 0.0)),
+            )
+            record["created_regions"].append("cyclic_amplitude")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("cyclic amplitude failed: {0}".format(exc))
+
+        try:
+            left_rp = assembly.ReferencePoint(point=(0.0, 0.0, -0.5 * length))
+            assembly.Set(referencePoints=(assembly.referencePoints[left_rp.id],), name=record["left_reference_point_set"])
+            record["created_regions"].append("left_reference_point")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("left reference point failed: {0}".format(exc))
+        try:
+            right_rp = assembly.ReferencePoint(point=(0.0, 0.0, 0.5 * length))
+            assembly.Set(referencePoints=(assembly.referencePoints[right_rp.id],), name=record["right_reference_point_set"])
+            record["created_regions"].append("right_reference_point")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("right reference point failed: {0}".format(exc))
+
+        left_faces = []
+        right_faces = []
+        for spec in solid_end_face_specs:
+            try:
+                inst = assembly.instances[spec["assembly_instance"]]
+                for face in region_sequence(inst.faces.findAt((spec["left_probe"],))):
+                    left_faces.append(face)
+            except Exception as exc:
+                record["warnings"].append("{0} left end face failed: {1}".format(spec["component"], exc))
+            try:
+                inst = assembly.instances[spec["assembly_instance"]]
+                for face in region_sequence(inst.faces.findAt((spec["right_probe"],))):
+                    right_faces.append(face)
+            except Exception as exc:
+                record["warnings"].append("{0} right end face failed: {1}".format(spec["component"], exc))
+        record["left_end_face_count"] = len(left_faces)
+        record["right_end_face_count"] = len(right_faces)
+
+        try:
+            assembly.Set(faces=tuple(left_faces), name="SCLAS_LeftEndFaces")
+            assembly.Surface(side1Faces=tuple(left_faces), name=record["left_end_surface"])
+            record["created_regions"].append("left_end_surface")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("left end surface failed: {0}".format(exc))
+        try:
+            assembly.Set(faces=tuple(right_faces), name="SCLAS_RightEndFaces")
+            assembly.Surface(side1Faces=tuple(right_faces), name=record["right_end_surface"])
+            record["created_regions"].append("right_end_surface")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("right end surface failed: {0}".format(exc))
+
+        try:
+            import abaqusConstants as ac
+
+            model.Coupling(
+                name="SCLAS_LeftEnd_KinematicCoupling",
+                controlPoint=assembly.sets[record["left_reference_point_set"]],
+                surface=assembly.surfaces[record["left_end_surface"]],
+                influenceRadius=getattr(ac, "WHOLE_SURFACE"),
+                couplingType=getattr(ac, "KINEMATIC"),
+                localCsys=None,
+                u1=ON,
+                u2=ON,
+                u3=ON,
+                ur1=ON,
+                ur2=ON,
+                ur3=ON,
+            )
+            model.Coupling(
+                name="SCLAS_RightEnd_KinematicCoupling",
+                controlPoint=assembly.sets[record["right_reference_point_set"]],
+                surface=assembly.surfaces[record["right_end_surface"]],
+                influenceRadius=getattr(ac, "WHOLE_SURFACE"),
+                couplingType=getattr(ac, "KINEMATIC"),
+                localCsys=None,
+                u1=ON,
+                u2=ON,
+                u3=ON,
+                ur1=ON,
+                ur2=ON,
+                ur3=ON,
+            )
+            record["created_regions"].append("end_couplings")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("end coupling failed: {0}".format(exc))
+
+        try:
+            model.EncastreBC(
+                name="SCLAS_LeftEnd_Fixed",
+                createStepName="Initial",
+                region=assembly.sets[record["left_reference_point_set"]],
+            )
+            model.DisplacementBC(
+                name="SCLAS_RightEnd_CyclicRotation",
+                createStepName=record["step"],
+                region=assembly.sets[record["right_reference_point_set"]],
+                u1=0.0,
+                u2=0.0,
+                u3=0.0,
+                ur1=0.0,
+                ur2=record["target_rotation_rad"],
+                ur3=0.0,
+                amplitude=record["amplitude"],
+            )
+            record["created_regions"].append("reference_point_bcs")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("reference point BCs failed: {0}".format(exc))
+
+        if created >= expected:
+            record["status"] = "created"
+        elif created > 0:
+            record["status"] = "partial"
+        else:
+            record["status"] = "failed"
+        return record
+
     def elem_code_for_solid():
         import abaqusConstants as ac
 
@@ -825,6 +997,12 @@ def build_abaqus_mesh_model(payload, job_dir):
         inst = assembly.Instance(name=name + "_1", part=part, dependent=ON)
         inst.translate(vector=(offset[0], offset[1], -0.5 * length + offset[2]))
         create_solid_contact_regions(part, inst, name)
+        append_solid_end_face_spec(
+            name,
+            inst.name,
+            (offset[0], offset[1], -0.5 * length + offset[2]),
+            (offset[0], offset[1], 0.5 * length + offset[2]),
+        )
         return part
 
     def layer_surface_specs(component_name, inner_radius, outer_radius, inner_surface, outer_surface):
@@ -876,12 +1054,17 @@ def build_abaqus_mesh_model(payload, job_dir):
         part.generateMesh()
         inst = assembly.Instance(name=name + "_1", part=part, dependent=ON)
         inst.translate(vector=(0.0, 0.0, -0.5 * length))
+        probe_angle = math.radians(53.0)
+        mid_radius = 0.5 * (inner_radius + outer_radius)
+        probe_x = mid_radius * math.cos(probe_angle)
+        probe_y = mid_radius * math.sin(probe_angle)
         create_solid_contact_regions(
             part,
             inst,
             name,
             surface_specs=layer_surface_specs(name, inner_radius, outer_radius, inner_surface, outer_surface),
         )
+        append_solid_end_face_spec(name, inst.name, (probe_x, probe_y, -0.5 * length), (probe_x, probe_y, 0.5 * length))
         return part
 
     def create_armour_layer(name, wire_radius, center_radius, count, lay_angle_deg, hand):
@@ -979,7 +1162,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         "outer_sheath_outer_surface",
     )
 
-    model.StaticStep(name="MeshOnlyStep", previous="Initial")
+    boundary_conditions = create_boundary_condition_scaffold()
     contact_interactions = [create_contact_interaction_scaffold(contact_property)]
     contact_pairs = create_explicit_contact_pair_scaffold(contact_property)
     old_cwd = os.getcwd()
@@ -1002,6 +1185,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         "contact_region_scaffold": contact_regions,
         "contact_interaction_scaffold": contact_interactions,
         "contact_pair_scaffold": contact_pairs,
+        "boundary_condition_scaffold": boundary_conditions,
         "node_element_note": "See generated .inp/.cae for Abaqus node and element counts.",
     }
 
@@ -1147,6 +1331,7 @@ def main(argv):
                 contact_regions=mesh_status.get("contact_region_scaffold"),
                 contact_interactions=mesh_status.get("contact_interaction_scaffold"),
                 contact_pairs=mesh_status.get("contact_pair_scaffold"),
+                boundary_conditions=mesh_status.get("boundary_condition_scaffold"),
             )
             print("Wrote Abaqus mesh scaffold: {0}".format(", ".join(mesh_status.get("files", []))))
         except Exception as exc:
