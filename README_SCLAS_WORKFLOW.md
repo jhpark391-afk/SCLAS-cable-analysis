@@ -1,9 +1,13 @@
-# SCLAS Workflow
+# HELIX / SCLAS Workflow
 
 ## Research goal
 
-SCLAS is being developed as an integrated framework for evaluating local
-behavior of submarine power cables. The primary workflow is:
+HELIX is being developed as an integrated framework for evaluating local
+behavior of submarine power cables.
+
+HELIX = **Helical Element Localised Interaction eXamination**
+
+The primary workflow is:
 
 ```text
 design variables -> cable section/helix geometry -> Abaqus automation -> local behavior metrics -> GUI visualization
@@ -24,6 +28,8 @@ See `docs/SCLAS_RESEARCH_BACKLOG.md` for the current public-reference scan and
 implementation backlog.
 See `docs/ABAQUS_BACKEND_IMPLEMENTATION_PLAN.md` for the staged Abaqus contact,
 cyclic bending, and ODB extraction plan.
+See `docs/HELIX_BACKEND_HANDOFF_BOGWANG_KR.md` for the current Korean handoff
+contract for the Abaqus backend owner.
 
 ## Main entry point
 
@@ -76,6 +82,12 @@ The backend must write:
 - `abaqus_mesh_manifest.json` when mesh conversion is attempted.
 - `sclas_mesh_model.cae` and `<job_name>_mesh.inp` when `abaqus_runner.py` is
   executed inside Abaqus/CAE.
+
+GUI screenshots for review and team handoff are stored under:
+
+```text
+screenshots/gui/
+```
 
 ## Backend modes
 
