@@ -19,6 +19,7 @@ import math
 import os
 import re
 import sys
+import traceback
 from datetime import datetime
 
 
@@ -242,10 +243,13 @@ def build_abaqus_mesh_model(payload, job_dir):
     model_name = safe_name(payload.get("metadata", {}).get("job_id", "SCLAS_CableMesh"), 32)
     job_name = safe_name(model_name + "_mesh", 32)
 
-    if "Model-1" in mdb.models and len(mdb.models) == 1:
-        del mdb.models["Model-1"]
-    if model_name in mdb.models:
-        del mdb.models[model_name]
+    try:
+        model_names = list(mdb.models.keys())
+    except Exception:
+        model_names = []
+    if model_name in model_names:
+        model_name = safe_name(model_name + "_" + datetime.now().strftime("%H%M%S"), 32)
+        job_name = safe_name(model_name + "_mesh", 32)
     model = mdb.Model(name=model_name)
     assembly = model.rootAssembly
     assembly.DatumCsysByDefault(CARTESIAN)
@@ -521,8 +525,9 @@ def main(argv):
             )
             print("Wrote Abaqus mesh scaffold: {0}".format(", ".join(mesh_status.get("files", []))))
         except Exception as exc:
+            error_detail = "{0}\n{1}".format(str(exc), traceback.format_exc())
             mesh_status = {"status": "abaqus_mesh_failed", "error": str(exc)}
-            write_mesh_manifest(os.path.join(job_dir, "abaqus_mesh_manifest.json"), payload, abaqus_created=False, error=str(exc))
+            write_mesh_manifest(os.path.join(job_dir, "abaqus_mesh_manifest.json"), payload, abaqus_created=False, error=error_detail)
             sys.stderr.write("Abaqus mesh scaffold failed: {0}\n".format(exc))
     else:
         write_mesh_manifest(os.path.join(job_dir, "abaqus_mesh_manifest.json"), payload, abaqus_created=False)
