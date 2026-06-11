@@ -66,7 +66,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "10.9-workspace-inspector"
+APP_VERSION = "11.0-interactive-workspace"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -464,12 +464,15 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_mode = "2D"
         self.current_k = np.array([])
         self.current_m = np.array([])
+        self.compare_items: List[pg.PlotDataItem] = []
+        self.job_history_paths: List[Path] = []
         self.last_job_dir = ""
         self.setWindowTitle("SCLAS Cable Analysis")
         self.setMinimumSize(1280, 720)
         self.init_ui()
         self.apply_theme()
         self.load_settings()
+        self.refresh_job_history()
         self.fit_to_screen()
 
         self.sys_timer = QTimer(self)
@@ -524,8 +527,14 @@ class SCLASRemoteGUI(QMainWindow):
         title_block.addWidget(subtitle)
         topbar.addLayout(title_block)
         topbar.addStretch()
+        self.lbl_model_status = QLabel("Model: pending")
+        self.lbl_model_status.setObjectName("TopbarMeta")
+        self.lbl_result_status = QLabel("Result: none")
+        self.lbl_result_status.setObjectName("TopbarMeta")
         session = QLabel("Local project")
         session.setObjectName("TopbarMeta")
+        topbar.addWidget(self.lbl_model_status)
+        topbar.addWidget(self.lbl_result_status)
         topbar.addWidget(session)
         content_layout.addLayout(topbar)
 
@@ -606,6 +615,25 @@ class SCLASRemoteGUI(QMainWindow):
         for i, button in enumerate(getattr(self, "nav_buttons", [])):
             button.setChecked(i == index)
 
+    def set_badge(self, label: QLabel, text: str, tone: str = "neutral") -> None:
+        palette = {
+            "neutral": ("#ffffff", "#d7dee8", "#405066"),
+            "good": ("#ecfdf5", "#a7f3d0", "#047857"),
+            "warn": ("#fffbeb", "#fde68a", "#92400e"),
+            "busy": ("#eff6ff", "#bfdbfe", "#1d4ed8"),
+            "error": ("#fef2f2", "#fecaca", "#b91c1c"),
+        }
+        bg, border, fg = palette.get(tone, palette["neutral"])
+        label.setText(text)
+        label.setStyleSheet(
+            f"color: {fg}; background-color: {bg}; border: 1px solid {border}; "
+            "border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 650;"
+        )
+
+    def layer_visible(self, key: str) -> bool:
+        checks = getattr(self, "layer_checks", {})
+        return key not in checks or checks[key].isChecked()
+
     def build_design_tab(self) -> None:
         tab = QWidget()
         layout = QHBoxLayout(tab)
@@ -620,6 +648,7 @@ class SCLASRemoteGUI(QMainWindow):
         left.addWidget(self.header("Cable Geometry Inputs"))
         self.btn_load_csv = QPushButton("Import key,value CSV")
         self.btn_load_csv.setFixedHeight(42)
+        self.btn_load_csv.setToolTip("Load the original SCLAS CSV-style key/value input table.")
         self.btn_load_csv.clicked.connect(self.load_csv)
         left.addWidget(self.btn_load_csv)
 
@@ -663,8 +692,26 @@ class SCLASRemoteGUI(QMainWindow):
         ]
         for label, key in labels:
             self.inputs[key].setMinimumWidth(112)
+            self.inputs[key].setToolTip(f"Edit {label}. The digital twin preview updates automatically.")
             form.addRow(label, self.inputs[key])
         left.addLayout(form)
+
+        layer_box = QGroupBox("Visible Layers")
+        layer_layout = QGridLayout(layer_box)
+        self.layer_checks = {
+            "outer_sheath": QCheckBox("Outer sheath"),
+            "outer_armour": QCheckBox("Outer armour"),
+            "bedding": QCheckBox("Bedding"),
+            "inner_armour": QCheckBox("Inner armour"),
+            "inner_sheath": QCheckBox("Inner sheath"),
+            "cores": QCheckBox("Three cores"),
+        }
+        for idx, check in enumerate(self.layer_checks.values()):
+            check.setChecked(True)
+            check.setToolTip("Toggle this layer in the digital twin view.")
+            check.toggled.connect(self.trigger_rebuild)
+            layer_layout.addWidget(check, idx // 2, idx % 2)
+        left.addWidget(layer_box)
         left.addStretch()
         input_scroll = self.scroll_panel(panel_inputs, min_width=430, max_width=520)
 
@@ -693,8 +740,13 @@ class SCLASRemoteGUI(QMainWindow):
         header = QHBoxLayout()
         header.addWidget(self.header("Digital Twin View"))
         self.btn_toggle = QPushButton("Toggle 2D / 3D")
+        self.btn_toggle.setToolTip("Switch between top-down section view and tilted 3D inspection.")
         self.btn_toggle.clicked.connect(self.toggle_view_mode)
+        self.btn_reset_solid = QPushButton("Reset View")
+        self.btn_reset_solid.setToolTip("Return the digital twin camera to the default engineering view.")
+        self.btn_reset_solid.clicked.connect(self.reset_solid_view)
         header.addWidget(self.btn_toggle)
+        header.addWidget(self.btn_reset_solid)
         right.addLayout(header)
         self.view_solid = gl.GLViewWidget()
         self.view_solid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -747,8 +799,19 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(40)
         self.mesh_inputs["c_elem_core"].setRange(4, 160); self.mesh_inputs["c_elem_core"].setValue(24)
         self.mesh_inputs["c_elem_armour"].setRange(4, 64); self.mesh_inputs["c_elem_armour"].setValue(8)
+        mesh_tips = {
+            "elem_type": "Abaqus element family requested in input_data.json.",
+            "model_strategy": "Controls whether the backend should build a periodic cell, full segment, or axisymmetric study.",
+            "armour_model": "Recommended representation for helical armour layers in Abaqus.",
+            "contact_beta": "Tangential contact regularization value for stick-slip stability.",
+            "z_elem": "Preview and backend-requested divisions along the cable axis.",
+            "c_elem_core": "Circumferential divisions for sheath/core preview surfaces.",
+            "c_elem_armour": "Circumferential divisions for armour wire preview surfaces.",
+        }
         for key in ["elem_type", "model_strategy", "armour_model", "contact_beta"]:
             self.mesh_inputs[key].setMinimumWidth(250)
+        for key, tip in mesh_tips.items():
+            self.mesh_inputs[key].setToolTip(tip)
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight)
         form.setHorizontalSpacing(12)
@@ -765,6 +828,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_mesh = QPushButton("Generate mesh preview")
         self.btn_mesh.setObjectName("RunBtn")
         self.btn_mesh.setFixedHeight(50)
+        self.btn_mesh.setToolTip("Build a visual mesh preview from the current geometry and mesh request.")
         self.btn_mesh.clicked.connect(self.generate_mesh_preview)
         left.addWidget(self.btn_mesh)
         note = QLabel("Visual request only. Abaqus backend owns actual mesh generation.")
@@ -776,7 +840,24 @@ class SCLASRemoteGUI(QMainWindow):
         right = QVBoxLayout(viewer)
         right.setContentsMargins(18, 18, 18, 18)
         right.setSpacing(10)
-        right.addWidget(self.header("Preview Only"))
+        mesh_header = QHBoxLayout()
+        mesh_header.addWidget(self.header("Preview Only"))
+        mesh_header.addStretch()
+        self.btn_mesh_top = QPushButton("Top")
+        self.btn_mesh_iso = QPushButton("Iso")
+        self.btn_mesh_reset = QPushButton("Reset")
+        for btn in [self.btn_mesh_top, self.btn_mesh_iso, self.btn_mesh_reset]:
+            btn.setFixedWidth(72)
+        self.btn_mesh_top.setToolTip("Set the mesh camera to top-down section view.")
+        self.btn_mesh_iso.setToolTip("Set the mesh camera to an isometric inspection view.")
+        self.btn_mesh_reset.setToolTip("Reset the mesh preview camera.")
+        self.btn_mesh_top.clicked.connect(self.reset_mesh_view)
+        self.btn_mesh_iso.clicked.connect(self.set_mesh_iso_view)
+        self.btn_mesh_reset.clicked.connect(self.reset_mesh_view)
+        mesh_header.addWidget(self.btn_mesh_top)
+        mesh_header.addWidget(self.btn_mesh_iso)
+        mesh_header.addWidget(self.btn_mesh_reset)
+        right.addLayout(mesh_header)
         self.view_wire = gl.GLViewWidget()
         self.view_wire.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.view_wire.setMinimumHeight(360)
@@ -813,6 +894,20 @@ class SCLASRemoteGUI(QMainWindow):
         }
         self.cond["cycles"].setRange(1, 20); self.cond["cycles"].setValue(2)
         self.cond["steps"].setRange(50, 10000); self.cond["steps"].setValue(500)
+        analysis_tips = {
+            "eff_length": "Effective cable length used for the periodic/homogenized bending request.",
+            "pressure": "Hydrostatic pressure term used by the GUI fallback and exported for Abaqus.",
+            "residual_contact_pressure": "Residual normal contact pressure for stick-slip/friction calibration.",
+            "friction": "Coulomb friction coefficient for armour-to-sheath and armour-to-bedding contact.",
+            "curvature": "Maximum curvature for the moment-curvature loop.",
+            "twist": "Maximum twist requested for future coupled torsion studies.",
+            "axial_strain": "Axial strain requested for tension-bending coupling studies.",
+            "radial_compression": "Compression ratio used for bird-caging risk proxy.",
+            "cycles": "Number of loading cycles in the preview/result request.",
+            "steps": "Number of output samples in the result curve.",
+        }
+        for key, tip in analysis_tips.items():
+            self.cond[key].setToolTip(tip)
         form = QFormLayout()
         form.addRow("Effective length (mm)", self.cond["eff_length"])
         form.addRow("Hydrostatic pressure (MPa)", self.cond["pressure"])
@@ -838,6 +933,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.study_checks["bending_stick_slip"].setChecked(True)
         self.study_checks["pressure_effect"].setChecked(True)
         for check in self.study_checks.values():
+            check.setToolTip("Enable this assessment in the exported backend contract.")
             scope_layout.addWidget(check)
         left.addWidget(scope_box)
 
@@ -848,6 +944,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.radio_remote = QRadioButton("Run remote computer via SSH/scp")
         self.radio_fast.setChecked(True)
         for r in [self.radio_fast, self.radio_package, self.radio_local, self.radio_remote]:
+            r.setToolTip("Choose how the current input package should be handled.")
             left.addWidget(r)
 
         remote_box = QGroupBox("Remote / Backend Settings")
@@ -857,6 +954,12 @@ class SCLASRemoteGUI(QMainWindow):
         self.remote_target_input = QLineEdit("user@remote-host")
         self.remote_root_input = QLineEdit("~/SCLAS_jobs")
         self.remote_command_input = QLineEdit("abaqus cae noGUI=abaqus_runner.py -- input_data.json")
+        self.job_root_input.setToolTip("Folder where generated SCLAS job packages are saved.")
+        self.local_command_input.setToolTip("Command run inside each job folder for local or shared-folder backend execution.")
+        self.remote_target_input.setToolTip("SSH target for the lab desktop or remote Abaqus computer.")
+        self.remote_root_input.setToolTip("Remote folder where job packages should be copied.")
+        self.remote_command_input.setToolTip("Abaqus command executed remotely after the job package is copied.")
+        self.job_root_input.editingFinished.connect(self.refresh_job_history)
         remote_form.addRow("Local job root", self.job_root_input)
         remote_form.addRow("Local command", self.local_command_input)
         remote_form.addRow("SSH target", self.remote_target_input)
@@ -874,6 +977,10 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_json.clicked.connect(self.export_json_dialog)
         self.btn_run.clicked.connect(self.run_analysis)
         self.btn_load_result.clicked.connect(self.load_result_csv_dialog)
+        self.btn_validate.setToolTip("Validate geometry, materials, mesh settings, and analysis conditions.")
+        self.btn_json.setToolTip("Export only input_data.json for backend review.")
+        self.btn_run.setToolTip("Create a job folder, then run the selected backend mode.")
+        self.btn_load_result.setToolTip("Load an existing result_data.csv and optional result_summary.json.")
         buttons.addWidget(self.btn_validate, 0, 0)
         buttons.addWidget(self.btn_json, 0, 1)
         buttons.addWidget(self.btn_run, 1, 0, 1, 2)
@@ -891,7 +998,22 @@ class SCLASRemoteGUI(QMainWindow):
 
         result_panel = QFrame(); result_panel.setObjectName("Card")
         right = QVBoxLayout(result_panel)
-        right.addWidget(self.header("Moment-Curvature Result"))
+        result_header = QHBoxLayout()
+        result_header.addWidget(self.header("Moment-Curvature Result"))
+        result_header.addStretch()
+        self.btn_export_plot = QPushButton("Export PNG")
+        self.btn_compare_csv = QPushButton("Compare CSV")
+        self.btn_clear_compare = QPushButton("Clear")
+        self.btn_export_plot.setToolTip("Save the current plot view as a PNG image.")
+        self.btn_compare_csv.setToolTip("Overlay another result_data.csv for FAST/Abaqus comparison.")
+        self.btn_clear_compare.setToolTip("Remove all comparison curves from the plot.")
+        self.btn_export_plot.clicked.connect(self.export_plot_png)
+        self.btn_compare_csv.clicked.connect(self.compare_result_csv_dialog)
+        self.btn_clear_compare.clicked.connect(self.clear_compare_curves)
+        result_header.addWidget(self.btn_export_plot)
+        result_header.addWidget(self.btn_compare_csv)
+        result_header.addWidget(self.btn_clear_compare)
+        right.addLayout(result_header)
         self.plot_canvas = pg.PlotWidget(background="#1e1e1e")
         self.plot_canvas.showGrid(x=True, y=True, alpha=0.13)
         self.plot_canvas.setLabel("left", "Bending Moment M", units="kN.m")
@@ -921,6 +1043,21 @@ class SCLASRemoteGUI(QMainWindow):
             "Expected contract: result_data.csv plus optional result_summary.json."
         )
         right.addWidget(self.summary_text)
+
+        history_box = QGroupBox("Recent Jobs")
+        history_layout = QGridLayout(history_box)
+        self.job_history_combo = QComboBox()
+        self.job_history_combo.setToolTip("Recent job folders containing result_data.csv.")
+        self.btn_refresh_jobs = QPushButton("Refresh")
+        self.btn_load_job = QPushButton("Load selected")
+        self.btn_refresh_jobs.setToolTip("Scan the job root for recent SCLAS result folders.")
+        self.btn_load_job.setToolTip("Load result_data.csv from the selected job folder.")
+        self.btn_refresh_jobs.clicked.connect(self.refresh_job_history)
+        self.btn_load_job.clicked.connect(self.load_selected_job)
+        history_layout.addWidget(self.job_history_combo, 0, 0, 1, 2)
+        history_layout.addWidget(self.btn_refresh_jobs, 1, 0)
+        history_layout.addWidget(self.btn_load_job, 1, 1)
+        right.addWidget(history_box)
 
         left_scroll = self.scroll_panel(left_panel, fixed_width=460)
         result_scroll = self.scroll_panel(result_panel)
@@ -1253,8 +1390,10 @@ class SCLASRemoteGUI(QMainWindow):
                 f"Estimated EI: {payload['equivalent_properties']['core_equivalent_EI_N_m2']:.6g} N.m^2\n"
                 f"Enabled assessments: {', '.join(k for k, v in payload['study_scope']['enabled_assessments'].items() if v)}"
             )
+            self.set_badge(self.lbl_model_status, "Model: valid", "good")
             QMessageBox.information(self, "Validation complete", msg)
         except Exception as exc:
+            self.set_badge(self.lbl_model_status, "Model: error", "error")
             QMessageBox.critical(self, "Validation error", str(exc))
 
     def export_json_dialog(self) -> None:
@@ -1292,6 +1431,8 @@ class SCLASRemoteGUI(QMainWindow):
             mode = self.selected_mode()
             self.console.clear()
             self.log(f"[SYS] Starting mode: {mode}")
+            self.set_badge(self.lbl_model_status, "Model: valid", "good")
+            self.set_badge(self.lbl_result_status, "Result: running", "busy")
             self.progress.setValue(0)
             self.btn_run.setEnabled(False)
             self.curve.setData([], [])
@@ -1304,6 +1445,8 @@ class SCLASRemoteGUI(QMainWindow):
             self.worker.finished_sig.connect(self.analysis_finished)
             self.worker.start()
         except Exception as exc:
+            self.set_badge(self.lbl_model_status, "Model: error", "error")
+            self.set_badge(self.lbl_result_status, "Result: stopped", "error")
             QMessageBox.critical(self, "Run error", str(exc))
             self.btn_run.setEnabled(True)
 
@@ -1411,21 +1554,74 @@ class SCLASRemoteGUI(QMainWindow):
         if job_dir:
             self.last_job_dir = job_dir
             self.log(f"[SYS] Job folder: {job_dir}")
+            self.set_badge(self.lbl_result_status, "Result: ready", "good")
+            self.refresh_job_history()
+        else:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
 
     def load_result_csv_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open result_data.csv", "", "CSV Files (*.csv)")
         if not path:
             return
         try:
-            csv_path = Path(path)
-            k, m = read_result_csv(csv_path)
-            metrics = make_metrics(k, m, source="MANUAL_CSV_LOAD")
-            self.update_plot(k, m)
-            self.update_metrics(metrics)
-            self.update_summary_panel(read_json(csv_path.with_name("result_summary.json"), metrics))
-            self.log(f"[RESULT] Loaded {path}")
+            self.load_result_bundle(Path(path), source="MANUAL_CSV_LOAD")
         except Exception as exc:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "CSV load error", str(exc))
+
+    def load_result_bundle(self, csv_path: Path, source: str = "RESULT_LOAD") -> None:
+        k, m = read_result_csv(csv_path)
+        metrics = make_metrics(k, m, source=source)
+        self.update_plot(k, m)
+        self.update_metrics(metrics)
+        summary = read_json(csv_path.with_name("result_summary.json"), metrics)
+        if isinstance(summary, dict):
+            summary.setdefault("source", metrics.get("source", source))
+            summary.setdefault("num_points", metrics["num_points"])
+            summary.setdefault("max_abs_moment_kn_m", metrics["max_abs_moment_kn_m"])
+            summary.setdefault("hysteresis_loss_kj_per_m_proxy", metrics["hysteresis_loss_kj_per_m_proxy"])
+        self.update_summary_panel(summary)
+        self.set_badge(self.lbl_result_status, "Result: loaded", "good")
+        self.log(f"[RESULT] Loaded {csv_path}")
+
+    def refresh_job_history(self) -> None:
+        if not hasattr(self, "job_history_combo"):
+            return
+        roots = [DEFAULT_JOB_ROOT]
+        try:
+            configured = Path(self.job_root_input.text().strip()).expanduser()
+            if configured not in roots:
+                roots.append(configured)
+        except Exception:
+            pass
+
+        jobs: List[Path] = []
+        for root in roots:
+            if not root.exists():
+                continue
+            for csv_path in root.glob("*/result_data.csv"):
+                jobs.append(csv_path.parent)
+        jobs = sorted(set(jobs), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)[:25]
+
+        self.job_history_paths = jobs
+        self.job_history_combo.clear()
+        if not jobs:
+            self.job_history_combo.addItem("No result jobs found")
+            return
+        for job in jobs:
+            stamp = datetime.fromtimestamp(job.stat().st_mtime).strftime("%m-%d %H:%M")
+            self.job_history_combo.addItem(f"{stamp} | {job.name}")
+
+    def load_selected_job(self) -> None:
+        index = self.job_history_combo.currentIndex() if hasattr(self, "job_history_combo") else -1
+        if index < 0 or index >= len(self.job_history_paths):
+            QMessageBox.information(self, "Recent Jobs", "No result job is selected.")
+            return
+        try:
+            self.load_result_bundle(self.job_history_paths[index] / "result_data.csv", source="RECENT_JOB_LOAD")
+        except Exception as exc:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
+            QMessageBox.critical(self, "Recent job load error", str(exc))
 
     def load_csv(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open key,value CSV", "", "CSV Files (*.csv)")
@@ -1481,6 +1677,52 @@ class SCLASRemoteGUI(QMainWindow):
         self.lbl_peak.value_label.setText(f"{data['max_abs_moment_kn_m']:.4g} kN.m")
         self.lbl_loss.value_label.setText(f"{data['hysteresis_loss_kj_per_m_proxy']:.4g}")
         self.lbl_points.value_label.setText(str(data["num_points"]))
+
+    def export_plot_png(self) -> None:
+        if not hasattr(self, "plot_canvas"):
+            return
+        default = str(PROJECT_DIR / "moment_curvature_result.png")
+        path, _ = QFileDialog.getSaveFileName(self, "Save plot image", default, "PNG Images (*.png)")
+        if not path:
+            return
+        ok = self.plot_canvas.grab().save(path, "PNG")
+        if ok:
+            self.log(f"[RESULT] Plot image saved: {path}")
+            QMessageBox.information(self, "Plot exported", f"Saved:\n{path}")
+        else:
+            QMessageBox.critical(self, "Plot export error", "Could not save the PNG image.")
+
+    def compare_result_csv_dialog(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Compare result_data.csv", "", "CSV Files (*.csv)")
+        if not path:
+            return
+        try:
+            k, m = read_result_csv(Path(path))
+            color_cycle = ["#e08f3e", "#10b981", "#d946ef", "#f43f5e"]
+            color = color_cycle[len(self.compare_items) % len(color_cycle)]
+            item = self.plot_canvas.plot(
+                k,
+                m,
+                pen=pg.mkPen(color=color, width=2.2, style=Qt.DashLine),
+                name=Path(path).parent.name,
+            )
+            self.compare_items.append(item)
+            self.plot_canvas.autoRange()
+            self.log(f"[RESULT] Comparison curve added: {path}")
+            self.set_badge(self.lbl_result_status, f"Result: +{len(self.compare_items)} compare", "busy")
+        except Exception as exc:
+            QMessageBox.critical(self, "Compare CSV error", str(exc))
+
+    def clear_compare_curves(self) -> None:
+        for item in self.compare_items:
+            try:
+                self.plot_canvas.removeItem(item)
+            except Exception:
+                pass
+        self.compare_items.clear()
+        self.plot_canvas.autoRange()
+        self.set_badge(self.lbl_result_status, "Result: ready", "good" if len(self.current_k) else "neutral")
+        self.log("[RESULT] Comparison curves cleared.")
 
     def update_summary_panel(self, data: dict) -> None:
         if not hasattr(self, "summary_text"):
@@ -1551,6 +1793,8 @@ class SCLASRemoteGUI(QMainWindow):
         return "\n".join(lines)
 
     def trigger_rebuild(self) -> None:
+        if hasattr(self, "lbl_model_status"):
+            self.set_badge(self.lbl_model_status, "Model: edited", "warn")
         if hasattr(self, "debounce"):
             self.debounce.start(120)
 
@@ -1561,6 +1805,18 @@ class SCLASRemoteGUI(QMainWindow):
         else:
             self.view_solid.setCameraPosition(distance=250, elevation=35, azimuth=45)
         self.rebuild_solid_geometry()
+
+    def reset_solid_view(self) -> None:
+        if self.view_mode == "2D":
+            self.view_solid.setCameraPosition(distance=180, elevation=90, azimuth=0)
+        else:
+            self.view_solid.setCameraPosition(distance=250, elevation=35, azimuth=45)
+
+    def reset_mesh_view(self) -> None:
+        self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
+
+    def set_mesh_iso_view(self) -> None:
+        self.view_wire.setCameraPosition(distance=190, elevation=35, azimuth=45)
 
     def create_solid_mesh(self, r: float, cx: float, cy: float, z_front: float, color) -> gl.GLMeshItem:
         if self.view_mode == "2D":
@@ -1583,23 +1839,41 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_cache_solid.clear()
         try:
             dg = self.parse_geometry()
-            self.add_solid(dg["outer_sheath_outer_radius_mm"], 0, 0, 0.0, [0.15, 0.15, 0.15, 1.0])
-            for i in range(dg["outer_armour_wire_count"]):
-                a = 2 * np.pi * i / dg["outer_armour_wire_count"]
-                self.add_solid(dg["outer_armour_wire_radius_mm"], dg["outer_armour_center_radius_mm"] * np.cos(a), dg["outer_armour_center_radius_mm"] * np.sin(a), 0.1, [0.5, 0.6, 0.7, 1.0])
-            self.add_solid(dg["bedding_outer_radius_mm"], 0, 0, 0.2, [0.4, 0.3, 0.2, 1.0])
-            for i in range(dg["inner_armour_wire_count"]):
-                a = 2 * np.pi * i / dg["inner_armour_wire_count"]
-                self.add_solid(dg["inner_armour_wire_radius_mm"], dg["inner_armour_center_radius_mm"] * np.cos(a), dg["inner_armour_center_radius_mm"] * np.sin(a), 0.3, [0.4, 0.5, 0.6, 1.0])
-            self.add_solid(dg["inner_sheath_outer_radius_mm"], 0, 0, 0.4, [0.1, 0.1, 0.1, 1.0])
-            self.add_solid(dg["inner_sheath_inner_radius_mm"], 0, 0, 0.5, [0.25, 0.25, 0.28, 1.0])
-            for i in range(3):
-                a = np.radians(120 * i)
-                cx = dg["core_center_radius_mm"] * np.cos(a)
-                cy = dg["core_center_radius_mm"] * np.sin(a)
-                self.add_solid(dg["core_outer_radius_mm"], cx, cy, 0.6, [0.6, 0.6, 0.65, 1.0])
-                self.add_solid(dg["insulation_radius_mm"], cx, cy, 0.7, [0.9, 0.9, 0.9, 0.9])
-                self.add_solid(dg["conductor_radius_mm"], cx, cy, 0.8, [0.85, 0.45, 0.15, 1.0])
+            if self.layer_visible("outer_sheath"):
+                self.add_solid(dg["outer_sheath_outer_radius_mm"], 0, 0, 0.0, [0.15, 0.15, 0.15, 0.88])
+            if self.layer_visible("outer_armour"):
+                for i in range(dg["outer_armour_wire_count"]):
+                    a = 2 * np.pi * i / dg["outer_armour_wire_count"]
+                    self.add_solid(
+                        dg["outer_armour_wire_radius_mm"],
+                        dg["outer_armour_center_radius_mm"] * np.cos(a),
+                        dg["outer_armour_center_radius_mm"] * np.sin(a),
+                        0.1,
+                        [0.5, 0.6, 0.7, 1.0],
+                    )
+            if self.layer_visible("bedding"):
+                self.add_solid(dg["bedding_outer_radius_mm"], 0, 0, 0.2, [0.4, 0.3, 0.2, 0.72])
+            if self.layer_visible("inner_armour"):
+                for i in range(dg["inner_armour_wire_count"]):
+                    a = 2 * np.pi * i / dg["inner_armour_wire_count"]
+                    self.add_solid(
+                        dg["inner_armour_wire_radius_mm"],
+                        dg["inner_armour_center_radius_mm"] * np.cos(a),
+                        dg["inner_armour_center_radius_mm"] * np.sin(a),
+                        0.3,
+                        [0.4, 0.5, 0.6, 1.0],
+                    )
+            if self.layer_visible("inner_sheath"):
+                self.add_solid(dg["inner_sheath_outer_radius_mm"], 0, 0, 0.4, [0.1, 0.1, 0.1, 0.82])
+                self.add_solid(dg["inner_sheath_inner_radius_mm"], 0, 0, 0.5, [0.25, 0.25, 0.28, 0.72])
+            if self.layer_visible("cores"):
+                for i in range(3):
+                    a = np.radians(120 * i)
+                    cx = dg["core_center_radius_mm"] * np.cos(a)
+                    cy = dg["core_center_radius_mm"] * np.sin(a)
+                    self.add_solid(dg["core_outer_radius_mm"], cx, cy, 0.6, [0.6, 0.6, 0.65, 1.0])
+                    self.add_solid(dg["insulation_radius_mm"], cx, cy, 0.7, [0.9, 0.9, 0.9, 0.9])
+                    self.add_solid(dg["conductor_radius_mm"], cx, cy, 0.8, [0.85, 0.45, 0.15, 1.0])
         except Exception as exc:
             self.log(f"[GEOMETRY] {exc}")
 
