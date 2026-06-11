@@ -66,7 +66,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "11.0-interactive-workspace"
+APP_VERSION = "11.1-plot-focus"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -1004,17 +1004,24 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_export_plot = QPushButton("Export PNG")
         self.btn_compare_csv = QPushButton("Compare CSV")
         self.btn_clear_compare = QPushButton("Clear")
+        self.btn_focus_plot = QPushButton("Focus Plot")
+        self.btn_focus_plot.setCheckable(True)
         self.btn_export_plot.setToolTip("Save the current plot view as a PNG image.")
         self.btn_compare_csv.setToolTip("Overlay another result_data.csv for FAST/Abaqus comparison.")
         self.btn_clear_compare.setToolTip("Remove all comparison curves from the plot.")
+        self.btn_focus_plot.setToolTip("Hide detail panels and give the result plot more vertical space.")
         self.btn_export_plot.clicked.connect(self.export_plot_png)
         self.btn_compare_csv.clicked.connect(self.compare_result_csv_dialog)
         self.btn_clear_compare.clicked.connect(self.clear_compare_curves)
+        self.btn_focus_plot.toggled.connect(self.set_plot_focus)
+        result_header.addWidget(self.btn_focus_plot)
         result_header.addWidget(self.btn_export_plot)
         result_header.addWidget(self.btn_compare_csv)
         result_header.addWidget(self.btn_clear_compare)
         right.addLayout(result_header)
         self.plot_canvas = pg.PlotWidget(background="#1e1e1e")
+        self.plot_canvas.setMinimumHeight(520)
+        self.plot_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.plot_canvas.showGrid(x=True, y=True, alpha=0.13)
         self.plot_canvas.setLabel("left", "Bending Moment M", units="kN.m")
         self.plot_canvas.setLabel("bottom", "Curvature kappa", units="1/m")
@@ -1023,20 +1030,23 @@ class SCLASRemoteGUI(QMainWindow):
         self.plot_canvas.getAxis("left").setPen("#555555")
         self.plot_canvas.getAxis("bottom").setPen("#555555")
         self.curve = self.plot_canvas.plot(pen=pg.mkPen(color="#8ab4ff", width=2.8))
-        right.addWidget(self.plot_canvas, 70)
-        metric_layout = QHBoxLayout()
+        right.addWidget(self.plot_canvas, 100)
+        self.metric_panel = QFrame()
+        self.metric_panel.setObjectName("MetricStrip")
+        metric_layout = QHBoxLayout(self.metric_panel)
+        metric_layout.setContentsMargins(0, 0, 0, 0)
         self.lbl_peak = self.metric_box("Peak |M|", "-")
         self.lbl_loss = self.metric_box("Loop loss proxy", "-")
         self.lbl_points = self.metric_box("Points", "-")
         metric_layout.addWidget(self.lbl_peak)
         metric_layout.addWidget(self.lbl_loss)
         metric_layout.addWidget(self.lbl_points)
-        right.addLayout(metric_layout)
+        right.addWidget(self.metric_panel)
 
         self.summary_text = QTextEdit()
         self.summary_text.setObjectName("SummaryText")
         self.summary_text.setReadOnly(True)
-        self.summary_text.setMaximumHeight(190)
+        self.summary_text.setMaximumHeight(155)
         self.summary_text.setPlainText(
             "Backend summary will appear here after FAST preview, local Abaqus runner, "
             "or manual result_data.csv load.\n\n"
@@ -1044,8 +1054,8 @@ class SCLASRemoteGUI(QMainWindow):
         )
         right.addWidget(self.summary_text)
 
-        history_box = QGroupBox("Recent Jobs")
-        history_layout = QGridLayout(history_box)
+        self.history_box = QGroupBox("Recent Jobs")
+        history_layout = QGridLayout(self.history_box)
         self.job_history_combo = QComboBox()
         self.job_history_combo.setToolTip("Recent job folders containing result_data.csv.")
         self.btn_refresh_jobs = QPushButton("Refresh")
@@ -1057,7 +1067,7 @@ class SCLASRemoteGUI(QMainWindow):
         history_layout.addWidget(self.job_history_combo, 0, 0, 1, 2)
         history_layout.addWidget(self.btn_refresh_jobs, 1, 0)
         history_layout.addWidget(self.btn_load_job, 1, 1)
-        right.addWidget(history_box)
+        right.addWidget(self.history_box)
 
         left_scroll = self.scroll_panel(left_panel, fixed_width=460)
         result_scroll = self.scroll_panel(result_panel)
@@ -1723,6 +1733,15 @@ class SCLASRemoteGUI(QMainWindow):
         self.plot_canvas.autoRange()
         self.set_badge(self.lbl_result_status, "Result: ready", "good" if len(self.current_k) else "neutral")
         self.log("[RESULT] Comparison curves cleared.")
+
+    def set_plot_focus(self, enabled: bool) -> None:
+        self.btn_focus_plot.setText("Show Details" if enabled else "Focus Plot")
+        self.plot_canvas.setMinimumHeight(700 if enabled else 520)
+        for widget_name in ["metric_panel", "summary_text", "history_box"]:
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.setVisible(not enabled)
+        QTimer.singleShot(0, self.plot_canvas.autoRange)
 
     def update_summary_panel(self, data: dict) -> None:
         if not hasattr(self, "summary_text"):
