@@ -59,6 +59,10 @@ Windows home-computer GUI verification has now passed for the current
   Python 2-era, so `code/abaqus_runner.py` has been converted away from Python
   3-only syntax such as type annotations, f-strings, `pathlib`, and
   `datetime.isoformat(timespec=...)`.
+- Phase 2 contact/friction scaffolding has started: `code/abaqus_runner.py`
+  now creates an Abaqus `ContactProperty` named `SCLAS_RegularizedContact`
+  with normal/tangential behavior parameters from the GUI payload. Real
+  surface-to-surface interaction pairs are still pending.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files
@@ -128,6 +132,10 @@ Expected minimum outputs remain `result_data.csv`, `result_summary.json`, and
 `abaqus_mesh_manifest.json`. If the Abaqus mesh scaffold succeeds, expect
 `sclas_mesh_model.cae` and a generated `.inp` file as well.
 
+For the contact scaffold check, open the generated `.cae` and verify that
+`Interaction Properties` contains `SCLAS_RegularizedContact`. The manifest
+should also include `contact_property_scaffold`.
+
 ## Research Implementation Status
 
 The papers are not fully implemented yet.
@@ -158,16 +166,17 @@ Still needed for a paper-level implementation:
 
 ## Next Recommended Tasks
 
-1. Start backend work in `code/abaqus_runner.py`.
-2. Preserve the GUI contract:
+1. Verify `SCLAS_RegularizedContact` appears in the lab Abaqus/CAE model tree.
+2. Add stable assembly surface/set creation for the declared contact interfaces.
+3. Bind actual surface-to-surface contact pairs to `SCLAS_RegularizedContact`.
+4. Preserve the GUI contract:
    - `input_data.json` as backend input
    - `result_data.csv` with `curvature_1_per_m,moment_kn_m`
    - `result_summary.json` for optional metrics
-3. Implement real Abaqus contact/friction definitions.
-4. Add periodic boundary conditions and cyclic bending boundary conditions.
-5. Add Abaqus job submission/status handling and ODB extraction into
+5. Add periodic boundary conditions and cyclic bending boundary conditions.
+6. Add Abaqus job submission/status handling and ODB extraction into
    `result_data.csv`.
-6. After each meaningful task, update this file, commit, and push.
+7. After each meaningful task, update this file, commit, and push.
 
 ## Home Codex Start Prompt
 

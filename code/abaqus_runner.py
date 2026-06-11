@@ -121,7 +121,20 @@ def abaqus_available():
         return False
 
 
-def write_mesh_manifest(path, payload, abaqus_created, files=None, error=""):
+def contact_defaults_from_payload(payload):
+    analysis = payload.get("analysis_conditions", {})
+    numerical_model = payload.get("numerical_model", {})
+    defaults = numerical_model.get("contact_interface_defaults", {})
+    return {
+        "normal": defaults.get("normal", "penalty_or_augmented_lagrange"),
+        "tangential": defaults.get("tangential", "regularized_coulomb"),
+        "friction_coefficient": defaults.get("friction_coefficient", analysis.get("friction_coefficient")),
+        "residual_contact_pressure_mpa": defaults.get("residual_contact_pressure_mpa", analysis.get("residual_contact_pressure_mpa")),
+        "regularization_beta": defaults.get("regularization_beta", analysis.get("contact_regularization_beta")),
+    }
+
+
+def write_mesh_manifest(path, payload, abaqus_created, files=None, error="", contact_property=None):
     geometry = payload.get("derived_geometry_mm", {})
     armour = payload.get("armour", {})
     analysis = payload.get("analysis_conditions", {})
@@ -143,13 +156,12 @@ def write_mesh_manifest(path, payload, abaqus_created, files=None, error=""):
             "contact_regularization_beta": float(analysis.get("contact_regularization_beta", 0.001)),
         },
         "contact_interfaces": numerical_model.get("contact_interfaces", []),
-        "contact_interface_defaults": numerical_model.get("contact_interface_defaults", {
-            "normal": "penalty_or_augmented_lagrange",
-            "tangential": "regularized_coulomb",
-            "friction_coefficient": analysis.get("friction_coefficient"),
-            "residual_contact_pressure_mpa": analysis.get("residual_contact_pressure_mpa"),
-            "regularization_beta": analysis.get("contact_regularization_beta"),
-        }),
+        "contact_interface_defaults": contact_defaults_from_payload(payload),
+        "contact_property_scaffold": contact_property or {
+            "status": "not_created",
+            "reason": "Abaqus API not available or mesh scaffold failed before contact property creation.",
+            "next_step": "create assembly surfaces/sets and bind the declared contact interfaces to this property",
+        },
         "components": [
             {
                 "name": "three_core_equivalent_solids",
@@ -212,6 +224,81 @@ def material_by_name(payload, needle, fallback_e=1.0, fallback_nu=0.3, fallback_
     }
 
 
+def create_contact_property_scaffold(model, payload):
+    import abaqusConstants as ac
+
+    defaults = contact_defaults_from_payload(payload)
+    numerical_model = payload.get("numerical_model", {})
+    friction = defaults.get("friction_coefficient")
+    beta = defaults.get("regularization_beta")
+    residual_pressure = defaults.get("residual_contact_pressure_mpa")
+    try:
+        friction = float(friction)
+    except Exception:
+        friction = 0.22
+    try:
+        beta = float(beta)
+    except Exception:
+        beta = 0.001
+    try:
+        residual_pressure = float(residual_pressure)
+    except Exception:
+        residual_pressure = 0.0
+
+    prop_name = "SCLAS_RegularizedContact"
+    contact_info = {
+        "status": "created",
+        "property_name": prop_name,
+        "normal_behavior": defaults.get("normal"),
+        "tangential_behavior": defaults.get("tangential"),
+        "friction_coefficient": friction,
+        "regularization_beta": beta,
+        "residual_contact_pressure_mpa": residual_pressure,
+        "declared_interfaces": numerical_model.get("contact_interfaces", []),
+        "interaction_pair_status": "property_only_surface_pairs_pending",
+        "warnings": [],
+    }
+
+    prop = model.ContactProperty(prop_name)
+    try:
+        prop.NormalBehavior(
+            pressureOverclosure=getattr(ac, "HARD"),
+            allowSeparation=getattr(ac, "ON"),
+            constraintEnforcementMethod=getattr(ac, "DEFAULT"),
+        )
+    except Exception as exc:
+        contact_info["warnings"].append("NormalBehavior default call failed: {0}".format(exc))
+        try:
+            prop.NormalBehavior(pressureOverclosure=getattr(ac, "HARD"), allowSeparation=getattr(ac, "ON"))
+        except Exception as inner_exc:
+            contact_info["warnings"].append("NormalBehavior fallback failed: {0}".format(inner_exc))
+            contact_info["status"] = "created_without_normal_behavior"
+
+    try:
+        prop.TangentialBehavior(
+            formulation=getattr(ac, "PENALTY"),
+            directionality=getattr(ac, "ISOTROPIC"),
+            slipRateDependency=getattr(ac, "OFF"),
+            pressureDependency=getattr(ac, "OFF"),
+            temperatureDependency=getattr(ac, "OFF"),
+            dependencies=0,
+            table=((friction,),),
+            shearStressLimit=None,
+            maximumElasticSlip=getattr(ac, "FRACTION"),
+            fraction=beta,
+            elasticSlipStiffness=None,
+        )
+    except Exception as exc:
+        contact_info["warnings"].append("TangentialBehavior regularized call failed: {0}".format(exc))
+        try:
+            prop.TangentialBehavior(formulation=getattr(ac, "PENALTY"), table=((friction,),))
+        except Exception as inner_exc:
+            contact_info["warnings"].append("TangentialBehavior fallback failed: {0}".format(inner_exc))
+            contact_info["status"] = "created_without_tangential_behavior"
+
+    return contact_info
+
+
 def build_abaqus_mesh_model(payload, job_dir):
     """Create a CAE mesh scaffold when this script is executed by Abaqus/CAE."""
     from abaqus import mdb
@@ -271,6 +358,7 @@ def build_abaqus_mesh_model(payload, job_dir):
     steel_mat = model.Material(name="ArmourSteel_mat")
     steel_mat.Elastic(table=((steel["elastic_modulus_mpa"], steel["poisson_ratio"]),))
     steel_mat.Density(table=((steel["density"],),))
+    contact_property = create_contact_property_scaffold(model, payload)
 
     def elem_code_for_solid():
         import abaqusConstants as ac
@@ -381,6 +469,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         "job_name": job_name,
         "model_name": model_name,
         "files": files,
+        "contact_property_scaffold": contact_property,
         "node_element_note": "See generated .inp/.cae for Abaqus node and element counts.",
     }
 
@@ -522,6 +611,7 @@ def main(argv):
                 payload,
                 abaqus_created=True,
                 files=mesh_status.get("files", []),
+                contact_property=mesh_status.get("contact_property_scaffold"),
             )
             print("Wrote Abaqus mesh scaffold: {0}".format(", ".join(mesh_status.get("files", []))))
         except Exception as exc:
