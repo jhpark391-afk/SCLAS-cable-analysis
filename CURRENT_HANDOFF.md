@@ -104,6 +104,13 @@ Windows home-computer GUI verification has now passed for the current
   coupling, records end-face sets separately, and uses
   `created_with_pending_end_coupling` when the mandatory scaffold is present
   but Abaqus coupling support still needs a version-specific fallback.
+- The runner now injects an Abaqus 2019-compatible keyword fallback into the
+  generated `.inp` after `writeInput()`: end-node `*Nset`s, node-based
+  `*Surface`s, and `*Coupling` / `*Kinematic` blocks are inserted before
+  `*End Assembly`. If injection succeeds the boundary-condition status becomes
+  `created_with_keyword_coupling_fallback`. This affects the generated input
+  deck; the CAE model tree may still show only the Python-created reference
+  points and BCs.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files
@@ -190,7 +197,9 @@ interactions in the CAE tree. For cyclic bending setup checks, inspect
 `SCLAS_CyclicBendingAmplitude`, end reference point sets, and BCs in the CAE
 model tree. If the status is `created_with_pending_end_coupling`, inspect
 `optional_warnings` and `available_constraint_methods` before implementing the
-version-specific coupling fallback.
+version-specific coupling fallback. If the status is
+`created_with_keyword_coupling_fallback`, inspect the generated `.inp` for
+`SCLAS_LeftEnd_KeywordCoupling` and `SCLAS_RightEnd_KeywordCoupling`.
 
 ## Research Implementation Status
 
@@ -228,8 +237,8 @@ Still needed for a paper-level implementation:
    tune B31 beam surface creation or fall back to a documented general-contact
    workflow.
 3. Verify `boundary_condition_scaffold_status`; if it is
-   `created_with_pending_end_coupling`, implement the Abaqus 2019-compatible
-   end-face coupling fallback using the recorded `available_constraint_methods`.
+   `created_with_keyword_coupling_fallback`, run a solver smoke test on the
+   generated `.inp` or submit the generated Abaqus job and inspect errors.
 4. Preserve the GUI contract:
    - `input_data.json` as backend input
    - `result_data.csv` with `curvature_1_per_m,moment_kn_m`
