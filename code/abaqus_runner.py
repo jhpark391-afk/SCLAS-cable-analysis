@@ -827,24 +827,29 @@ def build_abaqus_mesh_model(payload, job_dir):
             "amplitude": "SCLAS_CyclicBendingAmplitude",
             "left_reference_point_set": "SCLAS_RP_LeftEnd",
             "right_reference_point_set": "SCLAS_RP_RightEnd",
+            "left_end_face_set": "SCLAS_LeftEndFaces",
+            "right_end_face_set": "SCLAS_RightEndFaces",
             "left_end_surface": "SCLAS_LeftEndSurface",
             "right_end_surface": "SCLAS_RightEndSurface",
             "target_curvature_1_per_m": float(analysis.get("max_curvature_1_per_m", 0.08)),
             "effective_length_mm": length,
             "target_rotation_rad": float(analysis.get("max_curvature_1_per_m", 0.08)) * (length / 1000.0),
             "created_regions": [],
+            "optional_created_regions": [],
             "warnings": [],
+            "optional_warnings": [],
             "notes": [
                 "Boundary conditions are a cyclic bending scaffold; moment extraction from ODB is still pending.",
-                "End faces are coupled to reference points using available solid end-face probes.",
+                "Reference point cyclic rotation is mandatory for this scaffold; end-face coupling is attempted when supported.",
             ],
         }
-        created = 0
-        expected = 8
+        required_created = 0
+        required_expected = 5
+        optional_created = 0
         try:
             model.StaticStep(name=record["step"], previous="Initial", nlgeom=ON)
             record["created_regions"].append("cyclic_bending_step")
-            created += 1
+            required_created += 1
         except Exception as exc:
             record["warnings"].append("cyclic bending step failed: {0}".format(exc))
 
@@ -857,7 +862,7 @@ def build_abaqus_mesh_model(payload, job_dir):
                 data=((0.0, 0.0), (0.25, 1.0), (0.5, 0.0), (0.75, -1.0), (1.0, 0.0)),
             )
             record["created_regions"].append("cyclic_amplitude")
-            created += 1
+            required_created += 1
         except Exception as exc:
             record["warnings"].append("cyclic amplitude failed: {0}".format(exc))
 
@@ -865,14 +870,14 @@ def build_abaqus_mesh_model(payload, job_dir):
             left_rp = assembly.ReferencePoint(point=(0.0, 0.0, -0.5 * length))
             assembly.Set(referencePoints=(assembly.referencePoints[left_rp.id],), name=record["left_reference_point_set"])
             record["created_regions"].append("left_reference_point")
-            created += 1
+            required_created += 1
         except Exception as exc:
             record["warnings"].append("left reference point failed: {0}".format(exc))
         try:
             right_rp = assembly.ReferencePoint(point=(0.0, 0.0, 0.5 * length))
             assembly.Set(referencePoints=(assembly.referencePoints[right_rp.id],), name=record["right_reference_point_set"])
             record["created_regions"].append("right_reference_point")
-            created += 1
+            required_created += 1
         except Exception as exc:
             record["warnings"].append("right reference point failed: {0}".format(exc))
 
@@ -895,27 +900,62 @@ def build_abaqus_mesh_model(payload, job_dir):
         record["right_end_face_count"] = len(right_faces)
 
         try:
-            assembly.Set(faces=tuple(left_faces), name="SCLAS_LeftEndFaces")
-            assembly.Surface(side1Faces=tuple(left_faces), name=record["left_end_surface"])
-            record["created_regions"].append("left_end_surface")
-            created += 1
+            assembly.Set(faces=tuple(left_faces), name=record["left_end_face_set"])
+            record["optional_created_regions"].append("left_end_face_set")
+            optional_created += 1
         except Exception as exc:
-            record["warnings"].append("left end surface failed: {0}".format(exc))
+            record["optional_warnings"].append("left end face set failed: {0}".format(exc))
         try:
-            assembly.Set(faces=tuple(right_faces), name="SCLAS_RightEndFaces")
-            assembly.Surface(side1Faces=tuple(right_faces), name=record["right_end_surface"])
-            record["created_regions"].append("right_end_surface")
-            created += 1
+            assembly.Set(faces=tuple(right_faces), name=record["right_end_face_set"])
+            record["optional_created_regions"].append("right_end_face_set")
+            optional_created += 1
         except Exception as exc:
-            record["warnings"].append("right end surface failed: {0}".format(exc))
+            record["optional_warnings"].append("right end face set failed: {0}".format(exc))
+
+        try:
+            assembly.Surface(side1Faces=tuple(left_faces), name=record["left_end_surface"])
+            record["optional_created_regions"].append("left_end_surface")
+            optional_created += 1
+        except Exception as exc:
+            record["optional_warnings"].append("left end surface failed: {0}".format(exc))
+        try:
+            assembly.Surface(side1Faces=tuple(right_faces), name=record["right_end_surface"])
+            record["optional_created_regions"].append("right_end_surface")
+            optional_created += 1
+        except Exception as exc:
+            record["optional_warnings"].append("right end surface failed: {0}".format(exc))
 
         try:
             import abaqusConstants as ac
+            coupling_method_name = None
+            for candidate in ["Coupling", "KinematicCoupling"]:
+                if hasattr(model, candidate):
+                    coupling_method_name = candidate
+                    break
+            record["available_constraint_methods"] = [
+                candidate for candidate in ["Coupling", "KinematicCoupling", "MultipointConstraint", "Equation"] if hasattr(model, candidate)
+            ]
+            if not coupling_method_name:
+                raise AttributeError("no Coupling/KinematicCoupling method on Abaqus model")
 
-            model.Coupling(
+            left_surface_region = None
+            right_surface_region = None
+            if record["left_end_surface"] in assembly.surfaces.keys():
+                left_surface_region = assembly.surfaces[record["left_end_surface"]]
+            elif record["left_end_face_set"] in assembly.sets.keys():
+                left_surface_region = assembly.sets[record["left_end_face_set"]]
+            if record["right_end_surface"] in assembly.surfaces.keys():
+                right_surface_region = assembly.surfaces[record["right_end_surface"]]
+            elif record["right_end_face_set"] in assembly.sets.keys():
+                right_surface_region = assembly.sets[record["right_end_face_set"]]
+            if left_surface_region is None or right_surface_region is None:
+                raise KeyError("end face regions were not available for coupling")
+
+            coupling_method = getattr(model, coupling_method_name)
+            coupling_method(
                 name="SCLAS_LeftEnd_KinematicCoupling",
                 controlPoint=assembly.sets[record["left_reference_point_set"]],
-                surface=assembly.surfaces[record["left_end_surface"]],
+                surface=left_surface_region,
                 influenceRadius=getattr(ac, "WHOLE_SURFACE"),
                 couplingType=getattr(ac, "KINEMATIC"),
                 localCsys=None,
@@ -926,10 +966,10 @@ def build_abaqus_mesh_model(payload, job_dir):
                 ur2=ON,
                 ur3=ON,
             )
-            model.Coupling(
+            coupling_method(
                 name="SCLAS_RightEnd_KinematicCoupling",
                 controlPoint=assembly.sets[record["right_reference_point_set"]],
-                surface=assembly.surfaces[record["right_end_surface"]],
+                surface=right_surface_region,
                 influenceRadius=getattr(ac, "WHOLE_SURFACE"),
                 couplingType=getattr(ac, "KINEMATIC"),
                 localCsys=None,
@@ -940,10 +980,11 @@ def build_abaqus_mesh_model(payload, job_dir):
                 ur2=ON,
                 ur3=ON,
             )
-            record["created_regions"].append("end_couplings")
-            created += 1
+            record["optional_created_regions"].append("end_couplings")
+            record["coupling_method"] = coupling_method_name
+            optional_created += 1
         except Exception as exc:
-            record["warnings"].append("end coupling failed: {0}".format(exc))
+            record["optional_warnings"].append("end coupling pending: {0}".format(exc))
 
         try:
             model.EncastreBC(
@@ -964,13 +1005,18 @@ def build_abaqus_mesh_model(payload, job_dir):
                 amplitude=record["amplitude"],
             )
             record["created_regions"].append("reference_point_bcs")
-            created += 1
+            required_created += 1
         except Exception as exc:
             record["warnings"].append("reference point BCs failed: {0}".format(exc))
 
-        if created >= expected:
+        record["required_created_count"] = required_created
+        record["required_expected_count"] = required_expected
+        record["optional_created_count"] = optional_created
+        if required_created >= required_expected and "end_couplings" in record["optional_created_regions"]:
             record["status"] = "created"
-        elif created > 0:
+        elif required_created >= required_expected:
+            record["status"] = "created_with_pending_end_coupling"
+        elif required_created > 0:
             record["status"] = "partial"
         else:
             record["status"] = "failed"

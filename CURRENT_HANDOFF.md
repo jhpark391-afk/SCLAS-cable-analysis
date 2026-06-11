@@ -97,6 +97,13 @@ Windows home-computer GUI verification has now passed for the current
   and effective length. Results are recorded under
   `boundary_condition_scaffold`. This is still a setup scaffold; no real Abaqus
   solve or ODB moment extraction is performed yet.
+- Lab Abaqus 2019 created the cyclic step, amplitude, reference points, and
+  reference-point BCs, but reported `partial` because assembly end surfaces
+  failed and the model object exposed no `Coupling` method. The runner now
+  separates required reference-point BC creation from optional end-face
+  coupling, records end-face sets separately, and uses
+  `created_with_pending_end_coupling` when the mandatory scaffold is present
+  but Abaqus coupling support still needs a version-specific fallback.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files
@@ -180,8 +187,10 @@ contract-named layer surfaces above. For explicit contact-pair checks, inspect
 `contact_pair_scaffold` in the manifest and verify any created `Pair_*`
 interactions in the CAE tree. For cyclic bending setup checks, inspect
 `boundary_condition_scaffold` and verify `SCLAS_CyclicBendingStep`,
-`SCLAS_CyclicBendingAmplitude`, end reference point sets, couplings, and BCs in
-the CAE model tree.
+`SCLAS_CyclicBendingAmplitude`, end reference point sets, and BCs in the CAE
+model tree. If the status is `created_with_pending_end_coupling`, inspect
+`optional_warnings` and `available_constraint_methods` before implementing the
+version-specific coupling fallback.
 
 ## Research Implementation Status
 
@@ -218,8 +227,9 @@ Still needed for a paper-level implementation:
 2. If explicit pair records are `failed` or `skipped`, use their warnings to
    tune B31 beam surface creation or fall back to a documented general-contact
    workflow.
-3. Verify `boundary_condition_scaffold_status`; if it is `partial`, use the
-   warnings to tune end-face probing/coupling creation.
+3. Verify `boundary_condition_scaffold_status`; if it is
+   `created_with_pending_end_coupling`, implement the Abaqus 2019-compatible
+   end-face coupling fallback using the recorded `available_constraint_methods`.
 4. Preserve the GUI contract:
    - `input_data.json` as backend input
    - `result_data.csv` with `curvature_1_per_m,moment_kn_m`
