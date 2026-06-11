@@ -134,21 +134,25 @@ def contact_defaults_from_payload(payload):
     }
 
 
-def contact_binding_scaffold(payload):
-    conceptual_regions = {
+def contact_region_map():
+    return {
         "inner_armour_helical_beams_or_surfaces": {
+            "assembly_surface": "InnerArmourHelix_ContactSurface",
             "assembly_edge_set": "InnerArmourHelix_ContactEdges",
             "component": "InnerArmourHelix",
         },
         "outer_armour_helical_beams_or_surfaces": {
+            "assembly_surface": "OuterArmourHelix_ContactSurface",
             "assembly_edge_set": "OuterArmourHelix_ContactEdges",
             "component": "OuterArmourHelix",
         },
         "inner_armour_layer": {
+            "assembly_surface": "InnerArmourHelix_ContactSurface",
             "assembly_edge_set": "InnerArmourHelix_ContactEdges",
             "component": "InnerArmourHelix",
         },
         "outer_armour_layer": {
+            "assembly_surface": "OuterArmourHelix_ContactSurface",
             "assembly_edge_set": "OuterArmourHelix_ContactEdges",
             "component": "OuterArmourHelix",
         },
@@ -177,6 +181,10 @@ def contact_binding_scaffold(payload):
             "component": "OuterSheathEquivalent",
         },
     }
+
+
+def contact_binding_scaffold(payload):
+    conceptual_regions = contact_region_map()
     numerical_model = payload.get("numerical_model", {})
     bindings = []
     for interface in numerical_model.get("contact_interfaces", []):
@@ -210,6 +218,7 @@ def write_mesh_manifest(
     contact_property=None,
     contact_regions=None,
     contact_interactions=None,
+    contact_pairs=None,
 ):
     geometry = payload.get("derived_geometry_mm", {})
     armour = payload.get("armour", {})
@@ -232,6 +241,14 @@ def write_mesh_manifest(
         for interaction in contact_interactions:
             if interaction.get("status") != "created":
                 contact_interaction_status = "partial"
+                break
+    contact_pairs = contact_pairs or []
+    contact_pair_status = "not_created"
+    if contact_pairs:
+        contact_pair_status = "created"
+        for contact_pair in contact_pairs:
+            if contact_pair.get("status") != "created":
+                contact_pair_status = "partial"
                 break
     manifest = {
         "status": "abaqus_mesh_created" if abaqus_created else "mesh_request_only",
@@ -259,6 +276,8 @@ def write_mesh_manifest(
         "contact_region_scaffold": contact_regions,
         "contact_interaction_scaffold_status": contact_interaction_status,
         "contact_interaction_scaffold": contact_interactions,
+        "contact_pair_scaffold_status": contact_pair_status,
+        "contact_pair_scaffold": contact_pairs,
         "components": [
             {
                 "name": "three_core_equivalent_solids",
@@ -593,18 +612,21 @@ def build_abaqus_mesh_model(payload, job_dir):
     def create_beam_contact_regions(part, inst, component_name):
         record = {
             "component": component_name,
-            "region_type": "beam_edge_set",
+            "region_type": "beam_edge_set_and_surface",
             "part": part.name,
             "assembly_instance": inst.name,
             "part_edge_set": "ContactEdges",
             "assembly_edge_set": component_name + "_ContactEdges",
+            "part_surface": "ContactSurface",
+            "assembly_surface": component_name + "_ContactSurface",
             "created_regions": [],
             "warnings": [],
             "notes": [
-                "B31 armour scaffold exposes edge sets; true beam/solid contact assignment is still pending."
+                "B31 armour scaffold exposes edge sets and attempts beam circumferential contact surfaces."
             ],
         }
         created = 0
+        expected = 4
         try:
             part.Set(edges=part.edges[:], name=record["part_edge_set"])
             record["created_regions"].append("part_edge_set")
@@ -617,7 +639,19 @@ def build_abaqus_mesh_model(payload, job_dir):
             created += 1
         except Exception as exc:
             record["warnings"].append("assembly edge set failed: {0}".format(exc))
-        append_contact_region(record, created, 2)
+        try:
+            part.Surface(circumEdges=part.edges[:], name=record["part_surface"])
+            record["created_regions"].append("part_surface")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("part beam surface failed: {0}".format(exc))
+        try:
+            assembly.Surface(circumEdges=inst.edges[:], name=record["assembly_surface"])
+            record["created_regions"].append("assembly_surface")
+            created += 1
+        except Exception as exc:
+            record["warnings"].append("assembly beam surface failed: {0}".format(exc))
+        append_contact_region(record, created, expected)
 
     def create_contact_interaction_scaffold(contact_property_record):
         record = {
@@ -669,6 +703,106 @@ def build_abaqus_mesh_model(payload, job_dir):
             record["status"] = "failed"
             record["warnings"].append("general contact creation failed: {0}".format(exc))
         return record
+
+    def create_explicit_contact_pair_scaffold(contact_property_record):
+        records = []
+        bindings = contact_binding_scaffold(payload)
+        for binding in bindings:
+            pair_name = safe_name("Pair_" + str(binding.get("name", "contact")), 38)
+            record = {
+                "name": pair_name,
+                "interface": binding.get("name"),
+                "type": "SurfaceToSurfaceContactStd",
+                "create_step": "Initial",
+                "contact_property": "SCLAS_RegularizedContact",
+                "master": binding.get("master"),
+                "slave": binding.get("slave"),
+                "resolved_master": binding.get("resolved_master"),
+                "resolved_slave": binding.get("resolved_slave"),
+                "status": "not_created",
+                "created_regions": [],
+                "warnings": [],
+                "notes": [
+                    "Explicit pair contact is a scaffold and may need beam/surface tuning before production solving."
+                ],
+            }
+            records.append(record)
+            if not contact_property_record or contact_property_record.get("status") not in ("created", "partial"):
+                record["status"] = "skipped"
+                record["warnings"].append("contact property was not available")
+                continue
+
+            master_surface = (binding.get("resolved_master") or {}).get("assembly_surface")
+            slave_surface = (binding.get("resolved_slave") or {}).get("assembly_surface")
+            record["master_surface"] = master_surface
+            record["slave_surface"] = slave_surface
+            if not master_surface or not slave_surface:
+                record["status"] = "skipped"
+                record["warnings"].append("resolved assembly surfaces are incomplete")
+                continue
+            if master_surface not in assembly.surfaces.keys():
+                record["status"] = "skipped"
+                record["warnings"].append("master surface not found: {0}".format(master_surface))
+                continue
+            if slave_surface not in assembly.surfaces.keys():
+                record["status"] = "skipped"
+                record["warnings"].append("slave surface not found: {0}".format(slave_surface))
+                continue
+
+            def remove_interaction_if_created(name):
+                try:
+                    if name in model.interactions.keys():
+                        del model.interactions[name]
+                except Exception:
+                    pass
+
+            def try_pair(name, master_region, slave_region, mode):
+                import abaqusConstants as ac
+
+                try:
+                    if mode == "standard":
+                        model.SurfaceToSurfaceContactStd(
+                            name=name,
+                            createStepName="Initial",
+                            master=master_region,
+                            slave=slave_region,
+                            sliding=getattr(ac, "FINITE"),
+                            interactionProperty="SCLAS_RegularizedContact",
+                            thickness=ON,
+                        )
+                    else:
+                        model.SurfaceToSurfaceContactStd(
+                            name=name,
+                            createStepName="Initial",
+                            master=master_region,
+                            slave=slave_region,
+                            sliding=getattr(ac, "FINITE"),
+                            interactionProperty="SCLAS_RegularizedContact",
+                        )
+                    return True, ""
+                except Exception as exc:
+                    remove_interaction_if_created(name)
+                    return False, str(exc)
+
+            master_region = assembly.surfaces[master_surface]
+            slave_region = assembly.surfaces[slave_surface]
+            attempts = [
+                (pair_name, master_region, slave_region, "standard", "declared_order"),
+                (pair_name, master_region, slave_region, "minimal", "declared_order_minimal"),
+                (safe_name(pair_name + "_Swap", 38), slave_region, master_region, "standard", "swapped_order"),
+                (safe_name(pair_name + "_Swap", 38), slave_region, master_region, "minimal", "swapped_order_minimal"),
+            ]
+            for attempt_name, attempt_master, attempt_slave, mode, label in attempts:
+                success, error = try_pair(attempt_name, attempt_master, attempt_slave, mode)
+                if success:
+                    record["status"] = "created"
+                    record["name"] = attempt_name
+                    record["created_regions"].append(label)
+                    break
+                record["warnings"].append("{0} failed: {1}".format(label, error))
+            if record["status"] != "created":
+                record["status"] = "failed"
+        return records
 
     def elem_code_for_solid():
         import abaqusConstants as ac
@@ -847,6 +981,7 @@ def build_abaqus_mesh_model(payload, job_dir):
 
     model.StaticStep(name="MeshOnlyStep", previous="Initial")
     contact_interactions = [create_contact_interaction_scaffold(contact_property)]
+    contact_pairs = create_explicit_contact_pair_scaffold(contact_property)
     old_cwd = os.getcwd()
     os.chdir(str(job_dir))
     try:
@@ -866,6 +1001,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         "contact_property_scaffold": contact_property,
         "contact_region_scaffold": contact_regions,
         "contact_interaction_scaffold": contact_interactions,
+        "contact_pair_scaffold": contact_pairs,
         "node_element_note": "See generated .inp/.cae for Abaqus node and element counts.",
     }
 
@@ -1010,6 +1146,7 @@ def main(argv):
                 contact_property=mesh_status.get("contact_property_scaffold"),
                 contact_regions=mesh_status.get("contact_region_scaffold"),
                 contact_interactions=mesh_status.get("contact_interaction_scaffold"),
+                contact_pairs=mesh_status.get("contact_pair_scaffold"),
             )
             print("Wrote Abaqus mesh scaffold: {0}".format(", ".join(mesh_status.get("files", []))))
         except Exception as exc:

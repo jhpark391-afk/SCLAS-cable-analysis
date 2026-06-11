@@ -83,6 +83,13 @@ Windows home-computer GUI verification has now passed for the current
   `outer_sheath_inner_surface`, and `outer_sheath_outer_surface`. The manifest
   resolves declared contact bindings to these assembly surfaces and the armour
   `*_ContactEdges` sets, but explicit pair interactions are still pending.
+- The runner now attempts B31 armour circumferential contact surfaces
+  (`InnerArmourHelix_ContactSurface`, `OuterArmourHelix_ContactSurface`) and
+  explicit `SurfaceToSurfaceContactStd` pair interactions for the declared GUI
+  contact interfaces. Results are recorded under `contact_pair_scaffold`.
+  Abaqus 2019 beam/surface contact support must be checked on the lab PC; pair
+  records may be `created`, `partial`, `skipped`, or `failed` without changing
+  the placeholder CSV contract.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files
@@ -162,7 +169,9 @@ include `contact_interaction_scaffold` with `SCLAS_GeneralContact`, and the CAE
 model tree should show this under Interactions. For separated layer geometry,
 also verify that `Parts` includes `InnerSheathEquivalent`, `BeddingEquivalent`,
 and `OuterSheathEquivalent`, and that assembly Surfaces include the six
-contract-named layer surfaces above.
+contract-named layer surfaces above. For explicit contact-pair checks, inspect
+`contact_pair_scaffold` in the manifest and verify any created `Pair_*`
+interactions in the CAE tree.
 
 ## Research Implementation Status
 
@@ -194,12 +203,13 @@ Still needed for a paper-level implementation:
 
 ## Next Recommended Tasks
 
-1. Re-run the lab Abaqus/CAE noGUI smoke test and verify annular layer parts
-   plus contract-named assembly surfaces are created.
-2. Verify `contact_binding_scaffold` resolves declared interfaces to the new
-   layer surfaces and armour edge sets.
-3. Bind explicit surface-to-surface or beam-to-surface contact pairs to
-   `SCLAS_RegularizedContact`.
+1. Re-run the lab Abaqus/CAE noGUI smoke test and inspect
+   `contact_pair_scaffold_status`.
+2. If explicit pair records are `failed` or `skipped`, use their warnings to
+   tune B31 beam surface creation or fall back to a documented general-contact
+   workflow.
+3. Once pair creation is stable, add periodic boundary conditions and cyclic
+   bending boundary conditions.
 4. Preserve the GUI contract:
    - `input_data.json` as backend input
    - `result_data.csv` with `curvature_1_per_m,moment_kn_m`
