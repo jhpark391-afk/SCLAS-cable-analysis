@@ -19,7 +19,7 @@ main
 Latest completed GUI baseline commit:
 
 ```text
-f926c95 Add direct Windows launcher and GitHub helpers
+b2c17a1 Document Windows HELIX GUI verification
 ```
 
 ## Current Focus
@@ -55,6 +55,10 @@ Windows home-computer GUI verification has now passed for the current
 - `code/abaqus_runner.py` placeholder summaries now include
   `result_contract`, `backend_readiness`, and
   `hysteresis_loss_kj_per_m_proxy` so `code/sclas_self_check.py` passes.
+- Lab PC Abaqus/CAE 2019 was reached through ZeroTier/RDP. Its noGUI Python is
+  Python 2-era, so `code/abaqus_runner.py` has been converted away from Python
+  3-only syntax such as type annotations, f-strings, `pathlib`, and
+  `datetime.isoformat(timespec=...)`.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files
@@ -113,6 +117,16 @@ python code\sclas_self_check.py
 ```
 
 Result: both passed using the Windows-ready virtual environment.
+
+After Abaqus-runner edits, also re-run an Abaqus noGUI smoke test on the lab PC:
+
+```bat
+abaqus cae noGUI=abaqus_runner.py -- input_data.json
+```
+
+Expected minimum outputs remain `result_data.csv`, `result_summary.json`, and
+`abaqus_mesh_manifest.json`. If the Abaqus mesh scaffold succeeds, expect
+`sclas_mesh_model.cae` and a generated `.inp` file as well.
 
 ## Research Implementation Status
 

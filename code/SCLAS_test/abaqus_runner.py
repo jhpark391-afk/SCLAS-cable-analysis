@@ -20,28 +20,35 @@ import os
 import re
 import sys
 from datetime import datetime
-from pathlib import Path
 
 
-def load_payload(path: Path) -> dict:
-    with path.open("r", encoding="utf-8") as f:
+def path_text(path):
+    return os.fspath(path) if hasattr(os, "fspath") else str(path)
+
+
+def timestamp_seconds():
+    return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def load_payload(path):
+    with open(path_text(path), "r") as f:
         return json.load(f)
 
 
-def write_json(path: Path, data: dict) -> None:
-    with path.open("w", encoding="utf-8") as f:
+def write_json(path, data):
+    with open(path_text(path), "w") as f:
         json.dump(data, f, indent=4)
 
 
-def write_result_csv(path: Path, curvature, moment_kn_m) -> None:
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
+def write_result_csv(path, curvature, moment_kn_m):
+    with open(path_text(path), "w") as f:
+        writer = csv.writer(f, lineterminator="\n")
         writer.writerow(["curvature_1_per_m", "moment_kn_m"])
         for k, m in zip(curvature, moment_kn_m):
-            writer.writerow([f"{k:.12g}", f"{m:.12g}"])
+            writer.writerow(["{0:.12g}".format(k), "{0:.12g}".format(m)])
 
 
-def hysteresis_loss(curvature, moment_kn_m) -> float:
+def hysteresis_loss(curvature, moment_kn_m):
     if len(curvature) < 2:
         return 0.0
     total = 0.0
@@ -50,12 +57,12 @@ def hysteresis_loss(curvature, moment_kn_m) -> float:
     return abs(total)
 
 
-def enabled_assessment_names(payload: dict):
+def enabled_assessment_names(payload):
     enabled = payload.get("study_scope", {}).get("enabled_assessments", {})
     return [key for key, is_enabled in enabled.items() if is_enabled]
 
 
-def build_backend_readiness(payload: dict, source: str, mesh_status: dict) -> dict:
+def build_backend_readiness(payload, source, mesh_status):
     enabled = set(enabled_assessment_names(payload))
     mesh_state = mesh_status.get("status", "not_attempted") if isinstance(mesh_status, dict) else "not_attempted"
     real_abaqus_mesh = mesh_state == "abaqus_mesh_created"
@@ -94,17 +101,17 @@ def build_backend_readiness(payload: dict, source: str, mesh_status: dict) -> di
     }
 
 
-def parse_input_path(argv) -> Path:
+def parse_input_path(argv):
     candidates = [arg for arg in argv[1:] if arg != "--" and not arg.startswith("-")]
-    return Path(candidates[-1]) if candidates else Path("input_data.json")
+    return candidates[-1] if candidates else "input_data.json"
 
 
-def safe_name(text: str, limit: int = 38) -> str:
+def safe_name(text, limit=38):
     cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", str(text)).strip("_")
     return (cleaned or "SCLAS")[:limit]
 
 
-def abaqus_available() -> bool:
+def abaqus_available():
     try:
         import abaqus  # noqa: F401
         import abaqusConstants  # noqa: F401
@@ -113,7 +120,7 @@ def abaqus_available() -> bool:
         return False
 
 
-def write_mesh_manifest(path: Path, payload: dict, abaqus_created: bool, files=None, error: str = "") -> dict:
+def write_mesh_manifest(path, payload, abaqus_created, files=None, error=""):
     geometry = payload.get("derived_geometry_mm", {})
     armour = payload.get("armour", {})
     analysis = payload.get("analysis_conditions", {})
@@ -122,7 +129,7 @@ def write_mesh_manifest(path: Path, payload: dict, abaqus_created: bool, files=N
     files = files or []
     manifest = {
         "status": "abaqus_mesh_created" if abaqus_created else "mesh_request_only",
-        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "created_at": timestamp_seconds(),
         "abaqus_files": files,
         "error": error,
         "mesh_settings_from_gui": {
@@ -187,7 +194,7 @@ def write_mesh_manifest(path: Path, payload: dict, abaqus_created: bool, files=N
     return manifest
 
 
-def material_by_name(payload: dict, needle: str, fallback_e=1.0, fallback_nu=0.3, fallback_density=1000.0):
+def material_by_name(payload, needle, fallback_e=1.0, fallback_nu=0.3, fallback_density=1000.0):
     for item in payload.get("materials", []):
         if needle.lower() in item.get("name", "").lower():
             return {
@@ -204,7 +211,7 @@ def material_by_name(payload: dict, needle: str, fallback_e=1.0, fallback_nu=0.3
     }
 
 
-def build_abaqus_mesh_model(payload: dict, job_dir: Path) -> dict:
+def build_abaqus_mesh_model(payload, job_dir):
     """Create a CAE mesh scaffold when this script is executed by Abaqus/CAE."""
     from abaqus import mdb
     from abaqusConstants import (
@@ -359,13 +366,13 @@ def build_abaqus_mesh_model(payload: dict, job_dir: Path) -> dict:
     try:
         mdb.Job(name=job_name, model=model_name, type=ANALYSIS, description="SCLAS GUI generated mesh scaffold")
         mdb.jobs[job_name].writeInput(consistencyChecking=OFF)
-        cae_path = job_dir / "sclas_mesh_model.cae"
+        cae_path = os.path.join(path_text(job_dir), "sclas_mesh_model.cae")
         mdb.saveAs(pathName=str(cae_path))
     finally:
         os.chdir(old_cwd)
 
-    inp_path = job_dir / (job_name + ".inp")
-    files = [str(path.name) for path in [cae_path, inp_path] if path.exists()]
+    inp_path = os.path.join(path_text(job_dir), job_name + ".inp")
+    files = [os.path.basename(path) for path in [cae_path, inp_path] if os.path.exists(path)]
     return {
         "job_name": job_name,
         "model_name": model_name,
@@ -374,11 +381,11 @@ def build_abaqus_mesh_model(payload: dict, job_dir: Path) -> dict:
     }
 
 
-def write_summary(path: Path, source: str, payload: dict, curvature, moment_kn_m, derived: dict, mesh_status: dict = None) -> None:
+def write_summary(path, source, payload, curvature, moment_kn_m, derived, mesh_status=None):
     mesh_status = mesh_status or {}
-    max_abs = max((abs(x) for x in moment_kn_m), default=0.0)
-    min_moment = min(moment_kn_m, default=0.0)
-    max_moment = max(moment_kn_m, default=0.0)
+    max_abs = max([abs(x) for x in moment_kn_m] or [0.0])
+    min_moment = min(moment_kn_m or [0.0])
+    max_moment = max(moment_kn_m or [0.0])
     study_scope = payload.get("study_scope", {})
     summary = {
         "source": source,
@@ -405,13 +412,13 @@ def write_summary(path: Path, source: str, payload: dict, curvature, moment_kn_m
             "replace the placeholder curve with ODB-extracted moment-curvature data",
             "promote proxy torsion, pressure, and bird-caging metrics to Abaqus load cases",
         ],
-        "computed_at": datetime.now().isoformat(timespec="seconds"),
+        "computed_at": timestamp_seconds(),
         "note": "Placeholder response curve. Abaqus mesh scaffold is generated when run inside Abaqus/CAE.",
     }
     write_json(path, summary)
 
 
-def run_placeholder_solver(payload: dict):
+def run_placeholder_solver(payload):
     if "analysis_conditions" in payload:
         analysis = payload["analysis_conditions"]
         equivalent = payload["equivalent_properties"]
@@ -493,39 +500,40 @@ def run_placeholder_solver(payload: dict):
     return curvature, moment_kn_m, derived
 
 
-def main(argv) -> int:
+def main(argv):
     input_path = parse_input_path(argv)
-    if not input_path.exists():
-        print(f"input JSON not found: {input_path}", file=sys.stderr)
+    if not os.path.exists(input_path):
+        sys.stderr.write("input JSON not found: {0}\n".format(input_path))
         return 2
 
     payload = load_payload(input_path)
-    job_dir = input_path.resolve().parent
+    job_dir = os.path.dirname(os.path.abspath(input_path))
 
     mesh_status = {"status": "not_attempted"}
     if abaqus_available():
         try:
             mesh_status = build_abaqus_mesh_model(payload, job_dir)
             write_mesh_manifest(
-                job_dir / "abaqus_mesh_manifest.json",
+                os.path.join(job_dir, "abaqus_mesh_manifest.json"),
                 payload,
                 abaqus_created=True,
                 files=mesh_status.get("files", []),
             )
-            print(f"Wrote Abaqus mesh scaffold: {', '.join(mesh_status.get('files', []))}")
+            print("Wrote Abaqus mesh scaffold: {0}".format(", ".join(mesh_status.get("files", []))))
         except Exception as exc:
             mesh_status = {"status": "abaqus_mesh_failed", "error": str(exc)}
-            write_mesh_manifest(job_dir / "abaqus_mesh_manifest.json", payload, abaqus_created=False, error=str(exc))
-            print(f"Abaqus mesh scaffold failed: {exc}", file=sys.stderr)
+            write_mesh_manifest(os.path.join(job_dir, "abaqus_mesh_manifest.json"), payload, abaqus_created=False, error=str(exc))
+            sys.stderr.write("Abaqus mesh scaffold failed: {0}\n".format(exc))
     else:
-        write_mesh_manifest(job_dir / "abaqus_mesh_manifest.json", payload, abaqus_created=False)
+        write_mesh_manifest(os.path.join(job_dir, "abaqus_mesh_manifest.json"), payload, abaqus_created=False)
         mesh_status = {"status": "abaqus_api_not_available", "manifest": "abaqus_mesh_manifest.json"}
         print("Abaqus API not available; wrote abaqus_mesh_manifest.json only.")
 
     curvature, moment_kn_m, derived = run_placeholder_solver(payload)
-    write_result_csv(job_dir / "result_data.csv", curvature, moment_kn_m)
-    write_summary(job_dir / "result_summary.json", "SCLAS_ABAQUS_MESH_BRIDGE", payload, curvature, moment_kn_m, derived, mesh_status)
-    print(f"Wrote {job_dir / 'result_data.csv'}")
+    result_csv = os.path.join(job_dir, "result_data.csv")
+    write_result_csv(result_csv, curvature, moment_kn_m)
+    write_summary(os.path.join(job_dir, "result_summary.json"), "SCLAS_ABAQUS_MESH_BRIDGE", payload, curvature, moment_kn_m, derived, mesh_status)
+    print("Wrote {0}".format(result_csv))
     return 0
 
 
