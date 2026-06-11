@@ -66,7 +66,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "11.1-plot-focus"
+APP_VERSION = "11.2-helix-language-toggle"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -466,8 +466,10 @@ class SCLASRemoteGUI(QMainWindow):
         self.current_m = np.array([])
         self.compare_items: List[pg.PlotDataItem] = []
         self.job_history_paths: List[Path] = []
+        self.ui_language = "EN"
+        self.last_summary_data: dict = {}
         self.last_job_dir = ""
-        self.setWindowTitle("SCLAS Cable Analysis")
+        self.setWindowTitle("HELIX Cable Analysis")
         self.setMinimumSize(1280, 720)
         self.init_ui()
         self.apply_theme()
@@ -499,6 +501,167 @@ class SCLASRemoteGUI(QMainWindow):
             available.y() + max(16, (available.height() - height) // 2),
         )
 
+    def translations(self) -> Dict[str, str]:
+        return {
+            "HELIX Cable Analysis": "HELIX 케이블 해석",
+            "Helical Element Localised Interaction eXamination": "나선형 유한요소 국부 상호작용 분석",
+            "Submarine cable modelling | mesh bridge | nonlinear response": "해저 케이블 모델링 | 메시 연동 | 비선형 응답",
+            "Local project": "로컬 프로젝트",
+            "Workflow": "작업 흐름",
+            "Design\nGeometry inputs": "설계\n형상 입력",
+            "Mesh\nAbaqus bridge": "메시\n아바쿠스 연동",
+            "Analysis\nResults": "해석\n결과",
+            "Ready | Local session": "준비됨 | 로컬 세션",
+            "Cable Geometry Inputs": "케이블 형상 입력",
+            "Import key,value CSV": "key,value CSV 불러오기",
+            "Visible Layers": "표시 레이어",
+            "Outer sheath": "외부 시스",
+            "Outer armour": "외부 아머",
+            "Bedding": "베딩",
+            "Inner armour": "내부 아머",
+            "Inner sheath": "내부 시스",
+            "Three cores": "3상 코어",
+            "Material Table": "재료 표",
+            "Digital Twin View": "디지털 트윈 뷰",
+            "Toggle 2D / 3D": "2D / 3D 전환",
+            "Reset View": "뷰 초기화",
+            "Mesh Request for Backend": "백엔드 메시 요청",
+            "Abaqus element type": "아바쿠스 요소 타입",
+            "Strategy": "전략",
+            "Armour model": "아머 모델",
+            "Contact beta": "접촉 beta",
+            "Axial divisions": "축방향 분할",
+            "Core divisions": "코어 분할",
+            "Armour divisions": "아머 분할",
+            "Generate mesh preview": "메시 프리뷰 생성",
+            "Visual request only. Abaqus backend owns actual mesh generation.": "시각화 요청입니다. 실제 메시 생성은 Abaqus 백엔드가 담당합니다.",
+            "Preview Only": "프리뷰 전용",
+            "Top": "상단",
+            "Iso": "등각",
+            "Reset": "초기화",
+            "Analysis Conditions": "해석 조건",
+            "Effective length (mm)": "유효 길이 (mm)",
+            "Hydrostatic pressure (MPa)": "정수압 (MPa)",
+            "Residual contact pressure (MPa)": "잔류 접촉압 (MPa)",
+            "Friction coefficient": "마찰 계수",
+            "Max curvature (1/m)": "최대 곡률 (1/m)",
+            "Max twist (rad/m)": "최대 비틀림 (rad/m)",
+            "Max axial strain": "최대 축 변형률",
+            "Radial compression ratio": "반경 방향 압축률",
+            "Loading cycles": "하중 사이클",
+            "Result steps": "결과 스텝",
+            "Research Scope / Local Behavior": "연구 범위 / 국부 거동",
+            "Bending: stick-slip / hysteresis": "굽힘: 스틱-슬립 / 히스테리시스",
+            "Torsion stiffness": "비틀림 강성",
+            "Tension-bending coupling": "인장-굽힘 연성",
+            "Compression: bird-caging risk": "압축: bird-caging 위험",
+            "Hydrostatic pressure effect": "정수압 효과",
+            "Backend Mode": "백엔드 모드",
+            "FAST GUI preview": "FAST GUI 프리뷰",
+            "Export job package only": "작업 패키지만 내보내기",
+            "Run local/shared-folder command": "로컬/공유폴더 명령 실행",
+            "Run remote computer via SSH/scp": "SSH/scp로 원격 컴퓨터 실행",
+            "Remote / Backend Settings": "원격 / 백엔드 설정",
+            "Local job root": "로컬 작업 폴더",
+            "Local command": "로컬 명령",
+            "SSH target": "SSH 대상",
+            "Remote job root": "원격 작업 폴더",
+            "Remote command": "원격 명령",
+            "Validate inputs": "입력 검증",
+            "Export JSON": "JSON 내보내기",
+            "Run / Create Job": "실행 / 작업 생성",
+            "Load result CSV": "결과 CSV 불러오기",
+            "System log": "시스템 로그",
+            "Moment-Curvature Result": "모멘트-곡률 결과",
+            "Focus Plot": "그래프 확대",
+            "Show Details": "상세 보기",
+            "Export PNG": "PNG 저장",
+            "Compare CSV": "CSV 비교",
+            "Clear": "지우기",
+            "Peak |M|": "최대 |M|",
+            "Loop loss proxy": "루프 손실 지표",
+            "Points": "데이터 수",
+            "Recent Jobs": "최근 작업",
+            "Refresh": "새로고침",
+            "Load selected": "선택 항목 불러오기",
+            "No result jobs found": "결과 작업 없음",
+            "Model: pending": "모델: 대기",
+            "Model: edited": "모델: 수정됨",
+            "Model: valid": "모델: 유효",
+            "Model: error": "모델: 오류",
+            "Result: none": "결과: 없음",
+            "Result: running": "결과: 실행 중",
+            "Result: ready": "결과: 준비됨",
+            "Result: loaded": "결과: 불러옴",
+            "Result: stopped": "결과: 중단됨",
+            "Result: error": "결과: 오류",
+            "Bending Moment M": "굽힘 모멘트 M",
+            "Curvature kappa": "곡률 kappa",
+            "Layer": "레이어",
+            "Density": "밀도",
+        }
+
+    def ui_text(self, text: str) -> str:
+        if self.ui_language == "KO":
+            return self.translations().get(text, text)
+        return text
+
+    def toggle_language(self) -> None:
+        self.ui_language = "KO" if self.ui_language == "EN" else "EN"
+        self.apply_language()
+        self.save_settings()
+
+    def apply_language(self) -> None:
+        reverse = {ko: en for en, ko in self.translations().items()}
+        for widget in self.findChildren(QWidget):
+            if widget.property("no_translate"):
+                continue
+            if not isinstance(widget, (QLabel, QPushButton, QCheckBox, QRadioButton, QGroupBox)):
+                continue
+            if not hasattr(widget, "text") or not hasattr(widget, "setText"):
+                continue
+            current = widget.text()
+            english = widget.property("en_text")
+            if not english:
+                english = reverse.get(current, current)
+                widget.setProperty("en_text", english)
+            widget.setText(self.ui_text(str(english)))
+
+        if hasattr(self, "btn_language"):
+            self.btn_language.setText("EN" if self.ui_language == "KO" else "KO")
+            self.btn_language.setToolTip(
+                "Switch interface language to English." if self.ui_language == "KO"
+                else "인터페이스 언어를 한국어로 전환합니다."
+            )
+        if hasattr(self, "table"):
+            self.table.setHorizontalHeaderLabels([
+                self.ui_text("Layer"),
+                "E (GPa)",
+                "Nu",
+                self.ui_text("Density"),
+            ])
+        if hasattr(self, "plot_canvas"):
+            self.plot_canvas.setLabel("left", self.ui_text("Bending Moment M"), units="kN.m")
+            self.plot_canvas.setLabel("bottom", self.ui_text("Curvature kappa"), units="1/m")
+        if hasattr(self, "summary_text"):
+            if self.last_summary_data:
+                self.summary_text.setPlainText(self.format_summary(self.last_summary_data))
+            else:
+                self.summary_text.setPlainText(self.summary_placeholder_text())
+
+    def summary_placeholder_text(self) -> str:
+        if self.ui_language == "KO":
+            return (
+                "FAST 프리뷰, 로컬 Abaqus 실행, 또는 수동 result_data.csv 로드 후 "
+                "백엔드 요약이 여기에 표시됩니다.\n\n"
+                "예상 계약: result_data.csv 및 선택적 result_summary.json."
+            )
+        return (
+            "Backend summary will appear here after FAST preview, local Abaqus runner, "
+            "or manual result_data.csv load.\n\n"
+            "Expected contract: result_data.csv plus optional result_summary.json."
+        )
+
     def init_ui(self) -> None:
         main = QWidget()
         root = QHBoxLayout(main)
@@ -519,7 +682,7 @@ class SCLASRemoteGUI(QMainWindow):
         topbar.setSpacing(10)
         title_block = QVBoxLayout()
         title_block.setSpacing(0)
-        title = QLabel("SCLAS Cable Analysis")
+        title = QLabel("HELIX Cable Analysis")
         title.setObjectName("AppTitle")
         subtitle = QLabel("Submarine cable modelling | mesh bridge | nonlinear response")
         subtitle.setObjectName("AppSubtitle")
@@ -533,9 +696,16 @@ class SCLASRemoteGUI(QMainWindow):
         self.lbl_result_status.setObjectName("TopbarMeta")
         session = QLabel("Local project")
         session.setObjectName("TopbarMeta")
+        self.btn_language = QPushButton("KO")
+        self.btn_language.setObjectName("LangToggle")
+        self.btn_language.setFixedWidth(58)
+        self.btn_language.setToolTip("인터페이스 언어를 한국어로 전환합니다.")
+        self.btn_language.setProperty("no_translate", True)
+        self.btn_language.clicked.connect(self.toggle_language)
         topbar.addWidget(self.lbl_model_status)
         topbar.addWidget(self.lbl_result_status)
         topbar.addWidget(session)
+        topbar.addWidget(self.btn_language)
         content_layout.addLayout(topbar)
 
         self.pages = QStackedWidget()
@@ -556,10 +726,11 @@ class SCLASRemoteGUI(QMainWindow):
         layout.setContentsMargins(14, 20, 14, 14)
         layout.setSpacing(8)
 
-        brand = QLabel("SCLAS")
+        brand = QLabel("HELIX")
         brand.setObjectName("SidebarBrand")
-        brand_sub = QLabel("Cable Analysis Suite")
+        brand_sub = QLabel("Helical Element Localised Interaction eXamination")
         brand_sub.setObjectName("SidebarSub")
+        brand_sub.setWordWrap(True)
         layout.addWidget(brand)
         layout.addWidget(brand_sub)
         layout.addSpacing(14)
@@ -624,7 +795,8 @@ class SCLASRemoteGUI(QMainWindow):
             "error": ("#fef2f2", "#fecaca", "#b91c1c"),
         }
         bg, border, fg = palette.get(tone, palette["neutral"])
-        label.setText(text)
+        label.setProperty("en_text", text)
+        label.setText(self.ui_text(text))
         label.setStyleSheet(
             f"color: {fg}; background-color: {bg}; border: 1px solid {border}; "
             "border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 650;"
@@ -1047,11 +1219,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.summary_text.setObjectName("SummaryText")
         self.summary_text.setReadOnly(True)
         self.summary_text.setMaximumHeight(155)
-        self.summary_text.setPlainText(
-            "Backend summary will appear here after FAST preview, local Abaqus runner, "
-            "or manual result_data.csv load.\n\n"
-            "Expected contract: result_data.csv plus optional result_summary.json."
-        )
+        self.summary_text.setPlainText(self.summary_placeholder_text())
         right.addWidget(self.summary_text)
 
         self.history_box = QGroupBox("Recent Jobs")
@@ -1086,6 +1254,7 @@ class SCLASRemoteGUI(QMainWindow):
         layout = QVBoxLayout(box)
         title_label = QLabel(title); title_label.setStyleSheet("color: #5f6b7a; font-size: 13px;")
         value_label = QLabel(value); value_label.setStyleSheet("color: #132033; font-size: 23px; font-weight: 750;")
+        value_label.setProperty("no_translate", True)
         layout.addWidget(title_label); layout.addWidget(value_label)
         box.value_label = value_label
         return box
@@ -1193,6 +1362,8 @@ class SCLASRemoteGUI(QMainWindow):
                 "job_id": job_id,
                 "created_at": datetime.now().isoformat(timespec="seconds"),
                 "created_by_role": "GUI_frontend",
+                "team_name": "HELIX",
+                "team_acronym": "Helical Element Localised Interaction eXamination",
             },
             "units": {
                 "length": "mm unless key ends with _m",
@@ -1472,6 +1643,7 @@ class SCLASRemoteGUI(QMainWindow):
 
         return {
             "version": APP_VERSION,
+            "ui": {"language": self.ui_language},
             "geometry": {key: widget_value(widget) for key, widget in self.inputs.items()},
             "analysis_conditions": {key: widget_value(widget) for key, widget in self.cond.items()},
             "study_scope": {key: widget.isChecked() for key, widget in self.study_checks.items()},
@@ -1542,6 +1714,9 @@ class SCLASRemoteGUI(QMainWindow):
             "REMOTE_SSH": self.radio_remote,
         }
         mode_buttons.get(mode, self.radio_fast).setChecked(True)
+        language = settings.get("ui", {}).get("language", "EN")
+        self.ui_language = "KO" if language == "KO" else "EN"
+        self.apply_language()
 
     def load_settings(self) -> None:
         try:
@@ -1616,7 +1791,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.job_history_paths = jobs
         self.job_history_combo.clear()
         if not jobs:
-            self.job_history_combo.addItem("No result jobs found")
+            self.job_history_combo.addItem(self.ui_text("No result jobs found"))
             return
         for job in jobs:
             stamp = datetime.fromtimestamp(job.stat().st_mtime).strftime("%m-%d %H:%M")
@@ -1719,7 +1894,17 @@ class SCLASRemoteGUI(QMainWindow):
             self.compare_items.append(item)
             self.plot_canvas.autoRange()
             self.log(f"[RESULT] Comparison curve added: {path}")
-            self.set_badge(self.lbl_result_status, f"Result: +{len(self.compare_items)} compare", "busy")
+            compare_text = (
+                f"결과: 비교 {len(self.compare_items)}개"
+                if self.ui_language == "KO"
+                else f"Result: +{len(self.compare_items)} compare"
+            )
+            self.lbl_result_status.setProperty("en_text", f"Result: +{len(self.compare_items)} compare")
+            self.lbl_result_status.setText(compare_text)
+            self.lbl_result_status.setStyleSheet(
+                "color: #1d4ed8; background-color: #eff6ff; border: 1px solid #bfdbfe; "
+                "border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 650;"
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Compare CSV error", str(exc))
 
@@ -1735,7 +1920,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.log("[RESULT] Comparison curves cleared.")
 
     def set_plot_focus(self, enabled: bool) -> None:
-        self.btn_focus_plot.setText("Show Details" if enabled else "Focus Plot")
+        self.btn_focus_plot.setProperty("en_text", "Show Details" if enabled else "Focus Plot")
+        self.btn_focus_plot.setText(self.ui_text("Show Details" if enabled else "Focus Plot"))
         self.plot_canvas.setMinimumHeight(700 if enabled else 520)
         for widget_name in ["metric_panel", "summary_text", "history_box"]:
             widget = getattr(self, widget_name, None)
@@ -1746,11 +1932,12 @@ class SCLASRemoteGUI(QMainWindow):
     def update_summary_panel(self, data: dict) -> None:
         if not hasattr(self, "summary_text"):
             return
+        self.last_summary_data = data if isinstance(data, dict) else {}
         self.summary_text.setPlainText(self.format_summary(data))
 
     def format_summary(self, data: dict) -> str:
         if not data:
-            return "No result summary loaded."
+            return "결과 요약이 없습니다." if self.ui_language == "KO" else "No result summary loaded."
 
         def value(path, default="-"):
             node = data
@@ -1768,16 +1955,28 @@ class SCLASRemoteGUI(QMainWindow):
 
         mesh_status = value(["mesh_status", "status"], value(["mesh_status"], "-"))
         derived = data.get("derived_placeholder_metrics", {})
-        lines = [
-            f"Source: {data.get('source', '-')}",
-            f"Status: {data.get('status', 'loaded')}",
-            f"Computed: {data.get('computed_at', '-')}",
-            f"Peak |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} kN.m",
-            f"Loop loss: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
-            f"Points: {data.get('num_points', '-')}",
-            f"Mesh status: {mesh_status}",
-            f"Enabled scope: {enabled_text}",
-        ]
+        if self.ui_language == "KO":
+            lines = [
+                f"출처: {data.get('source', '-')}",
+                f"상태: {data.get('status', 'loaded')}",
+                f"계산 시각: {data.get('computed_at', '-')}",
+                f"최대 |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} kN.m",
+                f"루프 손실: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
+                f"데이터 수: {data.get('num_points', '-')}",
+                f"메시 상태: {mesh_status}",
+                f"활성 연구 범위: {enabled_text}",
+            ]
+        else:
+            lines = [
+                f"Source: {data.get('source', '-')}",
+                f"Status: {data.get('status', 'loaded')}",
+                f"Computed: {data.get('computed_at', '-')}",
+                f"Peak |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} kN.m",
+                f"Loop loss: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
+                f"Points: {data.get('num_points', '-')}",
+                f"Mesh status: {mesh_status}",
+                f"Enabled scope: {enabled_text}",
+            ]
 
         readiness = data.get("backend_readiness", {})
         if isinstance(readiness, dict):
@@ -1794,21 +1993,32 @@ class SCLASRemoteGUI(QMainWindow):
                 if isinstance(item, dict) and item.get("requested"):
                     status_lines.append(f"- {key}: {item.get('status', '-')}")
             if status_lines:
-                lines.extend(["", "Backend readiness:"] + status_lines)
+                heading = "백엔드 준비도:" if self.ui_language == "KO" else "Backend readiness:"
+                lines.extend(["", heading] + status_lines)
 
         if derived:
-            lines.extend([
-                "",
-                "Research proxies:",
-                f"- slip stiffness: {float(derived.get('bending_stiffness_slip_N_m2', 0.0)):.6g} N.m^2",
-                f"- pressure softening: {float(derived.get('pressure_softening_factor', 0.0)):.4g}",
-                f"- bird-caging risk: {float(derived.get('bird_caging_risk_index', 0.0)):.4g}",
-                f"- torsion proxy: {float(derived.get('torsion_proxy_N_m2', 0.0)):.6g} N.m^2",
-            ])
+            if self.ui_language == "KO":
+                lines.extend([
+                    "",
+                    "연구 지표:",
+                    f"- 슬립 강성: {float(derived.get('bending_stiffness_slip_N_m2', 0.0)):.6g} N.m^2",
+                    f"- 압력 연화: {float(derived.get('pressure_softening_factor', 0.0)):.4g}",
+                    f"- bird-caging 위험: {float(derived.get('bird_caging_risk_index', 0.0)):.4g}",
+                    f"- 비틀림 지표: {float(derived.get('torsion_proxy_N_m2', 0.0)):.6g} N.m^2",
+                ])
+            else:
+                lines.extend([
+                    "",
+                    "Research proxies:",
+                    f"- slip stiffness: {float(derived.get('bending_stiffness_slip_N_m2', 0.0)):.6g} N.m^2",
+                    f"- pressure softening: {float(derived.get('pressure_softening_factor', 0.0)):.4g}",
+                    f"- bird-caging risk: {float(derived.get('bird_caging_risk_index', 0.0)):.4g}",
+                    f"- torsion proxy: {float(derived.get('torsion_proxy_N_m2', 0.0)):.6g} N.m^2",
+                ])
 
         note = data.get("note")
         if note:
-            lines.extend(["", f"Note: {note}"])
+            lines.extend(["", f"{'메모' if self.ui_language == 'KO' else 'Note'}: {note}"])
         return "\n".join(lines)
 
     def trigger_rebuild(self) -> None:
@@ -2003,6 +2213,19 @@ class SCLASRemoteGUI(QMainWindow):
                 padding: 6px 10px;
                 font-size: 12px;
                 font-weight: 650;
+            }
+            QPushButton#LangToggle {
+                color: #0f3a72;
+                background-color: #dfeafb;
+                border: 1px solid #b9cdea;
+                border-radius: 8px;
+                padding: 6px 8px;
+                font-size: 12px;
+                font-weight: 750;
+            }
+            QPushButton#LangToggle:hover {
+                background-color: #d2e4fb;
+                border-color: #9dbde8;
             }
             QPushButton#NavButton {
                 background-color: transparent;
