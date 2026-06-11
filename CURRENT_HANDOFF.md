@@ -106,11 +106,18 @@ Windows home-computer GUI verification has now passed for the current
   but Abaqus coupling support still needs a version-specific fallback.
 - The runner now injects an Abaqus 2019-compatible keyword fallback into the
   generated `.inp` after `writeInput()`: end-node `*Nset`s, node-based
-  `*Surface`s, and `*Coupling` / `*Kinematic` blocks are inserted before
-  `*End Assembly`. If injection succeeds the boundary-condition status becomes
+  `*Surface`s, and `*Coupling` / `*Kinematic` blocks are injected around
+  `*End Assembly` using Abaqus input-deck scoping rules. If injection succeeds
+  the boundary-condition status becomes
   `created_with_keyword_coupling_fallback`. This affects the generated input
   deck; the CAE model tree may still show only the Python-created reference
   points and BCs.
+- A solver smoke submit reached input processing and generated an `.odb`, then
+  stopped with two fatal errors. The likely cause was the two `*Coupling`
+  keyword blocks being placed inside the assembly block. The fallback now keeps
+  generated `*Nset` and node-based `*Surface` data before `*End Assembly`, but
+  injects `*Coupling` / `*Kinematic` as model data immediately after
+  `*End Assembly`.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files
