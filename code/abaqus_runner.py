@@ -135,18 +135,67 @@ def contact_defaults_from_payload(payload):
 
 
 def contact_binding_scaffold(payload):
+    conceptual_regions = {
+        "inner_armour_helical_beams_or_surfaces": {
+            "assembly_edge_set": "InnerArmourHelix_ContactEdges",
+            "component": "InnerArmourHelix",
+        },
+        "outer_armour_helical_beams_or_surfaces": {
+            "assembly_edge_set": "OuterArmourHelix_ContactEdges",
+            "component": "OuterArmourHelix",
+        },
+        "inner_armour_layer": {
+            "assembly_edge_set": "InnerArmourHelix_ContactEdges",
+            "component": "InnerArmourHelix",
+        },
+        "outer_armour_layer": {
+            "assembly_edge_set": "OuterArmourHelix_ContactEdges",
+            "component": "OuterArmourHelix",
+        },
+        "inner_sheath_inner_surface": {
+            "assembly_surface": "inner_sheath_inner_surface",
+            "component": "InnerSheathEquivalent",
+        },
+        "inner_sheath_outer_surface": {
+            "assembly_surface": "inner_sheath_outer_surface",
+            "component": "InnerSheathEquivalent",
+        },
+        "bedding_inner_surface": {
+            "assembly_surface": "bedding_inner_surface",
+            "component": "BeddingEquivalent",
+        },
+        "bedding_outer_surface": {
+            "assembly_surface": "bedding_outer_surface",
+            "component": "BeddingEquivalent",
+        },
+        "outer_sheath_inner_surface": {
+            "assembly_surface": "outer_sheath_inner_surface",
+            "component": "OuterSheathEquivalent",
+        },
+        "outer_sheath_outer_surface": {
+            "assembly_surface": "outer_sheath_outer_surface",
+            "component": "OuterSheathEquivalent",
+        },
+    }
     numerical_model = payload.get("numerical_model", {})
     bindings = []
     for interface in numerical_model.get("contact_interfaces", []):
+        master = interface.get("master")
+        slave = interface.get("slave")
+        resolved_master = conceptual_regions.get(master)
+        resolved_slave = conceptual_regions.get(slave)
+        status = "resolved_scaffold_not_bound_to_pair" if resolved_master and resolved_slave else "declared_not_bound_to_interaction"
         bindings.append(
             {
                 "name": interface.get("name"),
-                "master": interface.get("master"),
-                "slave": interface.get("slave"),
+                "master": master,
+                "slave": slave,
+                "resolved_master": resolved_master,
+                "resolved_slave": resolved_slave,
                 "priority": interface.get("priority"),
                 "contact_property": "SCLAS_RegularizedContact",
-                "status": "declared_not_bound_to_interaction",
-                "next_step": "resolve conceptual master/slave names to assembly surfaces or edge sets",
+                "status": status,
+                "next_step": "bind resolved assembly regions to explicit Abaqus pair interactions",
             }
         )
     return bindings
@@ -220,6 +269,15 @@ def write_mesh_manifest(
                 "element_hint": mesh_cfg.get("requested_element_type", "C3D8R"),
             },
             {
+                "name": "inner_sheath_equivalent_solid",
+                "count": 1,
+                "type": "annular_solid_cylinder",
+                "inner_radius_mm": geometry.get("inner_sheath_inner_radius_mm"),
+                "outer_radius_mm": geometry.get("inner_sheath_outer_radius_mm"),
+                "interface_surfaces": ["inner_sheath_inner_surface", "inner_sheath_outer_surface"],
+                "element_hint": mesh_cfg.get("requested_element_type", "C3D8R"),
+            },
+            {
                 "name": "inner_armour_helical_beams",
                 "count": armour.get("inner_wire_count"),
                 "type": "beam_helix",
@@ -227,6 +285,15 @@ def write_mesh_manifest(
                 "center_radius_mm": geometry.get("inner_armour_center_radius_mm"),
                 "lay_angle_deg": armour.get("inner_lay_angle_deg"),
                 "element_hint": "B31",
+            },
+            {
+                "name": "bedding_equivalent_solid",
+                "count": 1,
+                "type": "annular_solid_cylinder",
+                "inner_radius_mm": geometry.get("inner_armour_outer_radius_mm"),
+                "outer_radius_mm": geometry.get("bedding_outer_radius_mm"),
+                "interface_surfaces": ["bedding_inner_surface", "bedding_outer_surface"],
+                "element_hint": mesh_cfg.get("requested_element_type", "C3D8R"),
             },
             {
                 "name": "outer_armour_helical_beams",
@@ -240,14 +307,16 @@ def write_mesh_manifest(
             {
                 "name": "outer_sheath_equivalent_solid",
                 "count": 1,
-                "type": "solid_cylinder",
-                "radius_mm": geometry.get("outer_sheath_outer_radius_mm"),
+                "type": "annular_solid_cylinder",
+                "inner_radius_mm": geometry.get("outer_sheath_inner_radius_mm"),
+                "outer_radius_mm": geometry.get("outer_sheath_outer_radius_mm"),
+                "interface_surfaces": ["outer_sheath_inner_surface", "outer_sheath_outer_surface"],
                 "element_hint": mesh_cfg.get("requested_element_type", "C3D8R"),
             },
         ],
         "limitations": [
             "This is an Abaqus mesh scaffold, not the final contact-calibrated bending model.",
-            "Solids are equivalent visual/mesh bodies; layer subtraction and full contact pairs remain backend work.",
+            "Layer solids are equivalent annular visual/mesh bodies; contact calibration and full pair definitions remain backend work.",
             "Helical armour wires are represented as B31 beam paths unless the backend replaces them with solid wires.",
         ],
     }
@@ -390,7 +459,7 @@ def build_abaqus_mesh_model(payload, job_dir):
     assembly.DatumCsysByDefault(CARTESIAN)
 
     def make_material_section(section_name, mat_info):
-        mat_name = safe_name(mat_info["name"] + "_mat")
+        mat_name = safe_name(section_name + "_" + mat_info["name"] + "_mat")
         material = model.Material(name=mat_name)
         material.Elastic(table=((mat_info["elastic_modulus_mpa"], mat_info["poisson_ratio"]),))
         material.Density(table=((mat_info["density"],),))
@@ -401,7 +470,9 @@ def build_abaqus_mesh_model(payload, job_dir):
     copper = material_by_name(payload, "Copper", 108.0, 0.33, 8960.0)
     sheath = material_by_name(payload, "Sheath", 1.4, 0.45, 1300.0)
     core_section = make_material_section("CoreSolidSection", copper)
-    sheath_section = make_material_section("OuterSheathSection", sheath)
+    inner_sheath_section = make_material_section("InnerSheathSection", sheath)
+    bedding_section = make_material_section("BeddingSection", sheath)
+    outer_sheath_section = make_material_section("OuterSheathSection", sheath)
 
     steel_mat = model.Material(name="ArmourSteel_mat")
     steel_mat.Elastic(table=((steel["elastic_modulus_mpa"], steel["poisson_ratio"]),))
@@ -418,7 +489,15 @@ def build_abaqus_mesh_model(payload, job_dir):
             record["status"] = "failed"
         contact_regions.append(record)
 
-    def create_solid_contact_regions(part, inst, component_name):
+    def region_sequence(found):
+        try:
+            len(found)
+            return found
+        except Exception:
+            return (found,)
+
+    def create_solid_contact_regions(part, inst, component_name, surface_specs=None):
+        surface_specs = surface_specs or []
         record = {
             "component": component_name,
             "region_type": "solid_face_surface",
@@ -428,13 +507,15 @@ def build_abaqus_mesh_model(payload, job_dir):
             "part_surface": "ContactSurface",
             "assembly_face_set": component_name + "_ContactFaces",
             "assembly_surface": component_name + "_ContactSurface",
+            "interface_surfaces": [],
             "created_regions": [],
             "warnings": [],
             "notes": [
-                "Solid scaffold uses all exterior faces until layer-specific inner/outer contact surfaces are implemented."
+                "ContactSurface uses all faces; named layer surfaces are created from radius-based face probes when available."
             ],
         }
         created = 0
+        expected = 4 + 4 * len(surface_specs)
         try:
             part.Set(faces=part.faces[:], name=record["part_face_set"])
             record["created_regions"].append("part_face_set")
@@ -459,7 +540,55 @@ def build_abaqus_mesh_model(payload, job_dir):
             created += 1
         except Exception as exc:
             record["warnings"].append("assembly surface failed: {0}".format(exc))
-        append_contact_region(record, created, 4)
+
+        for spec in surface_specs:
+            spec_status = {
+                "label": spec.get("label"),
+                "radius_mm": spec.get("radius_mm"),
+                "part_face_set": spec.get("part_face_set"),
+                "part_surface": spec.get("part_surface"),
+                "assembly_face_set": spec.get("assembly_face_set"),
+                "assembly_surface": spec.get("assembly_surface"),
+                "created_regions": [],
+                "warnings": [],
+            }
+            try:
+                part_faces = region_sequence(part.faces.findAt((spec.get("part_probe"),)))
+                part.Set(faces=part_faces, name=spec.get("part_face_set"))
+                spec_status["created_regions"].append("part_face_set")
+                created += 1
+            except Exception as exc:
+                spec_status["warnings"].append("part named face set failed: {0}".format(exc))
+            try:
+                part_faces = region_sequence(part.faces.findAt((spec.get("part_probe"),)))
+                part.Surface(side1Faces=part_faces, name=spec.get("part_surface"))
+                spec_status["created_regions"].append("part_surface")
+                created += 1
+            except Exception as exc:
+                spec_status["warnings"].append("part named surface failed: {0}".format(exc))
+            try:
+                assembly_faces = region_sequence(inst.faces.findAt((spec.get("assembly_probe"),)))
+                assembly.Set(faces=assembly_faces, name=spec.get("assembly_face_set"))
+                spec_status["created_regions"].append("assembly_face_set")
+                created += 1
+            except Exception as exc:
+                spec_status["warnings"].append("assembly named face set failed: {0}".format(exc))
+            try:
+                assembly_faces = region_sequence(inst.faces.findAt((spec.get("assembly_probe"),)))
+                assembly.Surface(side1Faces=assembly_faces, name=spec.get("assembly_surface"))
+                spec_status["created_regions"].append("assembly_surface")
+                created += 1
+            except Exception as exc:
+                spec_status["warnings"].append("assembly named surface failed: {0}".format(exc))
+            if len(spec_status["created_regions"]) == 4:
+                spec_status["status"] = "created"
+            elif spec_status["created_regions"]:
+                spec_status["status"] = "partial"
+            else:
+                spec_status["status"] = "failed"
+            record["interface_surfaces"].append(spec_status)
+
+        append_contact_region(record, created, expected)
 
     def create_beam_contact_regions(part, inst, component_name):
         record = {
@@ -564,6 +693,63 @@ def build_abaqus_mesh_model(payload, job_dir):
         create_solid_contact_regions(part, inst, name)
         return part
 
+    def layer_surface_specs(component_name, inner_radius, outer_radius, inner_surface, outer_surface):
+        probe_angle = math.radians(37.0)
+        inner_probe = (inner_radius * math.cos(probe_angle), inner_radius * math.sin(probe_angle), 0.5 * length)
+        outer_probe = (outer_radius * math.cos(probe_angle), outer_radius * math.sin(probe_angle), 0.5 * length)
+        inner_assembly_probe = (inner_probe[0], inner_probe[1], 0.0)
+        outer_assembly_probe = (outer_probe[0], outer_probe[1], 0.0)
+        return [
+            {
+                "label": "inner",
+                "radius_mm": inner_radius,
+                "part_face_set": "InnerContactFaces",
+                "part_surface": "InnerContactSurface",
+                "assembly_face_set": inner_surface + "_faces",
+                "assembly_surface": inner_surface,
+                "part_probe": inner_probe,
+                "assembly_probe": inner_assembly_probe,
+            },
+            {
+                "label": "outer",
+                "radius_mm": outer_radius,
+                "part_face_set": "OuterContactFaces",
+                "part_surface": "OuterContactSurface",
+                "assembly_face_set": outer_surface + "_faces",
+                "assembly_surface": outer_surface,
+                "part_probe": outer_probe,
+                "assembly_probe": outer_assembly_probe,
+            },
+        ]
+
+    def create_annular_cylinder(name, inner_radius, outer_radius, section_name, seed_circ, inner_surface, outer_surface):
+        if inner_radius <= 0.0 or outer_radius <= inner_radius:
+            return create_solid_cylinder(name, outer_radius, section_name, seed_circ)
+
+        sketch = model.ConstrainedSketch(name=name + "_sketch", sheetSize=max(10.0, outer_radius * 4.0))
+        sketch.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(outer_radius, 0.0))
+        sketch.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(inner_radius, 0.0))
+        part = model.Part(name=name, dimensionality=THREE_D, type=DEFORMABLE_BODY)
+        part.BaseSolidExtrude(sketch=sketch, depth=length)
+        del model.sketches[sketch.name]
+        region = part.Set(cells=part.cells[:], name="AllCells")
+        part.SectionAssignment(region=region, sectionName=section_name)
+        size_axial = length / float(z_elem)
+        size_circ = max(0.1, 2.0 * math.pi * outer_radius / float(seed_circ))
+        size_radial = max(0.1, outer_radius - inner_radius)
+        part.seedPart(size=max(0.1, min(size_axial, size_circ, size_radial)), deviationFactor=0.1, minSizeFactor=0.1)
+        part.setElementType(regions=(part.cells[:],), elemTypes=(ElemType(elemCode=elem_code_for_solid(), elemLibrary=STANDARD),))
+        part.generateMesh()
+        inst = assembly.Instance(name=name + "_1", part=part, dependent=ON)
+        inst.translate(vector=(0.0, 0.0, -0.5 * length))
+        create_solid_contact_regions(
+            part,
+            inst,
+            name,
+            surface_specs=layer_surface_specs(name, inner_radius, outer_radius, inner_surface, outer_surface),
+        )
+        return part
+
     def create_armour_layer(name, wire_radius, center_radius, count, lay_angle_deg, hand):
         profile_name = name + "_profile"
         section_name = name + "_BeamSection"
@@ -611,11 +797,14 @@ def build_abaqus_mesh_model(payload, job_dir):
             offset=(core_center * math.cos(angle), core_center * math.sin(angle), 0.0),
         )
 
-    create_solid_cylinder(
-        "OuterSheathEquivalent",
-        float(geometry["outer_sheath_outer_radius_mm"]),
-        sheath_section,
+    create_annular_cylinder(
+        "InnerSheathEquivalent",
+        float(geometry["inner_sheath_inner_radius_mm"]),
+        float(geometry["inner_sheath_outer_radius_mm"]),
+        inner_sheath_section,
         core_circ,
+        "inner_sheath_inner_surface",
+        "inner_sheath_outer_surface",
     )
 
     create_armour_layer(
@@ -626,6 +815,17 @@ def build_abaqus_mesh_model(payload, job_dir):
         float(armour["inner_lay_angle_deg"]),
         hand=1.0,
     )
+
+    create_annular_cylinder(
+        "BeddingEquivalent",
+        float(geometry["inner_armour_outer_radius_mm"]),
+        float(geometry["bedding_outer_radius_mm"]),
+        bedding_section,
+        core_circ,
+        "bedding_inner_surface",
+        "bedding_outer_surface",
+    )
+
     create_armour_layer(
         "OuterArmourHelix",
         float(armour["outer_wire_radius_mm"]),
@@ -633,6 +833,16 @@ def build_abaqus_mesh_model(payload, job_dir):
         int(armour["outer_wire_count"]),
         float(armour["outer_lay_angle_deg"]),
         hand=-1.0,
+    )
+
+    create_annular_cylinder(
+        "OuterSheathEquivalent",
+        float(geometry["outer_sheath_inner_radius_mm"]),
+        float(geometry["outer_sheath_outer_radius_mm"]),
+        outer_sheath_section,
+        core_circ,
+        "outer_sheath_inner_surface",
+        "outer_sheath_outer_surface",
     )
 
     model.StaticStep(name="MeshOnlyStep", previous="Initial")

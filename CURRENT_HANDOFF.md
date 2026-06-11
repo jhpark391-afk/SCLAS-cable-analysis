@@ -75,6 +75,14 @@ Windows home-computer GUI verification has now passed for the current
   API. This is still a scaffold; explicit pair-level interfaces for bedding,
   inner sheath, and armour layers are pending until those layer surfaces are
   represented directly.
+- The mesh scaffold now separates the main polymer layers into annular parts:
+  `InnerSheathEquivalent`, `BeddingEquivalent`, and `OuterSheathEquivalent`.
+  Their assembly surfaces use the GUI contract names
+  `inner_sheath_inner_surface`, `inner_sheath_outer_surface`,
+  `bedding_inner_surface`, `bedding_outer_surface`,
+  `outer_sheath_inner_surface`, and `outer_sheath_outer_surface`. The manifest
+  resolves declared contact bindings to these assembly surfaces and the armour
+  `*_ContactEdges` sets, but explicit pair interactions are still pending.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files
@@ -151,7 +159,10 @@ should also include `contact_property_scaffold`, `contact_region_scaffold`, and
 assembly Sets/Surfaces for `ContactFaces`, `ContactSurface`, and
 `ContactEdges`. If the general contact API succeeds, the manifest should also
 include `contact_interaction_scaffold` with `SCLAS_GeneralContact`, and the CAE
-model tree should show this under Interactions.
+model tree should show this under Interactions. For separated layer geometry,
+also verify that `Parts` includes `InnerSheathEquivalent`, `BeddingEquivalent`,
+and `OuterSheathEquivalent`, and that assembly Surfaces include the six
+contract-named layer surfaces above.
 
 ## Research Implementation Status
 
@@ -183,10 +194,10 @@ Still needed for a paper-level implementation:
 
 ## Next Recommended Tasks
 
-1. Re-run the lab Abaqus/CAE noGUI smoke test and verify the new
-   `contact_interaction_scaffold` entry.
-2. Open the generated `.cae` and verify `SCLAS_GeneralContact` appears under
-   Interactions.
+1. Re-run the lab Abaqus/CAE noGUI smoke test and verify annular layer parts
+   plus contract-named assembly surfaces are created.
+2. Verify `contact_binding_scaffold` resolves declared interfaces to the new
+   layer surfaces and armour edge sets.
 3. Bind explicit surface-to-surface or beam-to-surface contact pairs to
    `SCLAS_RegularizedContact`.
 4. Preserve the GUI contract:
