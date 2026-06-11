@@ -69,6 +69,12 @@ Windows home-computer GUI verification has now passed for the current
   `ContactEdges` plus assembly-level `*_ContactEdges`. The manifest records
   these under `contact_region_scaffold` and keeps declared interface bindings
   under `contact_binding_scaffold` until real interactions are implemented.
+- The Abaqus runner now attempts an executable Standard general-contact
+  interaction named `SCLAS_GeneralContact`, assigning
+  `SCLAS_RegularizedContact` at global/self scope when Abaqus/CAE supports the
+  API. This is still a scaffold; explicit pair-level interfaces for bedding,
+  inner sheath, and armour layers are pending until those layer surfaces are
+  represented directly.
 - `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
 
 ## Important Files
@@ -143,7 +149,9 @@ For the contact scaffold check, open the generated `.cae` and verify that
 should also include `contact_property_scaffold`, `contact_region_scaffold`, and
 `contact_binding_scaffold`. In the CAE model tree, check the generated part and
 assembly Sets/Surfaces for `ContactFaces`, `ContactSurface`, and
-`ContactEdges`.
+`ContactEdges`. If the general contact API succeeds, the manifest should also
+include `contact_interaction_scaffold` with `SCLAS_GeneralContact`, and the CAE
+model tree should show this under Interactions.
 
 ## Research Implementation Status
 
@@ -176,10 +184,10 @@ Still needed for a paper-level implementation:
 ## Next Recommended Tasks
 
 1. Re-run the lab Abaqus/CAE noGUI smoke test and verify the new
-   `contact_region_scaffold` entries.
-2. Open the generated `.cae` and verify `ContactSurface` / `ContactEdges`
-   appear in the expected part and assembly Sets/Surfaces.
-3. Bind actual surface-to-surface or beam-to-surface contact pairs to
+   `contact_interaction_scaffold` entry.
+2. Open the generated `.cae` and verify `SCLAS_GeneralContact` appears under
+   Interactions.
+3. Bind explicit surface-to-surface or beam-to-surface contact pairs to
    `SCLAS_RegularizedContact`.
 4. Preserve the GUI contract:
    - `input_data.json` as backend input

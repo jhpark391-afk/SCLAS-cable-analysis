@@ -152,7 +152,16 @@ def contact_binding_scaffold(payload):
     return bindings
 
 
-def write_mesh_manifest(path, payload, abaqus_created, files=None, error="", contact_property=None, contact_regions=None):
+def write_mesh_manifest(
+    path,
+    payload,
+    abaqus_created,
+    files=None,
+    error="",
+    contact_property=None,
+    contact_regions=None,
+    contact_interactions=None,
+):
     geometry = payload.get("derived_geometry_mm", {})
     armour = payload.get("armour", {})
     analysis = payload.get("analysis_conditions", {})
@@ -166,6 +175,14 @@ def write_mesh_manifest(path, payload, abaqus_created, files=None, error="", con
         for region in contact_regions:
             if region.get("status") != "created":
                 contact_region_status = "partial"
+                break
+    contact_interactions = contact_interactions or []
+    contact_interaction_status = "not_created"
+    if contact_interactions:
+        contact_interaction_status = "created"
+        for interaction in contact_interactions:
+            if interaction.get("status") != "created":
+                contact_interaction_status = "partial"
                 break
     manifest = {
         "status": "abaqus_mesh_created" if abaqus_created else "mesh_request_only",
@@ -191,6 +208,8 @@ def write_mesh_manifest(path, payload, abaqus_created, files=None, error="", con
         },
         "contact_region_scaffold_status": contact_region_status,
         "contact_region_scaffold": contact_regions,
+        "contact_interaction_scaffold_status": contact_interaction_status,
+        "contact_interaction_scaffold": contact_interactions,
         "components": [
             {
                 "name": "three_core_equivalent_solids",
@@ -471,6 +490,57 @@ def build_abaqus_mesh_model(payload, job_dir):
             record["warnings"].append("assembly edge set failed: {0}".format(exc))
         append_contact_region(record, created, 2)
 
+    def create_contact_interaction_scaffold(contact_property_record):
+        record = {
+            "name": "SCLAS_GeneralContact",
+            "type": "ContactStd",
+            "create_step": "Initial",
+            "contact_property": "SCLAS_RegularizedContact",
+            "assignment_scope": "GLOBAL_SELF",
+            "status": "not_created",
+            "created_regions": [],
+            "warnings": [],
+            "notes": [
+                "General contact is an executable scaffold until explicit inner sheath and bedding surfaces exist.",
+                "Declared interface names remain in contact_binding_scaffold for later pair-level binding.",
+            ],
+        }
+        if not contact_property_record or contact_property_record.get("status") not in ("created", "partial"):
+            record["status"] = "skipped"
+            record["warnings"].append("contact property was not available")
+            return record
+
+        try:
+            import abaqusConstants as ac
+
+            interaction = model.ContactStd(name=record["name"], createStepName=record["create_step"])
+            record["created_regions"].append("interaction")
+            try:
+                interaction.includedPairs.setValuesInStep(stepName=record["create_step"], useAllstar=ON)
+                record["created_regions"].append("included_pairs_allstar")
+            except Exception as exc:
+                record["warnings"].append("included pair assignment failed: {0}".format(exc))
+
+            try:
+                global_region = getattr(ac, "GLOBAL")
+                self_region = getattr(ac, "SELF")
+                interaction.contactPropertyAssignments.appendInStep(
+                    stepName=record["create_step"],
+                    assignments=((global_region, self_region, record["contact_property"]),),
+                )
+                record["created_regions"].append("global_self_property_assignment")
+            except Exception as exc:
+                record["warnings"].append("contact property assignment failed: {0}".format(exc))
+
+            if "global_self_property_assignment" in record["created_regions"]:
+                record["status"] = "created"
+            else:
+                record["status"] = "partial"
+        except Exception as exc:
+            record["status"] = "failed"
+            record["warnings"].append("general contact creation failed: {0}".format(exc))
+        return record
+
     def elem_code_for_solid():
         import abaqusConstants as ac
 
@@ -566,6 +636,7 @@ def build_abaqus_mesh_model(payload, job_dir):
     )
 
     model.StaticStep(name="MeshOnlyStep", previous="Initial")
+    contact_interactions = [create_contact_interaction_scaffold(contact_property)]
     old_cwd = os.getcwd()
     os.chdir(str(job_dir))
     try:
@@ -584,6 +655,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         "files": files,
         "contact_property_scaffold": contact_property,
         "contact_region_scaffold": contact_regions,
+        "contact_interaction_scaffold": contact_interactions,
         "node_element_note": "See generated .inp/.cae for Abaqus node and element counts.",
     }
 
@@ -727,6 +799,7 @@ def main(argv):
                 files=mesh_status.get("files", []),
                 contact_property=mesh_status.get("contact_property_scaffold"),
                 contact_regions=mesh_status.get("contact_region_scaffold"),
+                contact_interactions=mesh_status.get("contact_interaction_scaffold"),
             )
             print("Wrote Abaqus mesh scaffold: {0}".format(", ".join(mesh_status.get("files", []))))
         except Exception as exc:
