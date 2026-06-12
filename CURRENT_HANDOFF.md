@@ -75,6 +75,9 @@ Windows home-computer GUI verification has now passed for the current
 - CLI `--save-markdown` and GUI diagnostics now also write
   `offline_diagnostics_report.md`, including a human-readable issue summary,
   solver log context blocks, and a ready-to-paste next-debug prompt.
+- Offline diagnostics now include `diagnostic_summary` with issue counts, the
+  first blocking issue, and a recommended next action. The GUI summary panel
+  shows this at the top of `Diagnose selected` output.
 - Lab PC Abaqus/CAE 2019 was reached through ZeroTier/RDP. Its noGUI Python is
   Python 2-era, so `code/abaqus_runner.py` has been converted away from Python
   3-only syntax such as type annotations, f-strings, `pathlib`, and

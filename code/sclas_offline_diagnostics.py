@@ -219,6 +219,46 @@ def inspect_solver_logs(job_dir: Path, report: dict) -> None:
         add_issue(report, "warning", "Solver log contains notable Abaqus keywords/errors", len(section["matches"]))
 
 
+def summarize_report(report: dict) -> None:
+    issues = report.get("issues", [])
+    severity_rank = {"error": 0, "warning": 1, "info": 2}
+    ordered = sorted(issues, key=lambda item: severity_rank.get(item.get("severity"), 9))
+    first = ordered[0] if ordered else None
+    counts = {
+        "error": sum(1 for item in issues if item.get("severity") == "error"),
+        "warning": sum(1 for item in issues if item.get("severity") == "warning"),
+        "info": sum(1 for item in issues if item.get("severity") == "info"),
+    }
+
+    deck = report.get("input_deck", {})
+    logs = report.get("solver_logs", {})
+    manifest = report.get("abaqus_mesh_manifest_json", {})
+
+    if counts["error"]:
+        if deck.get("coupling_after_end_assembly"):
+            action = "Move injected *Coupling/*Kinematic blocks inside the assembly scope before *End Assembly."
+        elif first and "result_data.csv" in first.get("message", ""):
+            action = "Restore the result_data.csv contract before debugging solver output."
+        elif manifest.get("status") == "abaqus_mesh_failed":
+            action = "Inspect abaqus_mesh_manifest.json error and fix the Abaqus scaffold creation failure first."
+        else:
+            action = "Fix the first error in this report before expanding the backend."
+    elif logs.get("matches"):
+        action = "Inspect the first solver log match and make the smallest targeted abaqus_runner.py fix."
+    elif not deck.get("exists"):
+        action = "Copy the Lab-PC generated .inp/.dat/.msg files into this job folder for deeper offline diagnostics."
+    elif counts["warning"]:
+        action = "Review warnings, then rerun the Lab-PC noGUI and solver smoke tests."
+    else:
+        action = "No blocking issue was detected offline; continue with the next Lab-PC Abaqus smoke test."
+
+    report["diagnostic_summary"] = {
+        "issue_counts": counts,
+        "first_blocking_issue": first,
+        "recommended_next_action": action,
+    }
+
+
 def build_report(job_dir: Path) -> dict:
     report = {
         "job_dir": str(job_dir),
@@ -233,6 +273,7 @@ def build_report(job_dir: Path) -> dict:
     inspect_manifest(job_dir, report)
     inspect_inp(job_dir, report)
     inspect_solver_logs(job_dir, report)
+    summarize_report(report)
     return report
 
 
@@ -265,6 +306,8 @@ def markdown_report(report: dict) -> str:
     manifest_section = report.get("abaqus_mesh_manifest_json", {})
     deck_section = report.get("input_deck", {})
     logs_section = report.get("solver_logs", {})
+    diagnostic_summary = report.get("diagnostic_summary", {})
+    issue_counts = diagnostic_summary.get("issue_counts", {})
 
     summary_rows = [
         ("Result CSV", scalar(csv_section.get("exists"))),
@@ -277,10 +320,15 @@ def markdown_report(report: dict) -> str:
         ("Input deck", scalar(deck_section.get("file"))),
         ("Couplings after End Assembly", scalar(deck_section.get("coupling_after_end_assembly"))),
         ("Solver log matches", scalar(len(logs_section.get("matches", [])))),
+        ("Errors", scalar(issue_counts.get("error"))),
+        ("Warnings", scalar(issue_counts.get("warning"))),
     ]
     lines.extend(["| Item | Value |", "|---|---|"])
     for key, value in summary_rows:
         lines.append("| {0} | {1} |".format(key, value))
+
+    lines.extend(["", "## Recommended Next Action", ""])
+    lines.append(diagnostic_summary.get("recommended_next_action", "-"))
 
     lines.extend(["", "## Issues", ""])
     issues = report.get("issues", [])
@@ -313,6 +361,7 @@ def markdown_report(report: dict) -> str:
         "",
         "```text",
         "This is a SCLAS/HELIX Abaqus offline diagnostics report.",
+        "Recommended next action: {0}".format(diagnostic_summary.get("recommended_next_action", "-")),
         "Focus on the first error or warning above. If an .inp keyword placement",
         "or solver log issue is shown, propose the smallest targeted fix in",
         "code/abaqus_runner.py while preserving result_data.csv and",
@@ -333,6 +382,10 @@ def save_markdown_report(report: dict, output_path: Path = None) -> Path:
 def print_report(report: dict) -> None:
     print("SCLAS Offline Diagnostics")
     print("Job:", report["job_dir"])
+    diagnostic_summary = report.get("diagnostic_summary", {})
+    issue_counts = diagnostic_summary.get("issue_counts", {})
+    print("Recommended next action:", diagnostic_summary.get("recommended_next_action", "-"))
+    print("Issue counts:", issue_counts)
     print()
 
     for key in ["result_data_csv", "result_summary_json", "abaqus_mesh_manifest_json", "input_deck", "solver_logs"]:

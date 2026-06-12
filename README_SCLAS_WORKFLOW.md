@@ -69,6 +69,8 @@ python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder> --save-mar
 The offline diagnostics tool checks `result_data.csv`,
 `result_summary.json`, `abaqus_mesh_manifest.json`, generated `.inp` keyword
 placement, and `.dat`/`.msg`/`.sta` solver logs when those files exist.
+It also adds a recommended next action so the next backend fix starts from the
+first blocking issue instead of rereading the whole log.
 The same report is also available in the GUI from
 `Analysis -> Recent Jobs -> Diagnose selected`. The GUI saves
 `offline_diagnostics_report.json` and `offline_diagnostics_report.md` in the

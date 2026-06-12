@@ -67,7 +67,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "11.8-diagnostic-markdown"
+APP_VERSION = "11.9-diagnostic-action-summary"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -2012,11 +2012,23 @@ class SCLASRemoteGUI(QMainWindow):
             QMessageBox.critical(self, "Offline diagnostics error", str(exc))
 
     def format_diagnostic_report(self, report: dict) -> str:
+        diagnostic_summary = report.get("diagnostic_summary", {})
+        issue_counts = diagnostic_summary.get("issue_counts", {})
+        first_issue = diagnostic_summary.get("first_blocking_issue") or {}
         lines = [
             "Offline Abaqus Diagnostics",
             f"Job: {Path(report.get('job_dir', '-')).name}",
             f"Saved report: {report.get('saved_report', '-')}",
             f"Saved Markdown: {report.get('saved_markdown_report', '-')}",
+            "",
+            "[Recommended Next Action]",
+            diagnostic_summary.get("recommended_next_action", "-"),
+            "",
+            "[Issue Counts]",
+            f"errors: {issue_counts.get('error', 0)}",
+            f"warnings: {issue_counts.get('warning', 0)}",
+            f"info: {issue_counts.get('info', 0)}",
+            f"first: [{first_issue.get('severity', '-')}] {first_issue.get('message', '-')}",
             "",
         ]
         for key, title in [

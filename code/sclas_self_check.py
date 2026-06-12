@@ -315,6 +315,9 @@ def check_backend_contract() -> None:
         fail(f"sclas_offline_diagnostics.py did not emit JSON: {exc}")
     if any(item.get("severity") == "error" for item in diag.get("issues", [])):
         fail("Offline diagnostics reported an error: " + json.dumps(diag.get("issues"), indent=2))
+    diagnostic_summary = diag.get("diagnostic_summary", {})
+    if not diagnostic_summary.get("recommended_next_action"):
+        fail("Offline diagnostics did not produce a recommended next action")
     if diag.get("result_data_csv", {}).get("data_rows") != 500:
         fail("Offline diagnostics did not read the expected result CSV row count")
     saved_report = job_dir / "offline_diagnostics_report.json"
