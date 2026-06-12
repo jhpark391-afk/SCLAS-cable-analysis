@@ -72,6 +72,9 @@ Windows home-computer GUI verification has now passed for the current
 - GUI diagnostics and CLI `--save-report` now write
   `offline_diagnostics_report.json` into the inspected job folder for sharing
   between Mac, home Windows, and the Lab PC.
+- CLI `--save-markdown` and GUI diagnostics now also write
+  `offline_diagnostics_report.md`, including a human-readable issue summary,
+  solver log context blocks, and a ready-to-paste next-debug prompt.
 - Lab PC Abaqus/CAE 2019 was reached through ZeroTier/RDP. Its noGUI Python is
   Python 2-era, so `code/abaqus_runner.py` has been converted away from Python
   3-only syntax such as type annotations, f-strings, `pathlib`, and
@@ -258,6 +261,12 @@ Save a shareable JSON report:
 
 ```bash
 ../90_env/venv/bin/python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder> --save-report
+```
+
+Save a human-readable Markdown report:
+
+```bash
+../90_env/venv/bin/python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder> --save-markdown
 ```
 
 Mac-appropriate next work:

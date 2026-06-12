@@ -67,7 +67,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "11.7-diagnostic-report-save"
+APP_VERSION = "11.8-diagnostic-markdown"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -1989,11 +1989,13 @@ class SCLASRemoteGUI(QMainWindow):
             return
         job_dir = self.job_history_paths[index]
         try:
-            from sclas_offline_diagnostics import build_report, save_report
+            from sclas_offline_diagnostics import build_report, save_markdown_report, save_report
 
             report = build_report(job_dir)
             saved_path = save_report(report)
+            saved_markdown_path = save_markdown_report(report)
             report["saved_report"] = str(saved_path)
+            report["saved_markdown_report"] = str(saved_markdown_path)
             text = self.format_diagnostic_report(report)
             self.last_summary_data = {}
             self.summary_text.setPlainText(text)
@@ -2004,6 +2006,7 @@ class SCLASRemoteGUI(QMainWindow):
             self.set_badge(self.lbl_result_status, label, tone)
             self.log(f"[DIAG] Offline diagnostics: {job_dir} | errors={errors}, warnings={warnings}")
             self.log(f"[DIAG] Saved report: {saved_path}")
+            self.log(f"[DIAG] Saved Markdown report: {saved_markdown_path}")
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Offline diagnostics error", str(exc))
@@ -2013,6 +2016,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Offline Abaqus Diagnostics",
             f"Job: {Path(report.get('job_dir', '-')).name}",
             f"Saved report: {report.get('saved_report', '-')}",
+            f"Saved Markdown: {report.get('saved_markdown_report', '-')}",
             "",
         ]
         for key, title in [

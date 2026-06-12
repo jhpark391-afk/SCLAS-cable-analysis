@@ -243,6 +243,93 @@ def save_report(report: dict, output_path: Path = None) -> Path:
     return path
 
 
+def markdown_report(report: dict) -> str:
+    def scalar(value, default="-"):
+        if value in (None, ""):
+            return default
+        return str(value)
+
+    lines = [
+        "# SCLAS Offline Diagnostics",
+        "",
+        "## Job",
+        "",
+        "- Path: `{0}`".format(report.get("job_dir", "-")),
+        "",
+        "## Summary",
+        "",
+    ]
+
+    csv_section = report.get("result_data_csv", {})
+    summary_section = report.get("result_summary_json", {})
+    manifest_section = report.get("abaqus_mesh_manifest_json", {})
+    deck_section = report.get("input_deck", {})
+    logs_section = report.get("solver_logs", {})
+
+    summary_rows = [
+        ("Result CSV", scalar(csv_section.get("exists"))),
+        ("CSV rows", scalar(csv_section.get("data_rows"))),
+        ("Summary status", scalar(summary_section.get("status"))),
+        ("Mesh status", scalar(summary_section.get("mesh_status"))),
+        ("Manifest status", scalar(manifest_section.get("status"))),
+        ("Contact pair scaffold", scalar(manifest_section.get("contact_pair_scaffold_status"))),
+        ("Boundary scaffold", scalar(manifest_section.get("boundary_condition_scaffold_status"))),
+        ("Input deck", scalar(deck_section.get("file"))),
+        ("Couplings after End Assembly", scalar(deck_section.get("coupling_after_end_assembly"))),
+        ("Solver log matches", scalar(len(logs_section.get("matches", [])))),
+    ]
+    lines.extend(["| Item | Value |", "|---|---|"])
+    for key, value in summary_rows:
+        lines.append("| {0} | {1} |".format(key, value))
+
+    lines.extend(["", "## Issues", ""])
+    issues = report.get("issues", [])
+    if not issues:
+        lines.append("No issues were reported.")
+    else:
+        for issue in issues:
+            lines.append("- **{0}**: {1}".format(issue.get("severity", "-"), issue.get("message", "-")))
+            if issue.get("detail") not in (None, ""):
+                lines.append("  - Detail: `{0}`".format(issue.get("detail")))
+
+    matches = logs_section.get("matches", [])
+    lines.extend(["", "## Solver Log Matches", ""])
+    if not matches:
+        lines.append("No solver log matches were found.")
+    else:
+        for match in matches[:20]:
+            lines.append("### {0}:{1}".format(match.get("file", "-"), match.get("line", "-")))
+            lines.append("")
+            lines.append("```text")
+            lines.append(match.get("context") or match.get("text", ""))
+            lines.append("```")
+            lines.append("")
+        if len(matches) > 20:
+            lines.append("Additional matches omitted: {0}".format(len(matches) - 20))
+
+    lines.extend([
+        "",
+        "## Next Debug Prompt",
+        "",
+        "```text",
+        "This is a SCLAS/HELIX Abaqus offline diagnostics report.",
+        "Focus on the first error or warning above. If an .inp keyword placement",
+        "or solver log issue is shown, propose the smallest targeted fix in",
+        "code/abaqus_runner.py while preserving result_data.csv and",
+        "result_summary.json contracts.",
+        "```",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def save_markdown_report(report: dict, output_path: Path = None) -> Path:
+    job_dir = Path(report["job_dir"])
+    path = output_path or (job_dir / "offline_diagnostics_report.md")
+    path.write_text(markdown_report(report), encoding="utf-8")
+    return path
+
+
 def print_report(report: dict) -> None:
     print("SCLAS Offline Diagnostics")
     print("Job:", report["job_dir"])
@@ -281,7 +368,13 @@ def main(argv=None) -> int:
         action="store_true",
         help="Write offline_diagnostics_report.json into the job folder",
     )
+    parser.add_argument(
+        "--save-markdown",
+        action="store_true",
+        help="Write offline_diagnostics_report.md into the job folder",
+    )
     parser.add_argument("--output", help="Optional JSON output path for --save-report")
+    parser.add_argument("--markdown-output", help="Optional Markdown output path for --save-markdown")
     args = parser.parse_args(argv)
 
     report = build_report(Path(args.job_dir).expanduser().resolve())
@@ -289,6 +382,10 @@ def main(argv=None) -> int:
         output_path = Path(args.output).expanduser().resolve() if args.output else None
         saved_path = save_report(report, output_path)
         report["saved_report"] = str(saved_path)
+    if args.save_markdown:
+        markdown_output = Path(args.markdown_output).expanduser().resolve() if args.markdown_output else None
+        saved_markdown_path = save_markdown_report(report, markdown_output)
+        report["saved_markdown_report"] = str(saved_markdown_path)
     if args.json:
         print(json.dumps(report, indent=2))
     else:
@@ -296,6 +393,8 @@ def main(argv=None) -> int:
         if args.save_report:
             print()
             print("Saved report:", report["saved_report"])
+        if args.save_markdown:
+            print("Saved Markdown report:", report["saved_markdown_report"])
 
     return 1 if any(issue["severity"] == "error" for issue in report["issues"]) else 0
 

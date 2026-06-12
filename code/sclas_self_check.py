@@ -296,7 +296,14 @@ def check_backend_contract() -> None:
         fail("Non-Abaqus self-check should leave boundary conditions as not_created")
 
     diag_proc = subprocess.run(
-        [sys.executable, str(CODE_DIR / "sclas_offline_diagnostics.py"), str(job_dir), "--json", "--save-report"],
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_offline_diagnostics.py"),
+            str(job_dir),
+            "--json",
+            "--save-report",
+            "--save-markdown",
+        ],
         text=True,
         capture_output=True,
     )
@@ -313,6 +320,9 @@ def check_backend_contract() -> None:
     saved_report = job_dir / "offline_diagnostics_report.json"
     if not saved_report.exists():
         fail("Offline diagnostics did not save offline_diagnostics_report.json")
+    saved_markdown_report = job_dir / "offline_diagnostics_report.md"
+    if not saved_markdown_report.exists():
+        fail("Offline diagnostics did not save offline_diagnostics_report.md")
 
     print(f"[OK] Backend contract smoke job: {job_dir}")
 
