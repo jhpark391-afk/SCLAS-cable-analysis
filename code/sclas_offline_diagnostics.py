@@ -236,6 +236,13 @@ def build_report(job_dir: Path) -> dict:
     return report
 
 
+def save_report(report: dict, output_path: Path = None) -> Path:
+    job_dir = Path(report["job_dir"])
+    path = output_path or (job_dir / "offline_diagnostics_report.json")
+    path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return path
+
+
 def print_report(report: dict) -> None:
     print("SCLAS Offline Diagnostics")
     print("Job:", report["job_dir"])
@@ -269,13 +276,26 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Inspect SCLAS Abaqus job output without Abaqus.")
     parser.add_argument("job_dir", help="Path to a SCLAS job folder")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON report")
+    parser.add_argument(
+        "--save-report",
+        action="store_true",
+        help="Write offline_diagnostics_report.json into the job folder",
+    )
+    parser.add_argument("--output", help="Optional JSON output path for --save-report")
     args = parser.parse_args(argv)
 
     report = build_report(Path(args.job_dir).expanduser().resolve())
+    if args.save_report:
+        output_path = Path(args.output).expanduser().resolve() if args.output else None
+        saved_path = save_report(report, output_path)
+        report["saved_report"] = str(saved_path)
     if args.json:
         print(json.dumps(report, indent=2))
     else:
         print_report(report)
+        if args.save_report:
+            print()
+            print("Saved report:", report["saved_report"])
 
     return 1 if any(issue["severity"] == "error" for issue in report["issues"]) else 0
 

@@ -62,13 +62,15 @@ Inspect a generated or copied Abaqus job folder without Abaqus:
 
 ```bash
 python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder>
+python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder> --save-report
 ```
 
 The offline diagnostics tool checks `result_data.csv`,
 `result_summary.json`, `abaqus_mesh_manifest.json`, generated `.inp` keyword
 placement, and `.dat`/`.msg`/`.sta` solver logs when those files exist.
 The same report is also available in the GUI from
-`Analysis -> Recent Jobs -> Diagnose selected`.
+`Analysis -> Recent Jobs -> Diagnose selected`. The GUI saves
+`offline_diagnostics_report.json` in the selected job folder.
 
 ## Job package contract
 
