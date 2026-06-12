@@ -58,6 +58,16 @@ Run the local smoke checks with:
 run_self_check.bat
 ```
 
+Inspect a generated or copied Abaqus job folder without Abaqus:
+
+```bash
+python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder>
+```
+
+The offline diagnostics tool checks `result_data.csv`,
+`result_summary.json`, `abaqus_mesh_manifest.json`, generated `.inp` keyword
+placement, and `.dat`/`.msg`/`.sta` solver logs when those files exist.
+
 ## Job package contract
 
 Each run creates a job folder under:

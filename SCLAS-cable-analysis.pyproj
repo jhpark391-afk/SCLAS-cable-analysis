@@ -24,6 +24,7 @@
     <Compile Include="code\abaqus_runner.py" />
     <Compile Include="code\main.py" />
     <Compile Include="code\sclas_self_check.py" />
+    <Compile Include="code\sclas_offline_diagnostics.py" />
     <Compile Include="code\sclas_mac_vscode.py" />
     <Compile Include="code\sclas_remote_gui.py" />
     <Compile Include="code\SCLAS_test\abaqus_runner.py" />

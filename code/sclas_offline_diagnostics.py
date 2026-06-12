@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+"""Offline diagnostics for SCLAS/HELIX Abaqus job folders.
+
+This tool is intentionally Abaqus-free. Use it on macOS or Windows to inspect
+job folders copied back from the lab PC.
+"""
+
+import argparse
+import csv
+import json
+import re
+import sys
+from pathlib import Path
+
+
+ERROR_PATTERNS = [
+    "FATAL",
+    "ERROR",
+    "UNKNOWN",
+    "INVALID",
+    "MISPLACED",
+    "COUPLING",
+    "KINEMATIC",
+    "REF NODE",
+    "SURFACE",
+]
+
+
+def read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except TypeError:
+        return path.read_text()
+
+
+def load_json(path: Path):
+    return json.loads(read_text(path))
+
+
+def add_issue(report: dict, severity: str, message: str, detail=None) -> None:
+    report["issues"].append({
+        "severity": severity,
+        "message": message,
+        "detail": detail,
+    })
+
+
+def find_first(job_dir: Path, patterns) -> Path:
+    for pattern in patterns:
+        matches = sorted(job_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+        if matches:
+            return matches[0]
+    return None
+
+
+def inspect_result_csv(job_dir: Path, report: dict) -> None:
+    path = job_dir / "result_data.csv"
+    section = {"exists": path.exists()}
+    report["result_data_csv"] = section
+    if not path.exists():
+        add_issue(report, "error", "result_data.csv is missing")
+        return
+
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+    header = rows[0] if rows else []
+    section["header"] = header
+    section["data_rows"] = max(len(rows) - 1, 0)
+    if header != ["curvature_1_per_m", "moment_kn_m"]:
+        add_issue(report, "error", "Unexpected result_data.csv header", header)
+    if section["data_rows"] < 2:
+        add_issue(report, "warning", "result_data.csv has too few data rows", section["data_rows"])
+
+
+def inspect_summary(job_dir: Path, report: dict) -> None:
+    path = job_dir / "result_summary.json"
+    section = {"exists": path.exists()}
+    report["result_summary_json"] = section
+    if not path.exists():
+        add_issue(report, "warning", "result_summary.json is missing")
+        return
+
+    try:
+        data = load_json(path)
+    except Exception as exc:
+        add_issue(report, "error", "Could not parse result_summary.json", str(exc))
+        return
+
+    required = ["source", "status", "result_contract", "backend_readiness", "mesh_status"]
+    section["source"] = data.get("source")
+    section["status"] = data.get("status")
+    section["mesh_status"] = data.get("mesh_status", {}).get("status") if isinstance(data.get("mesh_status"), dict) else data.get("mesh_status")
+    section["enabled_assessments"] = data.get("enabled_assessments", [])
+    for key in required:
+        if key not in data:
+            add_issue(report, "warning", "result_summary.json missing key", key)
+    contract = data.get("result_contract", {})
+    if contract.get("required_columns") != ["curvature_1_per_m", "moment_kn_m"]:
+        add_issue(report, "warning", "Summary result contract has unexpected required columns", contract)
+
+
+def inspect_manifest(job_dir: Path, report: dict) -> None:
+    path = job_dir / "abaqus_mesh_manifest.json"
+    section = {"exists": path.exists()}
+    report["abaqus_mesh_manifest_json"] = section
+    if not path.exists():
+        add_issue(report, "warning", "abaqus_mesh_manifest.json is missing")
+        return
+
+    try:
+        data = load_json(path)
+    except Exception as exc:
+        add_issue(report, "error", "Could not parse abaqus_mesh_manifest.json", str(exc))
+        return
+
+    status_keys = [
+        "status",
+        "contact_region_scaffold_status",
+        "contact_interaction_scaffold_status",
+        "contact_pair_scaffold_status",
+        "boundary_condition_scaffold_status",
+    ]
+    for key in status_keys:
+        section[key] = data.get(key)
+    section["abaqus_files"] = data.get("abaqus_files", [])
+    section["contact_bindings"] = len(data.get("contact_binding_scaffold", []))
+    section["components"] = [item.get("name") for item in data.get("components", []) if isinstance(item, dict)]
+
+    for key in status_keys:
+        if key not in data:
+            add_issue(report, "warning", "Mesh manifest missing scaffold status key", key)
+    if data.get("status") == "abaqus_mesh_failed":
+        add_issue(report, "error", "Abaqus mesh scaffold failed", data.get("error", ""))
+    if data.get("status") == "abaqus_mesh_created" and not data.get("abaqus_files"):
+        add_issue(report, "warning", "Manifest says Abaqus mesh was created but no files are listed")
+
+
+def keyword_positions(lines, keyword):
+    keyword_upper = keyword.upper()
+    return [idx for idx, line in enumerate(lines) if line.strip().upper().startswith(keyword_upper)]
+
+
+def inspect_inp(job_dir: Path, report: dict) -> None:
+    path = find_first(job_dir, ["*.inp", "*_mesh.inp", "*_mes.inp"])
+    section = {"exists": path is not None}
+    report["input_deck"] = section
+    if path is None:
+        add_issue(report, "info", "No Abaqus .inp file found in job folder")
+        return
+
+    text = read_text(path)
+    lines = text.splitlines()
+    upper = text.upper()
+    section["file"] = path.name
+    section["line_count"] = len(lines)
+    section["has_end_assembly"] = "*END ASSEMBLY" in upper
+    section["coupling_count"] = upper.count("*COUPLING")
+    section["kinematic_count"] = upper.count("*KINEMATIC")
+    section["node_surface_count"] = len(re.findall(r"(?im)^\*SURFACE,\s*TYPE=NODE", text))
+    section["sclas_keyword_fallback_present"] = "SCLAS ABAQUS 2019 END-COUPLING KEYWORD FALLBACK" in upper
+    section["left_keyword_coupling"] = "SCLAS_LEFTEND_KEYWORDCOUPLING" in upper
+    section["right_keyword_coupling"] = "SCLAS_RIGHTEND_KEYWORDCOUPLING" in upper
+
+    end_assembly_positions = keyword_positions(lines, "*End Assembly")
+    coupling_positions = keyword_positions(lines, "*Coupling")
+    section["coupling_after_end_assembly"] = False
+    if end_assembly_positions and coupling_positions:
+        first_end = min(end_assembly_positions)
+        after = [pos + 1 for pos in coupling_positions if pos > first_end]
+        section["coupling_after_end_assembly"] = bool(after)
+        if after:
+            add_issue(report, "error", "*Coupling appears after *End Assembly", after[:10])
+    if section["coupling_count"] and not section["kinematic_count"]:
+        add_issue(report, "warning", "*Coupling exists but *Kinematic was not found")
+    if section["sclas_keyword_fallback_present"] and not (
+        section["left_keyword_coupling"] and section["right_keyword_coupling"]
+    ):
+        add_issue(report, "warning", "SCLAS keyword fallback marker exists but left/right coupling names are incomplete")
+
+
+def context_block(lines, index, radius=2):
+    start = max(0, index - radius)
+    end = min(len(lines), index + radius + 1)
+    return "\n".join("{0}: {1}".format(i + 1, lines[i]) for i in range(start, end))
+
+
+def inspect_solver_logs(job_dir: Path, report: dict) -> None:
+    log_files = []
+    for pattern in ["*.dat", "*.msg", "*.sta", "solver_stdout.txt", "abaqus_stdout.txt"]:
+        log_files.extend(sorted(job_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True))
+    seen = set()
+    unique_logs = []
+    for path in log_files:
+        if path not in seen:
+            unique_logs.append(path)
+            seen.add(path)
+
+    section = {"files": [path.name for path in unique_logs], "matches": []}
+    report["solver_logs"] = section
+    if not unique_logs:
+        add_issue(report, "info", "No Abaqus solver log files found")
+        return
+
+    pattern = re.compile("|".join(re.escape(item) for item in ERROR_PATTERNS), re.IGNORECASE)
+    for path in unique_logs:
+        lines = read_text(path).splitlines()
+        for idx, line in enumerate(lines):
+            if pattern.search(line):
+                match = {
+                    "file": path.name,
+                    "line": idx + 1,
+                    "text": line.strip(),
+                    "context": context_block(lines, idx),
+                }
+                section["matches"].append(match)
+                if len(section["matches"]) >= 80:
+                    return
+    if section["matches"]:
+        add_issue(report, "warning", "Solver log contains notable Abaqus keywords/errors", len(section["matches"]))
+
+
+def build_report(job_dir: Path) -> dict:
+    report = {
+        "job_dir": str(job_dir),
+        "issues": [],
+    }
+    if not job_dir.exists() or not job_dir.is_dir():
+        add_issue(report, "error", "Job directory does not exist", str(job_dir))
+        return report
+
+    inspect_result_csv(job_dir, report)
+    inspect_summary(job_dir, report)
+    inspect_manifest(job_dir, report)
+    inspect_inp(job_dir, report)
+    inspect_solver_logs(job_dir, report)
+    return report
+
+
+def print_report(report: dict) -> None:
+    print("SCLAS Offline Diagnostics")
+    print("Job:", report["job_dir"])
+    print()
+
+    for key in ["result_data_csv", "result_summary_json", "abaqus_mesh_manifest_json", "input_deck", "solver_logs"]:
+        section = report.get(key, {})
+        print("[{0}]".format(key))
+        for item_key, value in section.items():
+            if item_key == "matches":
+                print("  matches:", len(value))
+                for match in value[:8]:
+                    print("  - {file}:{line}: {text}".format(**match))
+                if len(value) > 8:
+                    print("  ... {0} more".format(len(value) - 8))
+            else:
+                print("  {0}: {1}".format(item_key, value))
+        print()
+
+    if report["issues"]:
+        print("Issues:")
+        for issue in report["issues"]:
+            print("- [{severity}] {message}".format(**issue))
+            if issue.get("detail") not in (None, ""):
+                print("  detail:", issue["detail"])
+    else:
+        print("Issues: none")
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="Inspect SCLAS Abaqus job output without Abaqus.")
+    parser.add_argument("job_dir", help="Path to a SCLAS job folder")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON report")
+    args = parser.parse_args(argv)
+
+    report = build_report(Path(args.job_dir).expanduser().resolve())
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print_report(report)
+
+    return 1 if any(issue["severity"] == "error" for issue in report["issues"]) else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

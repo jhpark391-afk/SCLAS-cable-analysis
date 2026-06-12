@@ -295,6 +295,22 @@ def check_backend_contract() -> None:
     if manifest.get("boundary_condition_scaffold_status") != "not_created":
         fail("Non-Abaqus self-check should leave boundary conditions as not_created")
 
+    diag_proc = subprocess.run(
+        [sys.executable, str(CODE_DIR / "sclas_offline_diagnostics.py"), str(job_dir), "--json"],
+        text=True,
+        capture_output=True,
+    )
+    if diag_proc.returncode != 0:
+        fail("sclas_offline_diagnostics.py failed:\n" + diag_proc.stdout + diag_proc.stderr)
+    try:
+        diag = json.loads(diag_proc.stdout)
+    except Exception as exc:
+        fail(f"sclas_offline_diagnostics.py did not emit JSON: {exc}")
+    if any(item.get("severity") == "error" for item in diag.get("issues", [])):
+        fail("Offline diagnostics reported an error: " + json.dumps(diag.get("issues"), indent=2))
+    if diag.get("result_data_csv", {}).get("data_rows") != 500:
+        fail("Offline diagnostics did not read the expected result CSV row count")
+
     print(f"[OK] Backend contract smoke job: {job_dir}")
 
 
