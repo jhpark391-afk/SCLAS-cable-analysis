@@ -1,6 +1,6 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-06-12
+Last updated: 2026-06-13
 
 ## Repository
 
@@ -56,6 +56,11 @@ Windows home-computer GUI verification has now passed for the current
 - `code/abaqus_runner.py` placeholder summaries now include
   `result_contract`, `backend_readiness`, and
   `hysteresis_loss_kj_per_m_proxy` so `code/sclas_self_check.py` passes.
+- Mac-side self-check now uses a GUI-like rich backend payload instead of the
+  legacy minimal sample. It verifies contact binding scaffold records,
+  contact defaults, annular layer component names, enabled assessment
+  propagation, result CSV row count, backend readiness keys, and placeholder
+  derived metric fields without needing Abaqus.
 - Lab PC Abaqus/CAE 2019 was reached through ZeroTier/RDP. Its noGUI Python is
   Python 2-era, so `code/abaqus_runner.py` has been converted away from Python
   3-only syntax such as type annotations, f-strings, `pathlib`, and
@@ -199,6 +204,36 @@ Expected next result:
   wiring.
 - If solver input processing proceeds further, start reducing model size for a
   faster real smoke solve before implementing ODB extraction.
+
+## Mac-Side Handoff - 2026-06-13 KST
+
+What was done on the Mac after pulling the home/Lab-PC work:
+
+- Pulled GitHub `main` through commit `a63c674`.
+- Read `AGENTS.md`, `CURRENT_HANDOFF.md`, `README_SCLAS_WORKFLOW.md`, and
+  `README_LITERATURE_NOTES.md`.
+- Verified that the pulled GUI/backend files compile on macOS:
+
+```bash
+../90_env/venv/bin/python -m py_compile code/sclas_remote_gui.py code/SCLAS_test/sclas_remote_gui.py code/abaqus_runner.py code/SCLAS_test/abaqus_runner.py
+```
+
+- Verified the project smoke check:
+
+```bash
+../90_env/venv/bin/python code/sclas_self_check.py
+```
+
+- Strengthened `code/sclas_self_check.py` so normal Python catches more
+  backend contract regressions before Lab-PC Abaqus testing.
+
+Mac-appropriate next work:
+
+1. Keep improving non-Abaqus contract checks and result post-processing.
+2. Add sample-result comparison/reporting features in the GUI if needed.
+3. Keep `CURRENT_HANDOFF.md` updated after each Mac-side support task.
+4. Leave actual Abaqus solve/input-deck debugging to the Lab PC unless the user
+   provides generated `.inp`, `.dat`, or `.msg` files for offline inspection.
 
 ## Important Files
 

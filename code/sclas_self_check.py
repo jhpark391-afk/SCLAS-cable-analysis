@@ -9,6 +9,7 @@ Python compilation, and the placeholder backend output contract.
 import compileall
 import csv
 import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -65,10 +66,129 @@ def check_compile() -> None:
     print("[OK] Python files compile")
 
 
+def rich_backend_payload() -> dict:
+    """Build a GUI-like payload so normal Python checks the Abaqus contract shape."""
+    return {
+        "metadata": {
+            "contract_version": "sclas-abaqus-contract-v1",
+            "frontend_version": "self_check",
+            "job_id": "self_check_contract",
+            "team_name": "HELIX",
+        },
+        "derived_geometry_mm": {
+            "core_outer_radius_mm": 15.3,
+            "core_center_radius_mm": 17.66,
+            "inner_sheath_inner_radius_mm": 32.96,
+            "inner_sheath_outer_radius_mm": 37.46,
+            "inner_armour_center_radius_mm": 39.96,
+            "inner_armour_wire_radius_mm": 2.0,
+            "inner_armour_outer_radius_mm": 41.96,
+            "bedding_outer_radius_mm": 43.06,
+            "outer_armour_center_radius_mm": 45.56,
+            "outer_armour_wire_radius_mm": 2.0,
+            "outer_sheath_inner_radius_mm": 47.56,
+            "outer_sheath_outer_radius_mm": 52.06,
+        },
+        "armour": {
+            "inner_wire_radius_mm": 2.0,
+            "outer_wire_radius_mm": 2.0,
+            "inner_wire_count": 55,
+            "outer_wire_count": 63,
+            "inner_lay_angle_deg": 20.1,
+            "outer_lay_angle_deg": 19.6,
+            "lay_angle_deg": 19.85,
+        },
+        "mesh": {
+            "requested_element_type": "C3D8R",
+            "model_strategy": "periodic_homogenized_cell",
+            "armour_model": "beam_with_contact_surface",
+            "axial_divisions": 40,
+            "core_circumferential_divisions": 24,
+            "armour_circumferential_divisions": 8,
+            "contact_regularization_beta": 0.001,
+        },
+        "analysis_conditions": {
+            "effective_length_mm": 234.2,
+            "hydrostatic_pressure_mpa": 40.0,
+            "residual_contact_pressure_mpa": 0.3,
+            "friction_coefficient": 0.22,
+            "max_curvature_1_per_m": 0.08,
+            "max_twist_rad_per_m": 0.05,
+            "max_axial_strain": 0.002,
+            "radial_compression_ratio": 0.015,
+            "contact_regularization_beta": 0.001,
+            "loading_cycles": 2,
+            "solver_steps": 500,
+        },
+        "study_scope": {
+            "enabled_assessments": {
+                "bending_stick_slip": True,
+                "torsion": True,
+                "tension_bending_coupling": True,
+                "compression_bird_caging": True,
+                "pressure_effect": True,
+            }
+        },
+        "numerical_model": {
+            "contact_interfaces": [
+                {
+                    "name": "inner_armour_to_inner_sheath",
+                    "master": "inner_armour_helical_beams_or_surfaces",
+                    "slave": "inner_sheath_outer_surface",
+                    "priority": "high",
+                },
+                {
+                    "name": "inner_armour_to_bedding",
+                    "master": "inner_armour_helical_beams_or_surfaces",
+                    "slave": "bedding_inner_surface",
+                    "priority": "high",
+                },
+                {
+                    "name": "outer_armour_to_bedding",
+                    "master": "outer_armour_helical_beams_or_surfaces",
+                    "slave": "bedding_outer_surface",
+                    "priority": "high",
+                },
+                {
+                    "name": "outer_armour_to_outer_sheath",
+                    "master": "outer_armour_helical_beams_or_surfaces",
+                    "slave": "outer_sheath_inner_surface",
+                    "priority": "high",
+                },
+                {
+                    "name": "armour_cross_layer_interaction",
+                    "master": "outer_armour_layer",
+                    "slave": "inner_armour_layer",
+                    "priority": "medium",
+                },
+            ],
+            "contact_interface_defaults": {
+                "normal": "penalty_or_augmented_lagrange",
+                "tangential": "regularized_coulomb",
+                "friction_coefficient": 0.22,
+                "residual_contact_pressure_mpa": 0.3,
+                "regularization_beta": 0.001,
+            },
+        },
+        "equivalent_properties": {
+            "core_equivalent_EI_N_m2": 65.14406526483796,
+        },
+    }
+
+
+def require_keys(data: dict, keys, label: str) -> None:
+    missing = [key for key in keys if key not in data]
+    if missing:
+        fail(f"{label} missing keys: {', '.join(missing)}")
+
+
 def check_backend_contract() -> None:
     job_dir = JOBS_DIR / ("self_check_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
     job_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(PROJECT_DIR / "data" / "input_data.json", job_dir / "input_data.json")
+    (job_dir / "input_data.json").write_text(
+        json.dumps(rich_backend_payload(), indent=4),
+        encoding="utf-8",
+    )
     shutil.copy2(CODE_DIR / "abaqus_runner.py", job_dir / "abaqus_runner.py")
 
     proc = subprocess.run(
@@ -88,14 +208,92 @@ def check_backend_contract() -> None:
             fail(f"Backend did not create {path.name}")
 
     with result_csv.open("r", encoding="utf-8-sig", newline="") as f:
-        header = next(csv.reader(f), [])
+        rows = list(csv.reader(f))
+    header = rows[0] if rows else []
     if header != ["curvature_1_per_m", "moment_kn_m"]:
         fail(f"Unexpected result_data.csv header: {header}")
+    if len(rows) != 501:
+        fail(f"Unexpected result_data.csv row count: {len(rows)}")
 
-    text = summary_json.read_text(encoding="utf-8")
-    for required in ["result_contract", "backend_readiness", "hysteresis_loss_kj_per_m_proxy"]:
-        if required not in text:
-            fail(f"result_summary.json missing {required}")
+    summary = json.loads(summary_json.read_text(encoding="utf-8"))
+    manifest = json.loads(manifest_json.read_text(encoding="utf-8"))
+
+    require_keys(
+        summary,
+        [
+            "result_contract",
+            "backend_readiness",
+            "hysteresis_loss_kj_per_m_proxy",
+            "derived_placeholder_metrics",
+            "enabled_assessments",
+        ],
+        "result_summary.json",
+    )
+    if summary["result_contract"].get("required_columns") != ["curvature_1_per_m", "moment_kn_m"]:
+        fail("result_summary.json has an unexpected result contract")
+    expected_assessments = {
+        "bending_stick_slip",
+        "torsion",
+        "tension_bending_coupling",
+        "compression_bird_caging",
+        "pressure_effect",
+    }
+    if set(summary.get("enabled_assessments", [])) != expected_assessments:
+        fail("result_summary.json enabled assessments do not match the GUI-like payload")
+    for key in expected_assessments:
+        if key not in summary["backend_readiness"]:
+            fail(f"backend_readiness missing {key}")
+    derived = summary["derived_placeholder_metrics"]
+    require_keys(
+        derived,
+        [
+            "axial_torsional_stiffness_matrix_proxy",
+            "calibration_targets",
+            "pressure_softening_factor",
+            "bird_caging_risk_index",
+        ],
+        "derived_placeholder_metrics",
+    )
+
+    require_keys(
+        manifest,
+        [
+            "mesh_settings_from_gui",
+            "contact_interface_defaults",
+            "contact_binding_scaffold",
+            "contact_property_scaffold",
+            "contact_region_scaffold_status",
+            "contact_interaction_scaffold_status",
+            "contact_pair_scaffold_status",
+            "boundary_condition_scaffold_status",
+            "components",
+        ],
+        "abaqus_mesh_manifest.json",
+    )
+    if manifest.get("status") != "mesh_request_only":
+        fail(f"Unexpected non-Abaqus manifest status: {manifest.get('status')}")
+    defaults = manifest["contact_interface_defaults"]
+    if defaults.get("friction_coefficient") != 0.22 or defaults.get("regularization_beta") != 0.001:
+        fail("contact interface defaults were not carried into the manifest")
+    bindings = manifest["contact_binding_scaffold"]
+    if len(bindings) != 5:
+        fail(f"Expected 5 contact binding scaffold records, found {len(bindings)}")
+    if any(item.get("status") != "resolved_scaffold_not_bound_to_pair" for item in bindings):
+        fail("At least one contact binding was not resolved to scaffold regions")
+    component_names = {item.get("name") for item in manifest["components"]}
+    for required in [
+        "inner_sheath_equivalent_solid",
+        "bedding_equivalent_solid",
+        "outer_sheath_equivalent_solid",
+        "inner_armour_helical_beams",
+        "outer_armour_helical_beams",
+    ]:
+        if required not in component_names:
+            fail(f"manifest components missing {required}")
+    if manifest["contact_property_scaffold"].get("status") != "not_created":
+        fail("Non-Abaqus self-check should leave the Abaqus contact property as not_created")
+    if manifest.get("boundary_condition_scaffold_status") != "not_created":
+        fail("Non-Abaqus self-check should leave boundary conditions as not_created")
 
     print(f"[OK] Backend contract smoke job: {job_dir}")
 
