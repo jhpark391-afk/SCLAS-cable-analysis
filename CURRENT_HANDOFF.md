@@ -66,6 +66,9 @@ Windows home-computer GUI verification has now passed for the current
   CSV/summary/manifest contract shape, generated `.inp` coupling keyword
   placement, and `.dat`/`.msg`/`.sta` solver log error context without needing
   Abaqus.
+- The Analysis page Recent Jobs panel now has `Diagnose selected`, which runs
+  the offline diagnostics report on the selected job folder and writes the
+  summary into the GUI result summary panel.
 - Lab PC Abaqus/CAE 2019 was reached through ZeroTier/RDP. Its noGUI Python is
   Python 2-era, so `code/abaqus_runner.py` has been converted away from Python
   3-only syntax such as type annotations, f-strings, `pathlib`, and
@@ -233,6 +236,8 @@ What was done on the Mac after pulling the home/Lab-PC work:
   backend contract regressions before Lab-PC Abaqus testing.
 - Added `code/sclas_offline_diagnostics.py` and wired it into
   `code/sclas_self_check.py`.
+- Added GUI access to the same offline diagnostics from Analysis > Recent Jobs
+  through `Diagnose selected`.
 
 Run offline diagnostics on any copied Lab-PC job folder:
 

@@ -67,7 +67,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "11.5-resizable-panels"
+APP_VERSION = "11.6-job-diagnostics"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -608,6 +608,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Recent Jobs": "최근 작업",
             "Refresh": "새로고침",
             "Load selected": "선택 항목 불러오기",
+            "Diagnose selected": "선택 항목 진단",
             "No result jobs found": "결과 작업 없음",
             "Model: pending": "모델: 대기",
             "Model: edited": "모델: 수정됨",
@@ -1398,13 +1399,17 @@ class SCLASRemoteGUI(QMainWindow):
         self.job_history_combo.setToolTip("Recent job folders containing result_data.csv.")
         self.btn_refresh_jobs = QPushButton("Refresh")
         self.btn_load_job = QPushButton("Load selected")
+        self.btn_diagnose_job = QPushButton("Diagnose selected")
         self.btn_refresh_jobs.setToolTip("Scan the job root for recent SCLAS result folders.")
         self.btn_load_job.setToolTip("Load result_data.csv from the selected job folder.")
+        self.btn_diagnose_job.setToolTip("Inspect selected job files with the offline Abaqus diagnostics tool.")
         self.btn_refresh_jobs.clicked.connect(self.refresh_job_history)
         self.btn_load_job.clicked.connect(self.load_selected_job)
-        history_layout.addWidget(self.job_history_combo, 0, 0, 1, 2)
+        self.btn_diagnose_job.clicked.connect(self.diagnose_selected_job)
+        history_layout.addWidget(self.job_history_combo, 0, 0, 1, 3)
         history_layout.addWidget(self.btn_refresh_jobs, 1, 0)
         history_layout.addWidget(self.btn_load_job, 1, 1)
+        history_layout.addWidget(self.btn_diagnose_job, 1, 2)
         right.addWidget(self.history_box)
 
         left_scroll = self.scroll_panel(left_panel, min_width=360)
@@ -1976,6 +1981,86 @@ class SCLASRemoteGUI(QMainWindow):
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Recent job load error", str(exc))
+
+    def diagnose_selected_job(self) -> None:
+        index = self.job_history_combo.currentIndex() if hasattr(self, "job_history_combo") else -1
+        if index < 0 or index >= len(self.job_history_paths):
+            QMessageBox.information(self, "Recent Jobs", "No result job is selected.")
+            return
+        job_dir = self.job_history_paths[index]
+        try:
+            from sclas_offline_diagnostics import build_report
+
+            report = build_report(job_dir)
+            text = self.format_diagnostic_report(report)
+            self.last_summary_data = {}
+            self.summary_text.setPlainText(text)
+            errors = sum(1 for item in report.get("issues", []) if item.get("severity") == "error")
+            warnings = sum(1 for item in report.get("issues", []) if item.get("severity") == "warning")
+            tone = "error" if errors else "warn" if warnings else "good"
+            label = "Result: error" if errors else "Result: ready"
+            self.set_badge(self.lbl_result_status, label, tone)
+            self.log(f"[DIAG] Offline diagnostics: {job_dir} | errors={errors}, warnings={warnings}")
+        except Exception as exc:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
+            QMessageBox.critical(self, "Offline diagnostics error", str(exc))
+
+    def format_diagnostic_report(self, report: dict) -> str:
+        lines = [
+            "Offline Abaqus Diagnostics",
+            f"Job: {Path(report.get('job_dir', '-')).name}",
+            "",
+        ]
+        for key, title in [
+            ("result_data_csv", "Result CSV"),
+            ("result_summary_json", "Summary JSON"),
+            ("abaqus_mesh_manifest_json", "Mesh Manifest"),
+            ("input_deck", "Input Deck"),
+            ("solver_logs", "Solver Logs"),
+        ]:
+            section = report.get(key, {})
+            lines.append(f"[{title}]")
+            if key == "solver_logs":
+                lines.append(f"files: {', '.join(section.get('files', [])) or '-'}")
+                matches = section.get("matches", [])
+                lines.append(f"matches: {len(matches)}")
+                for match in matches[:5]:
+                    lines.append(f"- {match.get('file')}:{match.get('line')} {match.get('text')}")
+            elif key == "input_deck":
+                lines.append(f"exists: {section.get('exists')}")
+                lines.append(f"file: {section.get('file', '-')}")
+                lines.append(f"coupling_count: {section.get('coupling_count', 0)}")
+                lines.append(f"kinematic_count: {section.get('kinematic_count', 0)}")
+                lines.append(f"coupling_after_end_assembly: {section.get('coupling_after_end_assembly', False)}")
+            elif key == "abaqus_mesh_manifest_json":
+                lines.append(f"exists: {section.get('exists')}")
+                lines.append(f"status: {section.get('status', '-')}")
+                lines.append(f"contact_pair_scaffold_status: {section.get('contact_pair_scaffold_status', '-')}")
+                lines.append(f"boundary_condition_scaffold_status: {section.get('boundary_condition_scaffold_status', '-')}")
+                lines.append(f"contact_bindings: {section.get('contact_bindings', 0)}")
+            elif key == "result_summary_json":
+                lines.append(f"exists: {section.get('exists')}")
+                lines.append(f"source: {section.get('source', '-')}")
+                lines.append(f"status: {section.get('status', '-')}")
+                lines.append(f"mesh_status: {section.get('mesh_status', '-')}")
+                lines.append(f"enabled: {', '.join(section.get('enabled_assessments', [])) or '-'}")
+            else:
+                lines.append(f"exists: {section.get('exists')}")
+                lines.append(f"header: {section.get('header', '-')}")
+                lines.append(f"data_rows: {section.get('data_rows', 0)}")
+            lines.append("")
+
+        issues = report.get("issues", [])
+        lines.append("[Issues]")
+        if not issues:
+            lines.append("none")
+        for issue in issues[:12]:
+            lines.append(f"- [{issue.get('severity')}] {issue.get('message')}")
+            if issue.get("detail") not in (None, ""):
+                lines.append(f"  detail: {issue.get('detail')}")
+        if len(issues) > 12:
+            lines.append(f"... {len(issues) - 12} more")
+        return "\n".join(lines)
 
     def load_csv(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open key,value CSV", "", "CSV Files (*.csv)")
