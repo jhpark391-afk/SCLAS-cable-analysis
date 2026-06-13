@@ -369,6 +369,11 @@ decoded`. The helper now writes the reduced JSON as UTF-8 without BOM, and
 `code/abaqus_runner.py` defensively strips UTF-8 BOM / decodes UTF-16 input
 payloads before `json.loads`.
 
+The next `-SmallSmoke` generation succeeded, but the helper did not find the
+input deck because small job names produce `small_smoke_..._mesh.inp` while the
+old helper only searched for `*_mes.inp` from truncated long job names. The
+helper now accepts both `*_mesh.inp` and `*_mes.inp`.
+
 ## Important Files
 
 ```text
