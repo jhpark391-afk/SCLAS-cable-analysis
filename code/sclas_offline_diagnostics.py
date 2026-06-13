@@ -608,6 +608,7 @@ def inspect_solver_logs(job_dir: Path, report: dict) -> None:
         "matches": [],
         "completed": False,
         "failed": False,
+        "warning_categories": {},
     }
     report["solver_logs"] = section
     if not unique_logs:
@@ -617,6 +618,10 @@ def inspect_solver_logs(job_dir: Path, report: dict) -> None:
     combined_text = "\n".join(read_text(path) for path in unique_logs)
     section["completed"] = bool(re.search(r"Abaqus JOB .* COMPLETED|COMPLETED SUCCESSFULLY", combined_text, re.IGNORECASE))
     section["failed"] = bool(re.search(r"Abaqus Error|Abaqus/Analysis exited with errors|exited with errors", combined_text, re.IGNORECASE))
+    keyword_scan = scan_solver_log_keywords(job_dir)
+    section["blocking_match_count"] = len(keyword_scan.get("blocking_matches", []))
+    section["notable_match_count"] = len(keyword_scan.get("notable_matches", []))
+    section["warning_categories"] = keyword_scan.get("warning_categories", {})
 
     def collect_matches(pattern_items, limit):
         pattern = re.compile("|".join(re.escape(item) for item in pattern_items), re.IGNORECASE)
@@ -816,6 +821,7 @@ def markdown_report(report: dict) -> str:
         ("Input deck", scalar(deck_section.get("file"))),
         ("Couplings after End Assembly", scalar(deck_section.get("coupling_after_end_assembly"))),
         ("Solver log matches", scalar(len(logs_section.get("matches", [])))),
+        ("Solver warning categories", top_counts(logs_section.get("warning_categories"))),
         ("Errors", scalar(issue_counts.get("error"))),
         ("Warnings", scalar(issue_counts.get("warning"))),
     ]

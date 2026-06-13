@@ -991,6 +991,26 @@ modelling target is therefore not contact-pair formulation fallback, but the
 underlying armour beam constraint/contact stability that causes numerical
 singularity and overconstraint-check warning volume.
 
+Follow-up diagnostics reporting:
+
+- `code/sclas_offline_diagnostics.py` now exposes the same warning taxonomy on
+  ordinary single-job `solver_logs.warning_categories`, not only parent sweep
+  child aggregation.
+- Latest direct check on `small_smoke_20260614_045330` reported zero diagnostic
+  issues and these top single-job warning categories:
+
+```text
+numerical_singularity=133
+overconstraint_check=77
+coupling_or_reference_node_note=12
+other_warning=8
+increment_cutback_or_excessive_reporting=3
+distorted_elements=2
+beam_curvature=2
+contact_pair_general_contact_overlap=1
+unconnected_regions=1
+```
+
 ## Important Files
 
 ```text
