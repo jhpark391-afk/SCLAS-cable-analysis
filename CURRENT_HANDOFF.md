@@ -912,6 +912,85 @@ Remaining non-blocking warning classes are still dominated by armour beam
 constraint/contact quality: numerical singularity, overconstraint checks,
 unconnected regions, beam curvature, and general-contact/contact-pair overlap.
 
+## Lab Curve V0 Sweep After Contact Adjustment - 2026-06-14 KST
+
+After commit `c40a64c Use node-to-surface for beam contact pairs`, the full
+default Curve V0 endpoint sweep was rerun:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_sweep.ps1
+```
+
+Runtime was about 14 minutes 48 seconds, below the 20-minute intervention
+threshold. The sweep created:
+
+```text
+jobs\SCLAS_jobs\curve_v0_sweep_20260614_045750
+```
+
+Parent result:
+
+```csv
+curvature_1_per_m,moment_kn_m
+-0.0079999997979,-0.84404125
+-0.00399999989895,-0.4220246875
+0,0
+0.00399999989895,0.42202409375
+0.0079999997979,0.8440385625
+```
+
+Parent diagnostics:
+
+```text
+source=SCLAS_CURVE_V0_ENDPOINT_SWEEP
+rows=5
+endpoint_sweep_shape.shape_checks_passed=true
+endpoint_sweep_children.all_children_deep_validated=true
+endpoint_sweep_children.blocking_log_hits=0
+diagnostic_summary.issue_counts={'error': 0, 'warning': 0, 'info': 0}
+```
+
+Child jobs:
+
+```text
+curve_v0_20260614_045750  factor=-0.1   adjust=adjusted  adjusted_count=4  fallback_hits=0  rows=2
+curve_v0_20260614_050108  factor=-0.05  adjust=adjusted  adjusted_count=4  fallback_hits=0  rows=2
+curve_v0_20260614_050401  factor=0      adjust=adjusted  adjusted_count=4  fallback_hits=0  rows=2
+curve_v0_20260614_050627  factor=0.05   adjust=adjusted  adjusted_count=4  fallback_hits=0  rows=2
+curve_v0_20260614_050920  factor=0.1    adjust=adjusted  adjusted_count=4  fallback_hits=0  rows=2
+```
+
+For every child:
+
+- Abaqus/Standard completed.
+- ODB extraction status was `extracted`.
+- `result_summary.json.source` was `SCLAS_ABAQUS_ODB_EXTRACTOR`.
+- `odb_extraction.rows_written` was `2`.
+- `abaqus_mesh_manifest.json.contact_pair_keyword_adjustment.status` was
+  `adjusted`.
+- Searching `.dat` for
+  `SURFACE TO SURFACE CONTACT APPROACH|NODE TO SURFACE APPROACH` returned
+  zero hits.
+
+Remaining completed-child warning taxonomy for the parent sweep:
+
+```text
+numerical_singularity=1367
+overconstraint_check=605
+coupling_or_reference_node_note=60
+other_warning=40
+increment_cutback_or_excessive_reporting=15
+distorted_elements=10
+beam_curvature=10
+contact_pair_general_contact_overlap=5
+unconnected_regions=5
+```
+
+The contact fallback warning class was removed from the new sweep. The next
+modelling target is therefore not contact-pair formulation fallback, but the
+underlying armour beam constraint/contact stability that causes numerical
+singularity and overconstraint-check warning volume.
+
 ## Important Files
 
 ```text
