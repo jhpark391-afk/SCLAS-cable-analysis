@@ -140,45 +140,55 @@ def contact_region_map():
             "assembly_surface": "InnerArmourHelix_ContactSurface",
             "assembly_edge_set": "InnerArmourHelix_ContactEdges",
             "component": "InnerArmourHelix",
+            "surface_kind": "beam_line",
         },
         "outer_armour_helical_beams_or_surfaces": {
             "assembly_surface": "OuterArmourHelix_ContactSurface",
             "assembly_edge_set": "OuterArmourHelix_ContactEdges",
             "component": "OuterArmourHelix",
+            "surface_kind": "beam_line",
         },
         "inner_armour_layer": {
             "assembly_surface": "InnerArmourHelix_ContactSurface",
             "assembly_edge_set": "InnerArmourHelix_ContactEdges",
             "component": "InnerArmourHelix",
+            "surface_kind": "beam_line",
         },
         "outer_armour_layer": {
             "assembly_surface": "OuterArmourHelix_ContactSurface",
             "assembly_edge_set": "OuterArmourHelix_ContactEdges",
             "component": "OuterArmourHelix",
+            "surface_kind": "beam_line",
         },
         "inner_sheath_inner_surface": {
             "assembly_surface": "inner_sheath_inner_surface",
             "component": "InnerSheathEquivalent",
+            "surface_kind": "solid_face",
         },
         "inner_sheath_outer_surface": {
             "assembly_surface": "inner_sheath_outer_surface",
             "component": "InnerSheathEquivalent",
+            "surface_kind": "solid_face",
         },
         "bedding_inner_surface": {
             "assembly_surface": "bedding_inner_surface",
             "component": "BeddingEquivalent",
+            "surface_kind": "solid_face",
         },
         "bedding_outer_surface": {
             "assembly_surface": "bedding_outer_surface",
             "component": "BeddingEquivalent",
+            "surface_kind": "solid_face",
         },
         "outer_sheath_inner_surface": {
             "assembly_surface": "outer_sheath_inner_surface",
             "component": "OuterSheathEquivalent",
+            "surface_kind": "solid_face",
         },
         "outer_sheath_outer_surface": {
             "assembly_surface": "outer_sheath_outer_surface",
             "component": "OuterSheathEquivalent",
+            "surface_kind": "solid_face",
         },
     }
 
@@ -763,8 +773,12 @@ def build_abaqus_mesh_model(payload, job_dir):
 
             master_surface = (binding.get("resolved_master") or {}).get("assembly_surface")
             slave_surface = (binding.get("resolved_slave") or {}).get("assembly_surface")
+            master_kind = (binding.get("resolved_master") or {}).get("surface_kind")
+            slave_kind = (binding.get("resolved_slave") or {}).get("surface_kind")
             record["master_surface"] = master_surface
             record["slave_surface"] = slave_surface
+            record["master_surface_kind"] = master_kind
+            record["slave_surface_kind"] = slave_kind
             if not master_surface or not slave_surface:
                 record["status"] = "skipped"
                 record["warnings"].append("resolved assembly surfaces are incomplete")
@@ -815,12 +829,35 @@ def build_abaqus_mesh_model(payload, job_dir):
 
             master_region = assembly.surfaces[master_surface]
             slave_region = assembly.surfaces[slave_surface]
-            attempts = [
-                (pair_name, master_region, slave_region, "standard", "declared_order"),
-                (pair_name, master_region, slave_region, "minimal", "declared_order_minimal"),
-                (safe_name(pair_name + "_Swap", 38), slave_region, master_region, "standard", "swapped_order"),
-                (safe_name(pair_name + "_Swap", 38), slave_region, master_region, "minimal", "swapped_order_minimal"),
-            ]
+            master_is_beam = master_kind == "beam_line"
+            slave_is_beam = slave_kind == "beam_line"
+            if master_is_beam and slave_is_beam:
+                record["status"] = "skipped"
+                record["warnings"].append(
+                    "both regions are B31 beam line surfaces; Abaqus/Standard cannot use line elements as an explicit contact-pair master surface"
+                )
+                record["notes"].append("Skipped explicit armour-armour pair; keep general contact scaffold until a solid/contact-surface armour representation is added.")
+                continue
+
+            if master_is_beam:
+                record["notes"].append("Declared master is a B31 beam line surface; using swapped solver order so the solid face is master.")
+                attempts = [
+                    (safe_name(pair_name + "_SolidMaster", 38), slave_region, master_region, "standard", "solid_master_swapped_order"),
+                    (safe_name(pair_name + "_SolidMaster", 38), slave_region, master_region, "minimal", "solid_master_swapped_order_minimal"),
+                ]
+            elif slave_is_beam:
+                record["notes"].append("Declared slave is a B31 beam line surface; keeping declared order so the solid face remains master.")
+                attempts = [
+                    (pair_name, master_region, slave_region, "standard", "solid_master_declared_order"),
+                    (pair_name, master_region, slave_region, "minimal", "solid_master_declared_order_minimal"),
+                ]
+            else:
+                attempts = [
+                    (pair_name, master_region, slave_region, "standard", "declared_order"),
+                    (pair_name, master_region, slave_region, "minimal", "declared_order_minimal"),
+                    (safe_name(pair_name + "_Swap", 38), slave_region, master_region, "standard", "swapped_order"),
+                    (safe_name(pair_name + "_Swap", 38), slave_region, master_region, "minimal", "swapped_order_minimal"),
+                ]
             for attempt_name, attempt_master, attempt_slave, mode, label in attempts:
                 success, error = try_pair(attempt_name, attempt_master, attempt_slave, mode)
                 if success:

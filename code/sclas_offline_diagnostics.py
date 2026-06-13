@@ -253,6 +253,11 @@ def summarize_report(report: dict) -> None:
     deck = report.get("input_deck", {})
     logs = report.get("solver_logs", {})
     manifest = report.get("abaqus_mesh_manifest_json", {})
+    log_match_text = "\n".join(
+        "{0}\n{1}".format(item.get("text", ""), item.get("context", ""))
+        for item in logs.get("matches", [])
+        if isinstance(item, dict)
+    ).upper()
 
     if counts["error"]:
         if deck.get("coupling_after_end_assembly"):
@@ -264,7 +269,10 @@ def summarize_report(report: dict) -> None:
         else:
             action = "Fix the first error in this report before expanding the backend."
     elif logs.get("matches"):
-        action = "Inspect the first solver log match and make the smallest targeted abaqus_runner.py fix."
+        if "LINE ELEMENTS" in log_match_text and "MASTER SURFACE" in log_match_text:
+            action = "Avoid explicit contact pairs that use B31 armour line-element surfaces as master; swap solid/beam order or skip beam-beam pairs."
+        else:
+            action = "Inspect the first solver log match and make the smallest targeted abaqus_runner.py fix."
     elif not deck.get("exists"):
         action = "Copy the Lab-PC generated .inp/.dat/.msg files into this job folder for deeper offline diagnostics."
     elif counts["warning"]:

@@ -323,6 +323,24 @@ terms such as `SURFACE` before true fatal/error markers. The helper and
 only fall back to notable terms like coupling/reference-node warnings if no
 blocking lines are found.
 
+The next Lab-PC `.dat` inspection showed that the old `*COUPLING misplaced`
+error is gone. Abaqus now stops on two explicit contact-pair errors:
+
+```text
+***ERROR: SURFACE ASSEMBLY_OUTERARMOURHELIX_CONTACTSURFACE IS MADE UP OF 3D
+          LINE ELEMENTS AND CANNOT BE USED AS A MASTER SURFACE
+***ERROR: SURFACE ASSEMBLY_INNERARMOURHELIX_CONTACTSURFACE IS MADE UP OF 3D
+          LINE ELEMENTS AND CANNOT BE USED AS A MASTER SURFACE
+```
+
+The runner now tags armour conceptual regions as `surface_kind=beam_line` and
+solid layer surfaces as `surface_kind=solid_face`. Explicit contact-pair
+creation avoids any solver attempt where a B31 beam-line armour surface is the
+master. For solid-vs-armour pairs, it swaps the solver order so the solid face
+is master and the beam surface is slave. For armour-vs-armour pairs, it skips
+the explicit pair and leaves that interaction to the general-contact scaffold
+until a solid/contact-surface armour representation is implemented.
+
 ## Important Files
 
 ```text
