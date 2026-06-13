@@ -374,6 +374,22 @@ input deck because small job names produce `small_smoke_..._mesh.inp` while the
 old helper only searched for `*_mes.inp` from truncated long job names. The
 helper now accepts both `*_mesh.inp` and `*_mes.inp`.
 
+The small smoke solver run then completed successfully:
+
+```text
+Abaqus JOB small_smoke_20260614_011324_mesh COMPLETED
+```
+
+This confirms that the current scaffold can pass Abaqus input processing and a
+small Abaqus/Standard solve after the coupling-scope and B31 master-surface
+fixes. The solver logs still contain modelling warnings such as distorted
+elements, zero-pivot/overconstraint checks on armour beam nodes, and contact
+adjustment notes. These are not blocking for the smoke milestone because Abaqus
+completed the job. Diagnostics now detect solver completion first and avoid
+treating completed-job warning vocabulary as a blocking error. Next backend
+work should focus on ODB extraction into `result_data.csv`, then tightening
+contact/BC modelling quality for the full-size job.
+
 ## Important Files
 
 ```text

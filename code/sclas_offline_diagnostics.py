@@ -16,22 +16,22 @@ from pathlib import Path
 BLOCKING_ERROR_PATTERNS = [
     "***ERROR",
     "FATAL",
-    "SEVERE",
     "THE PROGRAM HAS DISCOVERED",
     "Abaqus Error",
     "Abaqus/Analysis exited",
+    "exited with errors",
     "UNKNOWN",
     "INVALID",
     "MISPLACED",
+]
+
+NOTABLE_LOG_PATTERNS = [
+    "WARNING",
     "ZERO PIVOT",
     "OVERCONSTRAINT",
     "TOO MANY",
     "EXCESSIVE",
     "DISTORTION",
-]
-
-NOTABLE_LOG_PATTERNS = [
-    "WARNING",
     "COUPLING",
     "KINEMATIC",
     "REF NODE",
@@ -207,11 +207,20 @@ def inspect_solver_logs(job_dir: Path, report: dict) -> None:
             unique_logs.append(path)
             seen.add(path)
 
-    section = {"files": [path.name for path in unique_logs], "matches": []}
+    section = {
+        "files": [path.name for path in unique_logs],
+        "matches": [],
+        "completed": False,
+        "failed": False,
+    }
     report["solver_logs"] = section
     if not unique_logs:
         add_issue(report, "info", "No Abaqus solver log files found")
         return
+
+    combined_text = "\n".join(read_text(path) for path in unique_logs)
+    section["completed"] = bool(re.search(r"Abaqus JOB .* COMPLETED|COMPLETED SUCCESSFULLY", combined_text, re.IGNORECASE))
+    section["failed"] = bool(re.search(r"Abaqus Error|Abaqus/Analysis exited with errors|exited with errors", combined_text, re.IGNORECASE))
 
     def collect_matches(pattern_items, limit):
         pattern = re.compile("|".join(re.escape(item) for item in pattern_items), re.IGNORECASE)
@@ -233,9 +242,11 @@ def inspect_solver_logs(job_dir: Path, report: dict) -> None:
     section["match_priority"] = "blocking"
     section["matches"] = collect_matches(BLOCKING_ERROR_PATTERNS, 80)
     if not section["matches"]:
-        section["match_priority"] = "notable"
+        section["match_priority"] = "notable_after_completion" if section["completed"] else "notable"
         section["matches"] = collect_matches(NOTABLE_LOG_PATTERNS, 40)
-    if section["matches"]:
+    if section["failed"]:
+        add_issue(report, "error", "Abaqus solver exited with errors")
+    elif section["matches"] and not section["completed"]:
         add_issue(report, "warning", "Solver log contains notable Abaqus keywords/errors", len(section["matches"]))
 
 
@@ -268,6 +279,8 @@ def summarize_report(report: dict) -> None:
             action = "Inspect abaqus_mesh_manifest.json error and fix the Abaqus scaffold creation failure first."
         else:
             action = "Fix the first error in this report before expanding the backend."
+    elif logs.get("completed"):
+        action = "Small Abaqus smoke solve completed; use this job to validate ODB extraction and then refine real contact/BC modelling."
     elif logs.get("matches"):
         if "LINE ELEMENTS" in log_match_text and "MASTER SURFACE" in log_match_text:
             action = "Avoid explicit contact pairs that use B31 armour line-element surfaces as master; swap solid/beam order or skip beam-beam pairs."

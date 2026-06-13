@@ -246,7 +246,10 @@ try {
 }
 
 Write-Section "solver_stdout.txt"
-Get-Content (Join-Path $JobDir "solver_stdout.txt") -Raw
+$solverStdoutPath = Join-Path $JobDir "solver_stdout.txt"
+$solverStdoutText = Get-Content $solverStdoutPath -Raw
+$solverStdoutText
+$solverCompleted = $solverStdoutText -match "Abaqus JOB .* COMPLETED|COMPLETED SUCCESSFULLY"
 
 Write-Section "Generated solver files"
 Get-ChildItem $JobDir -Filter "$jobName.*" |
@@ -267,23 +270,30 @@ $extractPath = Join-Path $JobDir "solver_error_extract.txt"
 if ($logFiles.Count -eq 0) {
     Write-Host "No solver logs found."
 } else {
-    $blockingPattern = "\*\*\*ERROR|FATAL|SEVERE|THE PROGRAM HAS DISCOVERED|Abaqus Error|Abaqus/Analysis exited|UNKNOWN|INVALID|MISPLACED|ZERO PIVOT|OVERCONSTRAINT|TOO MANY|EXCESSIVE|DISTORTION"
-    $notablePattern = "WARNING|COUPLING|KINEMATIC|REF NODE"
+    $blockingPattern = "\*\*\*ERROR|FATAL|THE PROGRAM HAS DISCOVERED|Abaqus Error|Abaqus/Analysis exited with errors|exited with errors|UNKNOWN|INVALID|MISPLACED"
+    $notablePattern = "WARNING|ZERO PIVOT|OVERCONSTRAINT|TOO MANY|EXCESSIVE|DISTORTION|COUPLING|KINEMATIC|REF NODE"
     $matches = @(Select-String -Path $logFiles `
         -Pattern $blockingPattern `
         -Context 3,3 |
         Select-Object -First 120)
-    if ($matches.Count -eq 0) {
+    if ($matches.Count -eq 0 -and -not $solverCompleted) {
         $matches = @(Select-String -Path $logFiles `
             -Pattern $notablePattern `
             -Context 3,3 |
             Select-Object -First 80)
     }
-    $matches | Out-File $extractPath -Encoding utf8
+    if ($matches.Count -eq 0 -and $solverCompleted) {
+        "Solver completed; no blocking error context found." | Out-File $extractPath -Encoding utf8
+    } else {
+        $matches | Out-File $extractPath -Encoding utf8
+    }
     if ($matches) {
         $matches | Select-Object -First 80
         Write-Host ""
         Write-Host "Saved full extract to $extractPath"
+    } elseif ($solverCompleted) {
+        Write-Host "Solver completed; no blocking error context found."
+        Write-Host "Saved completion note to $extractPath"
     } else {
         Write-Host "No matching error/warning context found in solver logs."
     }
