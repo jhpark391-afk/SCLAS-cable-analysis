@@ -156,7 +156,7 @@ foreach ($factor in $CurveFactors) {
     $row = Read-LastCsvDataRow $csvPath
     $curvature = [double]::Parse($row.curvature_1_per_m, [System.Globalization.CultureInfo]::InvariantCulture)
     $moment = [double]::Parse($row.moment_kn_m, [System.Globalization.CultureInfo]::InvariantCulture)
-    $curveRows.Add("{0},{1}" -f (Format-InvariantDouble $curvature), (Format-InvariantDouble $moment))
+    $curveRows.Add(("{0},{1}" -f (Format-InvariantDouble $curvature), (Format-InvariantDouble $moment)))
     $childJobs += [pscustomobject]@{
         factor = [double]$factor
         job = $child.Name
