@@ -1,6 +1,6 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-06-13
+Last updated: 2026-06-14
 
 ## Repository
 
@@ -414,6 +414,96 @@ powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -JobDir "C:\
 
 Use a newly generated small smoke job for this check so the output requests are
 present in the `.inp` and `.odb`.
+
+## Lab ODB Smoke Success - 2026-06-14 KST
+
+The Lab PC pulled commit:
+
+```text
+9fa51ed Add initial Abaqus ODB extraction
+```
+
+Then this command was run from
+`C:\Users\user\Documents\SCLAS-cable-analysis`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e" -SmallSmoke
+```
+
+The helper created:
+
+```text
+jobs\SCLAS_jobs\small_smoke_20260614_013239
+```
+
+Verified result:
+
+- Abaqus/CAE noGUI generation completed with `Exit code: 0`.
+- Mesh status was `abaqus_mesh_created`.
+- Boundary condition scaffold status was
+  `created_with_keyword_coupling_fallback`.
+- Abaqus/Standard completed:
+  `Abaqus JOB small_smoke_20260614_013239_mesh COMPLETED`.
+- ODB extraction succeeded with `status: extracted`.
+- `result_data.csv` was updated by `SCLAS_ABAQUS_ODB_EXTRACTOR`.
+- Offline diagnostics reported:
+  `Issue counts: {'error': 0, 'warning': 0, 'info': 0}`,
+  `completed: True`, and `failed: False`.
+
+ODB extraction summary:
+
+```json
+{
+    "status": "extracted",
+    "method": "field",
+    "node_set": "SCLAS_RP_RIGHTEND",
+    "step": "SCLAS_CyclicBendingStep",
+    "rotation_output": "UR2",
+    "moment_output": "RM2",
+    "effective_length_mm": 50.0,
+    "frames_used": 2,
+    "rows_written": 2
+}
+```
+
+This is the first end-to-end backend smoke milestone:
+
+```text
+GUI job package -> Abaqus/CAE noGUI mesh/input deck -> Abaqus/Standard solve -> ODB extraction -> result_data.csv/result_summary.json -> offline diagnostics
+```
+
+Important limitation:
+
+- `rows_written` is only 2, so this is still a connection/extraction smoke
+  test, not a useful moment-curvature loop.
+- The next backend task is to force more Abaqus increments/output frames so the
+  extractor produces a multi-point curve.
+
+This handoff update also adds a small runner/helper change for the next Lab-PC
+test:
+
+- `code/abaqus_runner.py` reads
+  `analysis_conditions.abaqus_output_intervals` and uses it to set cyclic-step
+  `initialInc` / `maxInc`.
+- Field and history output requests now use `frequency=1`.
+- `run_lab_abaqus_smoke.ps1 -SmallSmoke` now writes
+  `abaqus_output_intervals=12` by default and exposes
+  `-SmallAbaqusOutputIntervals`.
+
+Next Lab-PC command after pulling the next commit:
+
+```powershell
+cd $env:USERPROFILE\Documents\SCLAS-cable-analysis
+git pull
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e" -SmallSmoke
+```
+
+Expected next check:
+
+- `ODB extraction status: extracted`
+- `result_summary.json` source remains `SCLAS_ABAQUS_ODB_EXTRACTOR`
+- `odb_rows_written` should be greater than 2, ideally about 10-13 rows for the
+  default 12 intervals.
 
 ## Important Files
 

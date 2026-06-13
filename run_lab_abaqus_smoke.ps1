@@ -6,7 +6,8 @@ param(
     [int]$SmallAxialDivisions = 4,
     [int]$SmallCoreCircumferentialDivisions = 8,
     [int]$SmallArmourCircumferentialDivisions = 4,
-    [double]$SmallEffectiveLengthMm = 50.0
+    [double]$SmallEffectiveLengthMm = 50.0,
+    [int]$SmallAbaqusOutputIntervals = 12
 )
 
 $ErrorActionPreference = "Stop"
@@ -113,7 +114,8 @@ function New-SmallSmokeJob {
         [Parameter(Mandatory=$true)][int]$AxialDivisions,
         [Parameter(Mandatory=$true)][int]$CoreCircumferentialDivisions,
         [Parameter(Mandatory=$true)][int]$ArmourCircumferentialDivisions,
-        [Parameter(Mandatory=$true)][double]$EffectiveLengthMm
+        [Parameter(Mandatory=$true)][double]$EffectiveLengthMm,
+        [Parameter(Mandatory=$true)][int]$AbaqusOutputIntervals
     )
 
     $jobsRoot = Join-Path $ProjectRoot "jobs\SCLAS_jobs"
@@ -146,6 +148,7 @@ function New-SmallSmokeJob {
     Set-JsonObjectProperty $mesh "armour_circumferential_divisions" ([int]$ArmourCircumferentialDivisions)
     Set-JsonObjectProperty $mesh "lab_smoke_reduced_mesh" $true
     Set-JsonObjectProperty $analysis "effective_length_mm" ([double]$EffectiveLengthMm)
+    Set-JsonObjectProperty $analysis "abaqus_output_intervals" ([int]$AbaqusOutputIntervals)
     if ($analysis.PSObject.Properties["solver_steps"]) {
         $analysis.solver_steps = 25
     }
@@ -157,7 +160,7 @@ function New-SmallSmokeJob {
     [System.IO.File]::WriteAllText($inputPath, $jsonText + [Environment]::NewLine, $utf8NoBom)
 
     Write-Host "Created reduced smoke job: $smallDir"
-    Write-Host "  axial_divisions=$AxialDivisions, core_circ=$CoreCircumferentialDivisions, armour_circ=$ArmourCircumferentialDivisions, effective_length_mm=$EffectiveLengthMm"
+    Write-Host "  axial_divisions=$AxialDivisions, core_circ=$CoreCircumferentialDivisions, armour_circ=$ArmourCircumferentialDivisions, effective_length_mm=$EffectiveLengthMm, abaqus_output_intervals=$AbaqusOutputIntervals"
     return $smallDir
 }
 
@@ -176,7 +179,8 @@ if ($SmallSmoke) {
         -AxialDivisions $SmallAxialDivisions `
         -CoreCircumferentialDivisions $SmallCoreCircumferentialDivisions `
         -ArmourCircumferentialDivisions $SmallArmourCircumferentialDivisions `
-        -EffectiveLengthMm $SmallEffectiveLengthMm
+        -EffectiveLengthMm $SmallEffectiveLengthMm `
+        -AbaqusOutputIntervals $SmallAbaqusOutputIntervals
 } else {
     $JobDir = $SourceJobDir
 }
