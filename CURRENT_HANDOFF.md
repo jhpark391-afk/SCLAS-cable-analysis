@@ -551,6 +551,17 @@ Expected next check:
 - `odb_extraction_summary.json` should include `history_rows_available` and
   `field_rows_available`.
 
+Latest Lab-PC follow-up:
+
+- Default fast `-SmallSmoke` created `small_smoke_20260614_024055` and Abaqus
+  completed quickly again, but ODB extraction failed after the multistep
+  extractor change.
+- The likely cause was overly aggressive row de-duplication: the extractor
+  removed duplicate-looking rows even within a single step, which can collapse
+  the two-frame smoke output below the minimum two rows.
+- The extractor now only removes a duplicate first row when concatenating a new
+  step to a previous step. Rows within a single step are preserved.
+
 ## Important Files
 
 ```text

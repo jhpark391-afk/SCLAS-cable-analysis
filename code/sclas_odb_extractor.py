@@ -111,8 +111,8 @@ def find_steps(odb, preferred_name):
 
 
 def append_nonduplicate_rows(target_rows, source_rows):
-    for row in source_rows:
-        if target_rows:
+    for index, row in enumerate(source_rows):
+        if target_rows and index == 0:
             prev = target_rows[-1]
             if abs(prev[0] - row[0]) <= 1.0e-12 and abs(prev[1] - row[1]) <= 1.0e-12:
                 continue
@@ -289,6 +289,8 @@ def extract_odb(odb_path, job_dir, input_data_path):
                 "steps": step_names,
                 "node_set": node_set_name,
                 "available_field_outputs": available_field_outputs,
+                "history_rows_available": len(history_rows),
+                "field_rows_available": len(field_rows),
                 "history_region_count": len(steps[-1][1].historyRegions.keys()),
                 "next_step": "Regenerate the input deck with SCLAS_RP_FieldOutput/SCLAS_RightRP_HistoryOutput enabled and rerun the smoke solve.",
             }, []
