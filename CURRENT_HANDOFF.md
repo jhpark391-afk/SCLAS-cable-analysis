@@ -604,31 +604,35 @@ Next implementation target:
 
 Implemented next:
 
-- `run_lab_abaqus_smoke.ps1` now has `-CurveV0`.
-- `-CurveV0` creates a reduced `curve_v0_YYYYMMDD_HHMMSS` job, sets
-  `analysis_conditions.abaqus_curve_v0=true`, and keeps default
-  `-SmallSmoke` as the fast two-row bridge check.
-- The first curve-v0 path uses `-CurveV0CurvatureScale 0.25` by default:
-  `+0.25*kmax -> 0 -> -0.25*kmax -> 0`.
-- `code/abaqus_runner.py` reads
-  `analysis_conditions.abaqus_curve_v0_path_factors` so later curve-v0 load
-  paths can be changed from the helper without editing the runner.
+- The previous one-model multi-step `-CurveV0` attempt was too slow for the
+  current nonlinear contact scaffold.
+- Curve-v0 is now redesigned as an endpoint sweep:
+  each curvature factor runs as its own reduced, single-step Abaqus job with no
+  cyclic amplitude and no forced solver increments.
+- `run_lab_abaqus_smoke.ps1 -CurveV0 -CurveV0CurvatureScale <factor>` now
+  creates a single endpoint job.
+- New `run_curve_v0_sweep.ps1` automates the proper v0 workflow: it runs
+  several endpoint jobs and aggregates each final ODB row into
+  `curve_v0_sweep_.../result_data.csv`.
+- Default factors are `-0.1, -0.05, 0, 0.05, 0.1`.
 
-Next Lab-PC curve-v0 command:
+Next Lab-PC curve-v0 sweep command:
 
 ```powershell
 cd $env:USERPROFILE\Documents\SCLAS-cable-analysis
 git pull
-powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e" -CurveV0
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_sweep.ps1 -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e"
 ```
 
 Expected:
 
-- It may run longer than `-SmallSmoke`.
-- If it completes, check `rows_written`, `steps`, and
-  `abaqus_result_quality.curve_class`.
-- If it is too slow, stop it and lower the first attempt with
-  `-CurveV0CurvatureScale 0.1`.
+- It will run five small child jobs, so it takes longer than one `-SmallSmoke`,
+  but each child should behave like a stable single-step endpoint solve.
+- Parent output should be
+  `jobs\SCLAS_jobs\curve_v0_sweep_...\result_data.csv` with five rows.
+- If even the first endpoint point is too slow, stop and rerun with fewer or
+  smaller factors, for example:
+  `-CurveFactors -0.05,0,0.05`.
 
 ## Important Files
 

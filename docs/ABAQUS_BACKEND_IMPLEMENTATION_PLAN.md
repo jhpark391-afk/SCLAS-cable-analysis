@@ -81,21 +81,26 @@ Recommended v0 approach:
 Current command shape:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 `
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_sweep.ps1 `
   -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e" `
-  -CurveV0
+  -CurveFactors -0.1,-0.05,0,0.05,0.1
 ```
 
-The first curve-v0 attempt intentionally uses a small curvature scale
-(`-CurveV0CurvatureScale 0.25` by default) and the path:
+Curve-v0 now uses an endpoint sweep. Each point is a separate, reduced,
+single-step Abaqus solve with no cyclic amplitude and no forced solver
+increments. The sweep helper aggregates the final ODB endpoint from each child
+job into one parent `curve_v0_sweep_.../result_data.csv`.
+
+Default factors:
 
 ```text
-+0.25*kmax -> 0 -> -0.25*kmax -> 0
+-0.1*kmax, -0.05*kmax, 0, +0.05*kmax, +0.1*kmax
 ```
 
-This mode may take longer than the default two-row smoke. Stop the run if it
-stays at the first increment for too long, and keep the default `-SmallSmoke`
-as the fast bridge health check.
+This is more robust than trying to force intermediate ODB frames from one
+nonlinear contact step. It is not a full hysteresis simulation yet, but it is
+the preferred first multi-point Abaqus curve because each point follows the
+same stable single-step pattern as the smoke baseline.
 
 ## Phase 1: Mesh scaffold verification
 

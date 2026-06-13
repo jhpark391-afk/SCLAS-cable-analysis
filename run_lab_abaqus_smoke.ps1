@@ -10,7 +10,7 @@ param(
     [int]$SmallAbaqusOutputIntervals = 4,
     [switch]$MultiStepSmoke,
     [switch]$CurveV0,
-    [double]$CurveV0CurvatureScale = 0.25
+    [double]$CurveV0CurvatureScale = 0.1
 )
 
 $ErrorActionPreference = "Stop"
@@ -156,17 +156,14 @@ function New-SmallSmokeJob {
     Set-JsonObjectProperty $mesh "lab_smoke_reduced_mesh" $true
     Set-JsonObjectProperty $analysis "effective_length_mm" ([double]$EffectiveLengthMm)
     Set-JsonObjectProperty $analysis "abaqus_output_intervals" ([int]$AbaqusOutputIntervals)
-    Set-JsonObjectProperty $analysis "abaqus_multistep_smoke" ([bool]($UseMultiStepSmoke -or $UseCurveV0))
+    Set-JsonObjectProperty $analysis "abaqus_multistep_smoke" ([bool]$UseMultiStepSmoke)
     Set-JsonObjectProperty $analysis "abaqus_curve_v0" ([bool]$UseCurveV0)
     Set-JsonObjectProperty $analysis "abaqus_curve_v0_curvature_scale" ([double]$CurveV0CurvatureScale)
     if ($UseCurveV0) {
-        $curvePath = @(
-            [double]$CurveV0CurvatureScale,
-            0.0,
-            (-1.0 * [double]$CurveV0CurvatureScale),
-            0.0
-        )
-        Set-JsonObjectProperty $analysis "abaqus_curve_v0_path_factors" $curvePath
+        Set-JsonObjectProperty $analysis "abaqus_curve_v0_endpoint" $true
+        Set-JsonObjectProperty $analysis "abaqus_curve_v0_endpoint_factor" ([double]$CurveV0CurvatureScale)
+    } else {
+        Set-JsonObjectProperty $analysis "abaqus_curve_v0_endpoint" $false
     }
     if ($analysis.PSObject.Properties["solver_steps"]) {
         $analysis.solver_steps = 25
@@ -180,7 +177,7 @@ function New-SmallSmokeJob {
     [System.IO.File]::WriteAllText($inputPath, $jsonText + [Environment]::NewLine, $utf8NoBom)
 
     Write-Host "Created reduced smoke job: $smallDir"
-    Write-Host "  axial_divisions=$AxialDivisions, core_circ=$CoreCircumferentialDivisions, armour_circ=$ArmourCircumferentialDivisions, effective_length_mm=$EffectiveLengthMm, abaqus_output_intervals=$AbaqusOutputIntervals, multistep_smoke=$($UseMultiStepSmoke -or $UseCurveV0), curve_v0=$UseCurveV0, curve_scale=$CurveV0CurvatureScale"
+    Write-Host "  axial_divisions=$AxialDivisions, core_circ=$CoreCircumferentialDivisions, armour_circ=$ArmourCircumferentialDivisions, effective_length_mm=$EffectiveLengthMm, abaqus_output_intervals=$AbaqusOutputIntervals, multistep_smoke=$UseMultiStepSmoke, curve_v0=$UseCurveV0, endpoint_factor=$CurveV0CurvatureScale"
     return $smallDir
 }
 

@@ -884,7 +884,9 @@ def build_abaqus_mesh_model(payload, job_dir):
         if output_intervals > 100:
             output_intervals = 100
         curve_v0_mode = bool(analysis.get("abaqus_curve_v0", False))
-        multistep_smoke = bool(analysis.get("abaqus_multistep_smoke", False)) or curve_v0_mode
+        curve_endpoint_mode = bool(analysis.get("abaqus_curve_v0_endpoint", False))
+        curve_endpoint_factor = float(analysis.get("abaqus_curve_v0_endpoint_factor", 1.0))
+        multistep_smoke = bool(analysis.get("abaqus_multistep_smoke", False))
         default_path = [1.0, 0.0, -1.0, 0.0]
         if curve_v0_mode:
             scale = float(analysis.get("abaqus_curve_v0_curvature_scale", 0.25))
@@ -910,13 +912,15 @@ def build_abaqus_mesh_model(payload, job_dir):
             "right_end_face_set": "SCLAS_RightEndFaces",
             "left_end_surface": "SCLAS_LeftEndSurface",
             "right_end_surface": "SCLAS_RightEndSurface",
-            "target_curvature_1_per_m": float(analysis.get("max_curvature_1_per_m", 0.08)),
+            "target_curvature_1_per_m": float(analysis.get("max_curvature_1_per_m", 0.08)) * (curve_endpoint_factor if curve_endpoint_mode else 1.0),
             "effective_length_mm": length,
-            "target_rotation_rad": float(analysis.get("max_curvature_1_per_m", 0.08)) * (length / 1000.0),
+            "target_rotation_rad": float(analysis.get("max_curvature_1_per_m", 0.08)) * (curve_endpoint_factor if curve_endpoint_mode else 1.0) * (length / 1000.0),
             "output_intervals": output_intervals,
             "solver_increment_control": "abaqus_default",
             "multistep_smoke": multistep_smoke,
             "curve_v0_mode": curve_v0_mode,
+            "curve_endpoint_mode": curve_endpoint_mode,
+            "curve_endpoint_factor": curve_endpoint_factor,
             "load_path_factors": load_path_factors,
             "created_regions": [],
             "optional_created_regions": [],
@@ -1117,18 +1121,31 @@ def build_abaqus_mesh_model(payload, job_dir):
                         ur2=step_item["target_rotation_rad"],
                     )
             else:
-                model.DisplacementBC(
-                    name="SCLAS_RightEnd_CyclicRotation",
-                    createStepName=record["step"],
-                    region=assembly.sets[record["right_reference_point_set"]],
-                    u1=0.0,
-                    u2=0.0,
-                    u3=0.0,
-                    ur1=0.0,
-                    ur2=record["target_rotation_rad"],
-                    ur3=0.0,
-                    amplitude=record["amplitude"],
-                )
+                if curve_endpoint_mode:
+                    model.DisplacementBC(
+                        name="SCLAS_RightEnd_CyclicRotation",
+                        createStepName=record["step"],
+                        region=assembly.sets[record["right_reference_point_set"]],
+                        u1=0.0,
+                        u2=0.0,
+                        u3=0.0,
+                        ur1=0.0,
+                        ur2=record["target_rotation_rad"],
+                        ur3=0.0,
+                    )
+                else:
+                    model.DisplacementBC(
+                        name="SCLAS_RightEnd_CyclicRotation",
+                        createStepName=record["step"],
+                        region=assembly.sets[record["right_reference_point_set"]],
+                        u1=0.0,
+                        u2=0.0,
+                        u3=0.0,
+                        ur1=0.0,
+                        ur2=record["target_rotation_rad"],
+                        ur3=0.0,
+                        amplitude=record["amplitude"],
+                    )
             record["created_regions"].append("reference_point_bcs")
             required_created += 1
         except Exception as exc:
