@@ -41,6 +41,60 @@ function Read-LastCsvDataRow {
     return $rows[-1]
 }
 
+function Read-JsonFile {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) {
+        throw "Missing JSON file: $Path"
+    }
+    try {
+        return Get-Content $Path -Raw | ConvertFrom-Json
+    } catch {
+        throw "Could not parse JSON file $Path`: $($_.Exception.Message)"
+    }
+}
+
+function Format-InvariantDouble {
+    param([double]$Value)
+    return [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:R}", $Value)
+}
+
+function Assert-ChildOdbResult {
+    param(
+        [Parameter(Mandatory=$true)]$Child,
+        [Parameter(Mandatory=$true)][double]$Factor
+    )
+    $summaryPath = Join-Path $Child.FullName "result_summary.json"
+    $summary = Read-JsonFile $summaryPath
+    $odb = $summary.odb_extraction
+    $quality = $summary.abaqus_result_quality
+
+    if ($summary.source -ne "SCLAS_ABAQUS_ODB_EXTRACTOR") {
+        throw "Curve factor $Factor did not produce an ODB-extracted result. Source was '$($summary.source)' in $summaryPath"
+    }
+    if ($summary.status -ne "completed") {
+        throw "Curve factor $Factor summary status was '$($summary.status)' in $summaryPath"
+    }
+    if (-not $odb -or $odb.status -ne "extracted") {
+        $reason = if ($odb) { $odb.reason } else { "missing odb_extraction block" }
+        throw "Curve factor $Factor ODB extraction was not successful: $reason"
+    }
+    if ([int]$odb.rows_written -lt 2) {
+        throw "Curve factor $Factor wrote too few ODB rows: $($odb.rows_written)"
+    }
+    if (-not $quality -or $quality.curve_class -eq "odb_extraction_failed" -or $quality.curve_class -eq "too_few_odb_rows") {
+        throw "Curve factor $Factor has unacceptable result quality: $($quality.curve_class)"
+    }
+
+    return [pscustomobject]@{
+        source = $summary.source
+        status = $summary.status
+        odb_status = $odb.status
+        odb_rows_written = [int]$odb.rows_written
+        curve_class = $quality.curve_class
+        is_research_curve = [bool]$quality.is_research_curve
+    }
+}
+
 function Write-Utf8NoBom {
     param([string]$Path, [string[]]$Lines)
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -97,15 +151,22 @@ foreach ($factor in $CurveFactors) {
     if (-not $child) {
         throw "Could not find the curve_v0 child job after factor $factor"
     }
+    $validation = Assert-ChildOdbResult -Child $child -Factor $factor
     $csvPath = Join-Path $child.FullName "result_data.csv"
     $row = Read-LastCsvDataRow $csvPath
-    $curveRows.Add("{0},{1}" -f $row.curvature_1_per_m, $row.moment_kn_m)
+    $curvature = [double]::Parse($row.curvature_1_per_m, [System.Globalization.CultureInfo]::InvariantCulture)
+    $moment = [double]::Parse($row.moment_kn_m, [System.Globalization.CultureInfo]::InvariantCulture)
+    $curveRows.Add("{0},{1}" -f (Format-InvariantDouble $curvature), (Format-InvariantDouble $moment))
     $childJobs += [pscustomobject]@{
         factor = [double]$factor
         job = $child.Name
         path = $child.FullName
-        curvature_1_per_m = [double]$row.curvature_1_per_m
-        moment_kn_m = [double]$row.moment_kn_m
+        curvature_1_per_m = $curvature
+        moment_kn_m = $moment
+        source = $validation.source
+        odb_status = $validation.odb_status
+        odb_rows_written = $validation.odb_rows_written
+        curve_class = $validation.curve_class
     }
 }
 
@@ -116,20 +177,39 @@ Write-Utf8NoBom -Path $resultCsv -Lines $curveLines
 $summary = [pscustomobject]@{
     source = "SCLAS_CURVE_V0_ENDPOINT_SWEEP"
     status = "completed"
+    num_points = $childJobs.Count
     result_contract = [pscustomobject]@{
         csv_file = "result_data.csv"
         required_columns = @("curvature_1_per_m", "moment_kn_m")
         summary_file = "result_summary.json"
         primary_result = "bending moment-curvature endpoint sweep"
     }
+    mesh_status = [pscustomobject]@{
+        status = "endpoint_sweep_parent"
+        child_job_count = $childJobs.Count
+    }
+    backend_readiness = [pscustomobject]@{
+        bending_stick_slip = [pscustomobject]@{
+            requested = $true
+            status = "abaqus_endpoint_sweep_curve_v0"
+            next_step = "Validate endpoint sweep shape against a continuous bending load path before research use."
+        }
+        source = "SCLAS_CURVE_V0_ENDPOINT_SWEEP"
+    }
     abaqus_result_quality = [pscustomobject]@{
-        curve_class = "multi_point_curve_v0"
-        is_research_curve = $true
+        curve_class = $(if ($childJobs.Count -ge 5) { "endpoint_sweep_curve_v0" } else { "endpoint_sweep_partial" })
+        is_research_curve = $false
         backend_readiness_status = "abaqus_endpoint_sweep_curve_v0"
-        next_step = "Validate endpoint sweep shape against a continuous bending load path before research use."
+        next_step = "Treat this as a candidate Abaqus endpoint curve; validate shape, contact warnings, and a continuous bending path before research use."
     }
     curve_factors = $CurveFactors
     rows_written = $childJobs.Count
+    endpoint_sweep_validation = [pscustomobject]@{
+        required_child_source = "SCLAS_ABAQUS_ODB_EXTRACTOR"
+        required_child_odb_status = "extracted"
+        all_child_jobs_validated = $true
+        aggregation_rule = "last ODB-extracted CSV row from each child job"
+    }
     child_jobs = $childJobs
     created_at = (Get-Date).ToString("s")
 }

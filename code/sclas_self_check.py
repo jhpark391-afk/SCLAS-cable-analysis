@@ -330,12 +330,100 @@ def check_backend_contract() -> None:
     print(f"[OK] Backend contract smoke job: {job_dir}")
 
 
+def check_endpoint_sweep_diagnostics() -> None:
+    job_dir = JOBS_DIR / ("self_check_endpoint_sweep_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
+    job_dir.mkdir(parents=True, exist_ok=True)
+    rows = [
+        ["curvature_1_per_m", "moment_kn_m"],
+        ["-0.008", "-0.031"],
+        ["-0.004", "-0.015"],
+        ["0", "0"],
+        ["0.004", "0.016"],
+        ["0.008", "0.032"],
+    ]
+    with (job_dir / "result_data.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerows(rows)
+    summary = {
+        "source": "SCLAS_CURVE_V0_ENDPOINT_SWEEP",
+        "status": "completed",
+        "num_points": 5,
+        "rows_written": 5,
+        "result_contract": {
+            "csv_file": "result_data.csv",
+            "required_columns": ["curvature_1_per_m", "moment_kn_m"],
+            "summary_file": "result_summary.json",
+            "primary_result": "bending moment-curvature endpoint sweep",
+        },
+        "mesh_status": {
+            "status": "endpoint_sweep_parent",
+            "child_job_count": 5,
+        },
+        "backend_readiness": {
+            "bending_stick_slip": {
+                "requested": True,
+                "status": "abaqus_endpoint_sweep_curve_v0",
+                "next_step": "Validate endpoint sweep shape against a continuous bending load path.",
+            },
+            "source": "SCLAS_CURVE_V0_ENDPOINT_SWEEP",
+        },
+        "abaqus_result_quality": {
+            "curve_class": "endpoint_sweep_curve_v0",
+            "is_research_curve": False,
+            "backend_readiness_status": "abaqus_endpoint_sweep_curve_v0",
+        },
+        "endpoint_sweep_validation": {
+            "required_child_source": "SCLAS_ABAQUS_ODB_EXTRACTOR",
+            "required_child_odb_status": "extracted",
+            "all_child_jobs_validated": True,
+            "aggregation_rule": "last ODB-extracted CSV row from each child job",
+        },
+        "child_jobs": [
+            {
+                "factor": factor,
+                "job": f"curve_v0_child_{idx}",
+                "source": "SCLAS_ABAQUS_ODB_EXTRACTOR",
+                "odb_status": "extracted",
+                "odb_rows_written": 2,
+                "curve_class": "two_point_odb_smoke",
+            }
+            for idx, factor in enumerate([-0.1, -0.05, 0.0, 0.05, 0.1], start=1)
+        ],
+    }
+    (job_dir / "result_summary.json").write_text(json.dumps(summary, indent=4), encoding="utf-8")
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_offline_diagnostics.py"),
+            str(job_dir),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("Endpoint sweep diagnostics failed:\n" + proc.stdout + proc.stderr)
+    report = json.loads(proc.stdout)
+    if any(item.get("severity") == "error" for item in report.get("issues", [])):
+        fail("Endpoint sweep diagnostics reported errors: " + json.dumps(report.get("issues"), indent=2))
+    action = report.get("diagnostic_summary", {}).get("recommended_next_action", "")
+    if "Endpoint sweep curve-v0 aggregated" not in action:
+        fail("Endpoint sweep diagnostics recommended the wrong next action: " + action)
+    summary_section = report.get("result_summary_json", {})
+    if summary_section.get("child_job_count") != 5 or summary_section.get("rows_written") != 5:
+        fail("Endpoint sweep diagnostics did not read parent sweep row/child counts")
+
+    print(f"[OK] Endpoint sweep diagnostics: {job_dir}")
+
+
 def main() -> int:
     checks = [
         check_pyproj_references,
         check_synced_files,
         check_compile,
         check_backend_contract,
+        check_endpoint_sweep_diagnostics,
     ]
     try:
         for check in checks:

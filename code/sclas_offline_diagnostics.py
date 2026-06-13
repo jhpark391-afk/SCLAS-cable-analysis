@@ -101,6 +101,8 @@ def inspect_summary(job_dir: Path, report: dict) -> None:
     required = ["source", "status", "result_contract", "backend_readiness", "mesh_status"]
     section["source"] = data.get("source")
     section["status"] = data.get("status")
+    section["num_points"] = data.get("num_points")
+    section["rows_written"] = data.get("rows_written")
     section["mesh_status"] = data.get("mesh_status", {}).get("status") if isinstance(data.get("mesh_status"), dict) else data.get("mesh_status")
     section["enabled_assessments"] = data.get("enabled_assessments", [])
     odb_extraction = data.get("odb_extraction", {})
@@ -111,6 +113,28 @@ def inspect_summary(job_dir: Path, report: dict) -> None:
     if isinstance(quality, dict) and quality:
         section["abaqus_curve_class"] = quality.get("curve_class")
         section["abaqus_is_research_curve"] = quality.get("is_research_curve")
+    endpoint_validation = data.get("endpoint_sweep_validation", {})
+    if isinstance(endpoint_validation, dict) and endpoint_validation:
+        section["endpoint_sweep_validated"] = endpoint_validation.get("all_child_jobs_validated")
+        section["endpoint_sweep_rule"] = endpoint_validation.get("aggregation_rule")
+    child_jobs = data.get("child_jobs", [])
+    if isinstance(child_jobs, list):
+        section["child_job_count"] = len(child_jobs)
+        invalid_children = [
+            item.get("job", f"child_{idx}")
+            for idx, item in enumerate(child_jobs)
+            if isinstance(item, dict)
+            and (
+                item.get("source") != "SCLAS_ABAQUS_ODB_EXTRACTOR"
+                or item.get("odb_status") != "extracted"
+            )
+        ]
+        if invalid_children:
+            add_issue(report, "error", "Endpoint sweep contains child jobs without ODB-extracted results", invalid_children)
+    if data.get("source") == "SCLAS_CURVE_V0_ENDPOINT_SWEEP":
+        rows_written = int(data.get("rows_written") or 0)
+        if rows_written < 5:
+            add_issue(report, "warning", "Endpoint sweep has fewer than five aggregated rows", rows_written)
     for key in required:
         if key not in data:
             add_issue(report, "warning", "result_summary.json missing key", key)
@@ -288,9 +312,16 @@ def summarize_report(report: dict) -> None:
             action = "Inspect abaqus_mesh_manifest.json error and fix the Abaqus scaffold creation failure first."
         else:
             action = "Fix the first error in this report before expanding the backend."
+    elif summary.get("source") == "SCLAS_CURVE_V0_ENDPOINT_SWEEP":
+        if int(summary.get("rows_written") or 0) >= 5:
+            action = "Endpoint sweep curve-v0 aggregated at least five validated ODB child endpoints; inspect curve shape and child solver warnings before promoting it."
+        else:
+            action = "Endpoint sweep completed partially; add more validated ODB child endpoints or reduce the curvature factors further."
     elif logs.get("completed"):
         if summary.get("abaqus_curve_class") == "two_point_odb_smoke":
             action = "Stable two-row Abaqus ODB smoke completed; keep it as the bridge baseline and design the multi-point curve as a separate backend task."
+        elif summary.get("abaqus_curve_class") == "endpoint_sweep_curve_v0":
+            action = "Endpoint sweep curve-v0 was extracted; validate it against a continuous bending path before treating it as research data."
         elif summary.get("abaqus_is_research_curve"):
             action = "A multi-point Abaqus ODB curve was extracted; validate contact warnings, curve shape, and calibration metrics next."
         else:
@@ -368,10 +399,14 @@ def markdown_report(report: dict) -> str:
         ("Result CSV", scalar(csv_section.get("exists"))),
         ("CSV rows", scalar(csv_section.get("data_rows"))),
         ("Summary status", scalar(summary_section.get("status"))),
+        ("Summary source", scalar(summary_section.get("source"))),
+        ("Curve class", scalar(summary_section.get("abaqus_curve_class"))),
         ("Mesh status", scalar(summary_section.get("mesh_status"))),
         ("Manifest status", scalar(manifest_section.get("status"))),
         ("Contact pair scaffold", scalar(manifest_section.get("contact_pair_scaffold_status"))),
         ("Boundary scaffold", scalar(manifest_section.get("boundary_condition_scaffold_status"))),
+        ("Sweep child jobs", scalar(summary_section.get("child_job_count"))),
+        ("Sweep rows", scalar(summary_section.get("rows_written"))),
         ("Input deck", scalar(deck_section.get("file"))),
         ("Couplings after End Assembly", scalar(deck_section.get("coupling_after_end_assembly"))),
         ("Solver log matches", scalar(len(logs_section.get("matches", [])))),

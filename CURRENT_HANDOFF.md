@@ -615,6 +615,14 @@ Implemented next:
   several endpoint jobs and aggregates each final ODB row into
   `curve_v0_sweep_.../result_data.csv`.
 - Default factors are `-0.1, -0.05, 0, 0.05, 0.1`.
+- The sweep helper now validates every child job before aggregation:
+  `result_summary.json.source` must be `SCLAS_ABAQUS_ODB_EXTRACTOR`,
+  `odb_extraction.status` must be `extracted`, and at least two ODB rows must
+  exist. This prevents a failed child or leftover placeholder CSV from being
+  silently included in the parent curve.
+- Parent sweep summaries are classified as candidate endpoint curves, not
+  validated research hysteresis loops. Use them to check shape and monotonic
+  response before attempting a continuous cyclic bending path.
 
 Next Lab-PC curve-v0 sweep command:
 

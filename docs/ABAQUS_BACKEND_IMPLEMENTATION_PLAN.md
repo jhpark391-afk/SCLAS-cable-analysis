@@ -91,6 +91,12 @@ single-step Abaqus solve with no cyclic amplitude and no forced solver
 increments. The sweep helper aggregates the final ODB endpoint from each child
 job into one parent `curve_v0_sweep_.../result_data.csv`.
 
+The parent sweep must only aggregate validated child jobs. Each child must have
+`result_summary.json.source=SCLAS_ABAQUS_ODB_EXTRACTOR`,
+`odb_extraction.status=extracted`, and at least two extracted ODB rows. If any
+child fails this check, stop the sweep rather than mixing placeholder data into
+the curve.
+
 Default factors:
 
 ```text
