@@ -283,6 +283,38 @@ Mac-appropriate next work:
 5. Leave actual Abaqus solve/input-deck debugging to the Lab PC unless the user
    provides generated `.inp`, `.dat`, or `.msg` files for offline inspection.
 
+## Home Pull / Lab Smoke Helper - 2026-06-14 KST
+
+The home Windows Codex pulled Mac-side commits through:
+
+```text
+17dcd78 Summarize diagnostic next actions
+```
+
+Local verification after the pull passed:
+
+```powershell
+python -m py_compile code\sclas_remote_gui.py code\SCLAS_test\sclas_remote_gui.py code\abaqus_runner.py code\SCLAS_test\abaqus_runner.py code\sclas_offline_diagnostics.py
+python code\sclas_self_check.py
+python code\sclas_offline_diagnostics.py jobs\SCLAS_jobs\self_check_20260614_001952
+```
+
+To reduce copy/paste mistakes on the Lab PC, use the new helper script after
+pulling the latest repository:
+
+```powershell
+cd $env:USERPROFILE\Documents\SCLAS-cable-analysis
+git pull
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e"
+```
+
+If no `-JobDir` is passed, the script uses the newest `jobs\SCLAS_jobs\job_*`
+folder with `input_data.json`. It copies the latest `code\abaqus_runner.py`
+into the job folder, runs Abaqus/CAE noGUI generation, submits the generated
+`*_mes.inp` to Abaqus/Standard, writes `solver_error_extract.txt`, and, when
+normal Python is available, saves `offline_diagnostics_report.json` and
+`offline_diagnostics_report.md`.
+
 ## Important Files
 
 ```text
@@ -291,6 +323,7 @@ code/SCLAS_test/sclas_remote_gui.py
 code/sclas_remote_gui_final_code.txt
 code/abaqus_runner.py
 code/SCLAS_test/abaqus_runner.py
+run_lab_abaqus_smoke.ps1
 README_SCLAS_WORKFLOW.md
 README_LITERATURE_NOTES.md
 README_WINDOWS_VISUAL_STUDIO.md
