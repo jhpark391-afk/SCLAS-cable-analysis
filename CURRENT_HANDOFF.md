@@ -341,6 +341,27 @@ is master and the beam surface is slave. For armour-vs-armour pairs, it skips
 the explicit pair and leaves that interaction to the general-contact scaffold
 until a solid/contact-surface armour representation is implemented.
 
+The next Lab-PC run reached the Abaqus/Standard `standard` process, which means
+input processing got past the previous coupling and B31-master-surface fatal
+errors. The existing full job is too large for quick smoke solving, so
+`run_lab_abaqus_smoke.ps1` now has `-SmallSmoke`. This creates a new lightweight
+job folder from the selected source job, copies only the contract files, lowers
+mesh settings, updates `metadata.job_id`, and leaves the original job untouched.
+
+Use this on the Lab PC for the next fast solver check:
+
+```powershell
+cd $env:USERPROFILE\Documents\SCLAS-cable-analysis
+git pull
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e" -SmallSmoke
+```
+
+Optional knobs:
+
+```powershell
+-SmallAxialDivisions 4 -SmallCoreCircumferentialDivisions 8 -SmallArmourCircumferentialDivisions 4 -SmallEffectiveLengthMm 50
+```
+
 ## Important Files
 
 ```text

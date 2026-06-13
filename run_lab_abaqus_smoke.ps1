@@ -1,7 +1,12 @@
 param(
     [string]$JobDir = "",
     [switch]$GenerateOnly,
-    [switch]$SkipGeneration
+    [switch]$SkipGeneration,
+    [switch]$SmallSmoke,
+    [int]$SmallAxialDivisions = 4,
+    [int]$SmallCoreCircumferentialDivisions = 8,
+    [int]$SmallArmourCircumferentialDivisions = 4,
+    [double]$SmallEffectiveLengthMm = 50.0
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,9 +82,103 @@ function Find-NormalPython {
     return $null
 }
 
+function Ensure-JsonObjectProperty {
+    param(
+        [Parameter(Mandatory=$true)]$Object,
+        [Parameter(Mandatory=$true)][string]$Name
+    )
+    if (-not $Object.PSObject.Properties[$Name]) {
+        $Object | Add-Member -MemberType NoteProperty -Name $Name -Value ([pscustomobject]@{})
+    }
+    return $Object.$Name
+}
+
+function Set-JsonObjectProperty {
+    param(
+        [Parameter(Mandatory=$true)]$Object,
+        [Parameter(Mandatory=$true)][string]$Name,
+        $Value
+    )
+    if ($Object.PSObject.Properties[$Name]) {
+        $Object.$Name = $Value
+    } else {
+        $Object | Add-Member -MemberType NoteProperty -Name $Name -Value $Value
+    }
+}
+
+function New-SmallSmokeJob {
+    param(
+        [Parameter(Mandatory=$true)][string]$ProjectRoot,
+        [Parameter(Mandatory=$true)][string]$SourceJobDir,
+        [Parameter(Mandatory=$true)][int]$AxialDivisions,
+        [Parameter(Mandatory=$true)][int]$CoreCircumferentialDivisions,
+        [Parameter(Mandatory=$true)][int]$ArmourCircumferentialDivisions,
+        [Parameter(Mandatory=$true)][double]$EffectiveLengthMm
+    )
+
+    $jobsRoot = Join-Path $ProjectRoot "jobs\SCLAS_jobs"
+    if (-not (Test-Path $jobsRoot)) {
+        New-Item -ItemType Directory -Path $jobsRoot -Force | Out-Null
+    }
+    $smallName = "small_smoke_" + (Get-Date -Format "yyyyMMdd_HHmmss")
+    $smallDir = Join-Path $jobsRoot $smallName
+    New-Item -ItemType Directory -Path $smallDir -Force | Out-Null
+
+    foreach ($fileName in @("input_data.json", "units_manifest.json", "BACKEND_CONTRACT.md")) {
+        $sourcePath = Join-Path $SourceJobDir $fileName
+        if (Test-Path $sourcePath) {
+            Copy-Item $sourcePath (Join-Path $smallDir $fileName) -Force
+        }
+    }
+
+    $inputPath = Join-Path $smallDir "input_data.json"
+    if (-not (Test-Path $inputPath)) {
+        throw "input_data.json was not found in source job folder: $SourceJobDir"
+    }
+
+    $payload = Get-Content $inputPath -Raw | ConvertFrom-Json
+    $mesh = Ensure-JsonObjectProperty $payload "mesh"
+    $analysis = Ensure-JsonObjectProperty $payload "analysis_conditions"
+    $metadata = Ensure-JsonObjectProperty $payload "metadata"
+
+    Set-JsonObjectProperty $mesh "axial_divisions" ([int]$AxialDivisions)
+    Set-JsonObjectProperty $mesh "core_circumferential_divisions" ([int]$CoreCircumferentialDivisions)
+    Set-JsonObjectProperty $mesh "armour_circumferential_divisions" ([int]$ArmourCircumferentialDivisions)
+    Set-JsonObjectProperty $mesh "lab_smoke_reduced_mesh" $true
+    Set-JsonObjectProperty $analysis "effective_length_mm" ([double]$EffectiveLengthMm)
+    if ($analysis.PSObject.Properties["solver_steps"]) {
+        $analysis.solver_steps = 25
+    }
+    Set-JsonObjectProperty $metadata "job_id" $smallName
+    Set-JsonObjectProperty $metadata "lab_smoke_source_job" (Split-Path -Leaf $SourceJobDir)
+
+    $payload |
+        ConvertTo-Json -Depth 100 |
+        Set-Content $inputPath -Encoding UTF8
+
+    Write-Host "Created reduced smoke job: $smallDir"
+    Write-Host "  axial_divisions=$AxialDivisions, core_circ=$CoreCircumferentialDivisions, armour_circ=$ArmourCircumferentialDivisions, effective_length_mm=$EffectiveLengthMm"
+    return $smallDir
+}
+
 $ProjectRoot = Resolve-ProjectRoot
 if (-not $JobDir) {
     $JobDir = Find-LatestJobDir $ProjectRoot
+}
+$SourceJobDir = (Resolve-Path $JobDir).Path
+if ($SmallSmoke -and $SkipGeneration) {
+    throw "-SmallSmoke cannot be combined with -SkipGeneration because the reduced job has no generated .inp yet."
+}
+if ($SmallSmoke) {
+    $JobDir = New-SmallSmokeJob `
+        -ProjectRoot $ProjectRoot `
+        -SourceJobDir $SourceJobDir `
+        -AxialDivisions $SmallAxialDivisions `
+        -CoreCircumferentialDivisions $SmallCoreCircumferentialDivisions `
+        -ArmourCircumferentialDivisions $SmallArmourCircumferentialDivisions `
+        -EffectiveLengthMm $SmallEffectiveLengthMm
+} else {
+    $JobDir = $SourceJobDir
 }
 $JobDir = (Resolve-Path $JobDir).Path
 
@@ -94,8 +193,11 @@ if (-not (Test-Path (Join-Path $JobDir "input_data.json"))) {
 
 Write-Section "SCLAS Lab Abaqus Smoke"
 Write-Host "Project: $ProjectRoot"
+if ($SmallSmoke) {
+    Write-Host "Source:  $SourceJobDir"
+}
 Write-Host "Job:     $JobDir"
-Write-Host "Mode:    $(if ($GenerateOnly) { 'generate only' } elseif ($SkipGeneration) { 'solver only' } else { 'generate + solver' })"
+Write-Host "Mode:    $(if ($SmallSmoke -and $GenerateOnly) { 'small smoke generate only' } elseif ($SmallSmoke) { 'small smoke generate + solver' } elseif ($GenerateOnly) { 'generate only' } elseif ($SkipGeneration) { 'solver only' } else { 'generate + solver' })"
 
 Copy-Item $RunnerSource $RunnerDest -Force
 Write-Host "Copied latest code\abaqus_runner.py into the job folder."
