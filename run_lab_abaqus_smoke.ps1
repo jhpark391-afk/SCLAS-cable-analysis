@@ -184,6 +184,8 @@ $JobDir = (Resolve-Path $JobDir).Path
 
 $RunnerSource = Join-Path $ProjectRoot "code\abaqus_runner.py"
 $RunnerDest = Join-Path $JobDir "abaqus_runner.py"
+$ExtractorSource = Join-Path $ProjectRoot "code\sclas_odb_extractor.py"
+$ExtractorDest = Join-Path $JobDir "sclas_odb_extractor.py"
 if (-not (Test-Path $RunnerSource)) {
     throw "Runner source was not found: $RunnerSource"
 }
@@ -201,6 +203,10 @@ Write-Host "Mode:    $(if ($SmallSmoke -and $GenerateOnly) { 'small smoke genera
 
 Copy-Item $RunnerSource $RunnerDest -Force
 Write-Host "Copied latest code\abaqus_runner.py into the job folder."
+if (Test-Path $ExtractorSource) {
+    Copy-Item $ExtractorSource $ExtractorDest -Force
+    Write-Host "Copied latest code\sclas_odb_extractor.py into the job folder."
+}
 
 if (-not $SkipGeneration) {
     Write-Section "Abaqus/CAE noGUI generation"
@@ -255,6 +261,24 @@ Write-Section "Generated solver files"
 Get-ChildItem $JobDir -Filter "$jobName.*" |
     Select-Object Name,Length,LastWriteTime |
     Format-Table -AutoSize
+
+$odbPath = Join-Path $JobDir "$jobName.odb"
+if ($solverCompleted -and (Test-Path $ExtractorDest) -and (Test-Path $odbPath)) {
+    Write-Section "ODB extraction"
+    Push-Location $JobDir
+    try {
+        cmd /c "abaqus python sclas_odb_extractor.py $($jobName).odb --job-dir . --input-data input_data.json > odb_extract_stdout.txt 2>&1"
+    } finally {
+        Pop-Location
+    }
+    Get-Content (Join-Path $JobDir "odb_extract_stdout.txt") -Raw
+    if (Test-Path (Join-Path $JobDir "odb_extraction_summary.json")) {
+        Get-Content (Join-Path $JobDir "odb_extraction_summary.json") -Raw
+    }
+} elseif ($solverCompleted) {
+    Write-Section "ODB extraction skipped"
+    Write-Host "Solver completed, but extractor or ODB was not found."
+}
 
 Write-Section "First blocking log context"
 $logFiles = @(

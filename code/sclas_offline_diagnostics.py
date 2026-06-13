@@ -103,6 +103,10 @@ def inspect_summary(job_dir: Path, report: dict) -> None:
     section["status"] = data.get("status")
     section["mesh_status"] = data.get("mesh_status", {}).get("status") if isinstance(data.get("mesh_status"), dict) else data.get("mesh_status")
     section["enabled_assessments"] = data.get("enabled_assessments", [])
+    odb_extraction = data.get("odb_extraction", {})
+    if isinstance(odb_extraction, dict) and odb_extraction:
+        section["odb_extraction_status"] = odb_extraction.get("status")
+        section["odb_rows_written"] = odb_extraction.get("rows_written")
     for key in required:
         if key not in data:
             add_issue(report, "warning", "result_summary.json missing key", key)

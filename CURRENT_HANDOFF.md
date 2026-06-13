@@ -390,6 +390,31 @@ treating completed-job warning vocabulary as a blocking error. Next backend
 work should focus on ODB extraction into `result_data.csv`, then tightening
 contact/BC modelling quality for the full-size job.
 
+ODB extraction work has started:
+
+- `code/sclas_odb_extractor.py` was added as an Abaqus-Python script.
+- `run_lab_abaqus_smoke.ps1` now copies it into the job folder and, when the
+  solver completes and an `.odb` exists, runs:
+  `abaqus python sclas_odb_extractor.py <job>.odb --job-dir .`.
+- The extractor tries `UR2` / `RM2` history output first, then field output on
+  the right reference point set. If successful, it overwrites
+  `result_data.csv` with ODB-derived `curvature_1_per_m,moment_kn_m` and writes
+  `odb_extraction_summary.json`; if not, it preserves the placeholder CSV and
+  records the missing-output reason.
+- New input decks request `U`, `UR`, `RF`, `RM` field output and right-RP
+  `UR2`/`RM2` history output to improve extraction reliability.
+
+Next Lab-PC check:
+
+```powershell
+cd $env:USERPROFILE\Documents\SCLAS-cable-analysis
+git pull
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e" -SmallSmoke
+```
+
+Use a newly generated small smoke job for this check so the output requests are
+present in the `.inp` and `.odb`.
+
 ## Important Files
 
 ```text

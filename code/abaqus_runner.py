@@ -1066,6 +1066,29 @@ def build_abaqus_mesh_model(payload, job_dir):
         except Exception as exc:
             record["warnings"].append("reference point BCs failed: {0}".format(exc))
 
+        try:
+            model.FieldOutputRequest(
+                name="SCLAS_RP_FieldOutput",
+                createStepName=record["step"],
+                variables=("U", "UR", "RF", "RM"),
+            )
+            record["optional_created_regions"].append("rp_field_output_request")
+            optional_created += 1
+        except Exception as exc:
+            record["optional_warnings"].append("RP field output request failed: {0}".format(exc))
+
+        try:
+            model.HistoryOutputRequest(
+                name="SCLAS_RightRP_HistoryOutput",
+                createStepName=record["step"],
+                variables=("UR2", "RM2"),
+                region=assembly.sets[record["right_reference_point_set"]],
+            )
+            record["optional_created_regions"].append("right_rp_history_output_request")
+            optional_created += 1
+        except Exception as exc:
+            record["optional_warnings"].append("RP history output request failed: {0}".format(exc))
+
         record["required_created_count"] = required_created
         record["required_expected_count"] = required_expected
         record["optional_created_count"] = optional_created
