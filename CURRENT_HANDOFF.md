@@ -519,10 +519,14 @@ Follow-up from Lab PC:
   but `history_rows_available` and `field_rows_available` were both still 2.
   This means the step solved in a single increment, so ODB output requests
   alone cannot create intermediate frames.
-- The next commit keeps solver increments automatic but changes `-SmallSmoke`
-  to a four-step smoke path: `+target -> 0 -> -target -> 0`. Each step can solve
-  quickly with Abaqus defaults, while the ODB extractor concatenates all
-  `SCLAS_CyclicBendingStep*` steps into one CSV.
+- The four-step smoke path `+target -> 0 -> -target -> 0` was added as a
+  candidate way to get more ODB rows, but Lab-PC feedback showed it takes too
+  long for an interactive smoke loop. `-SmallSmoke` therefore defaults back to
+  the fast single-step path; the four-step path is now opt-in through
+  `-MultiStepSmoke`.
+- When `-MultiStepSmoke` is used, the ODB extractor concatenates all
+  `SCLAS_CyclicBendingStep*` steps into one CSV. Use it only when a longer run
+  is acceptable.
 - The runner still injects an input-deck output keyword fallback before each
   `*End Step`:
   `*Output, field, number interval=4, time marks=NO` plus right-reference-point
@@ -541,8 +545,9 @@ Expected next check:
 
 - `ODB extraction status: extracted`
 - `result_summary.json` source remains `SCLAS_ABAQUS_ODB_EXTRACTOR`
-- `odb_rows_written` should be greater than 2, ideally about 4-5 rows for the
-  default 4 intervals.
+- default `-SmallSmoke` should complete quickly and may still write 2 rows.
+- only `-SmallSmoke -MultiStepSmoke` is expected to produce more than 2 rows,
+  but it may take noticeably longer.
 - `odb_extraction_summary.json` should include `history_rows_available` and
   `field_rows_available`.
 
