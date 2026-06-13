@@ -22,6 +22,62 @@ The GUI remains useful as long as every backend iteration writes
   - writes `.cae` and `.inp` mesh scaffold when Abaqus APIs are available
   - still writes the placeholder result curve
 
+## Verified Lab-PC baseline
+
+As of 2026-06-14, the Lab PC has verified a stable end-to-end Abaqus smoke
+bridge:
+
+```text
+input_data.json -> Abaqus/CAE noGUI .inp/.cae -> Abaqus/Standard .odb -> ODB extractor -> result_data.csv/result_summary.json
+```
+
+The stable smoke job is intentionally small and fast. It writes a two-row ODB
+result (`curve_class=two_point_odb_smoke`) and is useful for checking that the
+bridge, licenses, coupling keyword fallback, ODB access, and GUI CSV contract
+still work.
+
+Do not treat the two-row smoke as a research moment-curvature curve. Do not
+spend interactive Lab-PC time trying to force the small smoke to emit more
+frames. Attempts to force additional increments or multi-step paths made the
+current nonlinear contact scaffold too slow for rapid testing.
+
+`result_summary.json` should distinguish result quality:
+
+- `two_point_odb_smoke`: bridge smoke only, not a research curve.
+- `multi_point_curve_v0`: candidate Abaqus curve, requires shape/contact
+  validation before research use.
+- `odb_extraction_failed` or `too_few_odb_rows`: extraction/debug state.
+
+## Phase 3A: Real curve v0 design
+
+The next backend task is a separate `real moment-curvature curve v0`, not an
+extension of the fast smoke test.
+
+Design constraints:
+
+- Keep default `-SmallSmoke` fast and two-row-capable.
+- Do not force Abaqus solver increments just to create output frames.
+- Use a deliberate load path that creates meaningful accepted solution states.
+- Keep the first implementation smaller than the full research model.
+- Record the result quality in `result_summary.json.abaqus_result_quality`.
+
+Recommended v0 approach:
+
+1. Add an explicit curve-v0 mode separate from `-SmallSmoke`.
+2. Start with a reduced geometry/mesh and a low-cost bending path.
+3. Use a limited sequence of target curvatures, for example:
+
+   ```text
+   0 -> +kmax -> +0.5kmax -> 0 -> -0.5kmax -> -kmax -> 0
+   ```
+
+4. Keep Abaqus increment control automatic at first.
+5. Extract right-reference-point `UR2` / `RM2` across all accepted steps.
+6. Promote the result to `multi_point_curve_v0` only if at least five valid
+   ODB rows are written and the solver completes.
+7. After curve-v0 works, add contact pressure/slip summaries to JSON rather
+   than widening `result_data.csv`.
+
 ## Phase 1: Mesh scaffold verification
 
 1. Run a GUI-exported job in Abaqus:

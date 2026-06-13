@@ -59,15 +59,55 @@ def write_result_csv(path, rows):
             writer.writerow(["{0:.12g}".format(curvature), "{0:.12g}".format(moment)])
 
 
+def build_result_quality(extraction_summary):
+    rows = int(extraction_summary.get("rows_written") or 0)
+    status = extraction_summary.get("status")
+    if status != "extracted":
+        return {
+            "curve_class": "odb_extraction_failed",
+            "is_research_curve": False,
+            "backend_readiness_status": "odb_extraction_failed",
+            "next_step": "Fix ODB reference-point output extraction before using Abaqus results in the GUI.",
+        }
+    if rows >= 5:
+        return {
+            "curve_class": "multi_point_curve_v0",
+            "is_research_curve": True,
+            "backend_readiness_status": "abaqus_odb_curve_v0",
+            "next_step": "Validate moment-curvature shape, contact warnings, and calibration targets before treating this as a research curve.",
+        }
+    if rows >= 2:
+        return {
+            "curve_class": "two_point_odb_smoke",
+            "is_research_curve": False,
+            "backend_readiness_status": "abaqus_odb_smoke_two_point",
+            "next_step": "Use this as an end-to-end Abaqus bridge smoke only; design a separate multi-point curve load path for research use.",
+        }
+    return {
+        "curve_class": "too_few_odb_rows",
+        "is_research_curve": False,
+        "backend_readiness_status": "odb_extraction_incomplete",
+        "next_step": "Regenerate the ODB with at least two valid UR2/RM2 rows.",
+    }
+
+
 def update_result_summary(job_dir, extraction_summary):
     summary_path = os.path.join(job_dir, "result_summary.json")
     summary = load_json(summary_path, default={}) or {}
     summary["odb_extraction"] = extraction_summary
+    quality = build_result_quality(extraction_summary)
+    summary["abaqus_result_quality"] = quality
     if extraction_summary.get("status") == "extracted":
         summary["source"] = "SCLAS_ABAQUS_ODB_EXTRACTOR"
         summary["status"] = "completed"
         summary["num_points"] = extraction_summary.get("rows_written", summary.get("num_points"))
         summary["note"] = "result_data.csv was updated from Abaqus ODB reference-point outputs."
+        readiness = summary.get("backend_readiness")
+        if isinstance(readiness, dict):
+            bending = readiness.get("bending_stick_slip")
+            if isinstance(bending, dict):
+                bending["status"] = quality["backend_readiness_status"]
+                bending["next_step"] = quality["next_step"]
     write_json(summary_path, summary)
 
 

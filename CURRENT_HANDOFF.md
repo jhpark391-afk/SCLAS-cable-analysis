@@ -573,6 +573,35 @@ Latest Lab-PC follow-up:
   small smoke. Multi-point curves should be designed as a separate backend
   task, likely with a lower-cost load path or different step/output strategy.
 
+## Real Curve v0 Preparation - 2026-06-14 KST
+
+After the stable Lab-PC smoke baseline, the next step moved back to code/docs
+instead of more interactive Lab-PC runs.
+
+Changes prepared for the next commit:
+
+- `code/sclas_odb_extractor.py` now writes
+  `result_summary.json.abaqus_result_quality`.
+- A two-row successful extraction is classified as
+  `curve_class=two_point_odb_smoke`, `is_research_curve=false`, and
+  `backend_readiness.bending_stick_slip.status=abaqus_odb_smoke_two_point`.
+- Five or more valid ODB rows are classified as
+  `curve_class=multi_point_curve_v0`, `is_research_curve=true`, and
+  `backend_readiness.bending_stick_slip.status=abaqus_odb_curve_v0`.
+- `code/sclas_offline_diagnostics.py` now reports the curve class and gives a
+  different recommended next action for stable two-row smoke versus a real
+  multi-point curve.
+- `docs/ABAQUS_BACKEND_IMPLEMENTATION_PLAN.md` now records the verified
+  Lab-PC baseline and separates `real moment-curvature curve v0` from the fast
+  `-SmallSmoke` bridge check.
+
+Next implementation target:
+
+- Add an explicit curve-v0 mode separate from default `-SmallSmoke`.
+- Use a deliberate reduced-cost load path with at least five accepted ODB rows.
+- Keep Abaqus solver increment control automatic unless a later diagnostic
+  proves a specific increment setting is needed.
+
 ## Important Files
 
 ```text

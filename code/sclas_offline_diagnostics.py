@@ -107,6 +107,10 @@ def inspect_summary(job_dir: Path, report: dict) -> None:
     if isinstance(odb_extraction, dict) and odb_extraction:
         section["odb_extraction_status"] = odb_extraction.get("status")
         section["odb_rows_written"] = odb_extraction.get("rows_written")
+    quality = data.get("abaqus_result_quality", {})
+    if isinstance(quality, dict) and quality:
+        section["abaqus_curve_class"] = quality.get("curve_class")
+        section["abaqus_is_research_curve"] = quality.get("is_research_curve")
     for key in required:
         if key not in data:
             add_issue(report, "warning", "result_summary.json missing key", key)
@@ -268,6 +272,7 @@ def summarize_report(report: dict) -> None:
     deck = report.get("input_deck", {})
     logs = report.get("solver_logs", {})
     manifest = report.get("abaqus_mesh_manifest_json", {})
+    summary = report.get("result_summary_json", {})
     log_match_text = "\n".join(
         "{0}\n{1}".format(item.get("text", ""), item.get("context", ""))
         for item in logs.get("matches", [])
@@ -284,7 +289,12 @@ def summarize_report(report: dict) -> None:
         else:
             action = "Fix the first error in this report before expanding the backend."
     elif logs.get("completed"):
-        action = "Small Abaqus smoke solve completed; use this job to validate ODB extraction and then refine real contact/BC modelling."
+        if summary.get("abaqus_curve_class") == "two_point_odb_smoke":
+            action = "Stable two-row Abaqus ODB smoke completed; keep it as the bridge baseline and design the multi-point curve as a separate backend task."
+        elif summary.get("abaqus_is_research_curve"):
+            action = "A multi-point Abaqus ODB curve was extracted; validate contact warnings, curve shape, and calibration metrics next."
+        else:
+            action = "Small Abaqus smoke solve completed; use this job to validate ODB extraction and then refine real contact/BC modelling."
     elif logs.get("matches"):
         if "LINE ELEMENTS" in log_match_text and "MASTER SURFACE" in log_match_text:
             action = "Avoid explicit contact pairs that use B31 armour line-element surfaces as master; swap solid/beam order or skip beam-beam pairs."
