@@ -7,7 +7,7 @@ param(
     [int]$SmallCoreCircumferentialDivisions = 8,
     [int]$SmallArmourCircumferentialDivisions = 4,
     [double]$SmallEffectiveLengthMm = 50.0,
-    [int]$SmallAbaqusOutputIntervals = 12
+    [int]$SmallAbaqusOutputIntervals = 4
 )
 
 $ErrorActionPreference = "Stop"

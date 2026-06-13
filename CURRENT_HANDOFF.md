@@ -487,8 +487,20 @@ test:
   `initialInc` / `maxInc`.
 - Field and history output requests now use `frequency=1`.
 - `run_lab_abaqus_smoke.ps1 -SmallSmoke` now writes
-  `abaqus_output_intervals=12` by default and exposes
+  `abaqus_output_intervals=4` by default and exposes
   `-SmallAbaqusOutputIntervals`.
+
+Follow-up from Lab PC:
+
+- A run with `-SmallAbaqusOutputIntervals 12` created
+  `small_smoke_20260614_014418`, but the solve was intentionally terminated by
+  the user after it remained near `STEP TIME/LPF = 0.0495` while CPU time was
+  still increasing. Abaqus reported
+  `Process terminated by external request (SIGTERM or SIGINT received)`, which
+  is expected for this manual termination.
+- The 12-interval smoke is too slow for the current contact/nonlinear scaffold,
+  so the default has been lowered to 4 intervals. Use a higher value only after
+  a 4-interval smoke confirms ODB extraction still succeeds.
 
 Next Lab-PC command after pulling the next commit:
 
@@ -502,8 +514,8 @@ Expected next check:
 
 - `ODB extraction status: extracted`
 - `result_summary.json` source remains `SCLAS_ABAQUS_ODB_EXTRACTOR`
-- `odb_rows_written` should be greater than 2, ideally about 10-13 rows for the
-  default 12 intervals.
+- `odb_rows_written` should be greater than 2, ideally about 4-5 rows for the
+  default 4 intervals.
 
 ## Important Files
 

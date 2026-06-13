@@ -878,7 +878,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         return records
 
     def create_boundary_condition_scaffold():
-        output_intervals = int(analysis.get("abaqus_output_intervals", 12))
+        output_intervals = int(analysis.get("abaqus_output_intervals", 4))
         if output_intervals < 2:
             output_intervals = 2
         if output_intervals > 100:
