@@ -883,6 +883,7 @@ def build_abaqus_mesh_model(payload, job_dir):
             output_intervals = 2
         if output_intervals > 100:
             output_intervals = 100
+        multistep_smoke = bool(analysis.get("abaqus_multistep_smoke", False))
         record = {
             "status": "not_created",
             "step": "SCLAS_CyclicBendingStep",
@@ -898,6 +899,7 @@ def build_abaqus_mesh_model(payload, job_dir):
             "target_rotation_rad": float(analysis.get("max_curvature_1_per_m", 0.08)) * (length / 1000.0),
             "output_intervals": output_intervals,
             "solver_increment_control": "abaqus_default",
+            "multistep_smoke": multistep_smoke,
             "created_regions": [],
             "optional_created_regions": [],
             "warnings": [],
@@ -911,8 +913,29 @@ def build_abaqus_mesh_model(payload, job_dir):
         required_expected = 5
         optional_created = 0
         try:
-            model.StaticStep(name=record["step"], previous="Initial", nlgeom=ON)
-            record["created_regions"].append("cyclic_bending_step")
+            if multistep_smoke:
+                smoke_amplitudes = [1.0, 0.0, -1.0, 0.0]
+                step_sequence = []
+                previous_step = "Initial"
+                for index, amplitude_value in enumerate(smoke_amplitudes):
+                    if index == 0:
+                        step_name = record["step"]
+                    else:
+                        step_name = safe_name(record["step"] + "_{0:02d}".format(index + 1), 38)
+                    model.StaticStep(name=step_name, previous=previous_step, nlgeom=ON)
+                    step_sequence.append(
+                        {
+                            "name": step_name,
+                            "amplitude_factor": amplitude_value,
+                            "target_rotation_rad": record["target_rotation_rad"] * amplitude_value,
+                        }
+                    )
+                    previous_step = step_name
+                record["step_sequence"] = step_sequence
+                record["created_regions"].append("cyclic_bending_multistep_smoke")
+            else:
+                model.StaticStep(name=record["step"], previous="Initial", nlgeom=ON)
+                record["created_regions"].append("cyclic_bending_step")
             required_created += 1
         except Exception as exc:
             record["warnings"].append("cyclic bending step failed: {0}".format(exc))
@@ -1056,18 +1079,36 @@ def build_abaqus_mesh_model(payload, job_dir):
                 createStepName="Initial",
                 region=assembly.sets[record["left_reference_point_set"]],
             )
-            model.DisplacementBC(
-                name="SCLAS_RightEnd_CyclicRotation",
-                createStepName=record["step"],
-                region=assembly.sets[record["right_reference_point_set"]],
-                u1=0.0,
-                u2=0.0,
-                u3=0.0,
-                ur1=0.0,
-                ur2=record["target_rotation_rad"],
-                ur3=0.0,
-                amplitude=record["amplitude"],
-            )
+            if multistep_smoke:
+                model.DisplacementBC(
+                    name="SCLAS_RightEnd_CyclicRotation",
+                    createStepName=record["step"],
+                    region=assembly.sets[record["right_reference_point_set"]],
+                    u1=0.0,
+                    u2=0.0,
+                    u3=0.0,
+                    ur1=0.0,
+                    ur2=record["step_sequence"][0]["target_rotation_rad"],
+                    ur3=0.0,
+                )
+                for step_item in record.get("step_sequence", [])[1:]:
+                    model.boundaryConditions["SCLAS_RightEnd_CyclicRotation"].setValuesInStep(
+                        stepName=step_item["name"],
+                        ur2=step_item["target_rotation_rad"],
+                    )
+            else:
+                model.DisplacementBC(
+                    name="SCLAS_RightEnd_CyclicRotation",
+                    createStepName=record["step"],
+                    region=assembly.sets[record["right_reference_point_set"]],
+                    u1=0.0,
+                    u2=0.0,
+                    u3=0.0,
+                    ur1=0.0,
+                    ur2=record["target_rotation_rad"],
+                    ur3=0.0,
+                    amplitude=record["amplitude"],
+                )
             record["created_regions"].append("reference_point_bcs")
             required_created += 1
         except Exception as exc:
@@ -1304,31 +1345,29 @@ def build_abaqus_mesh_model(payload, job_dir):
         try:
             with open(inp_path, "r") as f:
                 lines = f.read().splitlines()
-            step_index = None
-            end_step_index = None
-            step_name = str(boundary_record.get("step", "SCLAS_CyclicBendingStep")).lower()
+            end_step_indices = []
             for i, line in enumerate(lines):
-                lowered = line.strip().lower()
-                if lowered.startswith("*step") and step_name in lowered:
-                    step_index = i
-                    continue
-                if step_index is not None and lowered == "*end step":
-                    end_step_index = i
-                    break
-            if end_step_index is None:
-                for i, line in enumerate(lines):
-                    if line.strip().lower() == "*end step":
-                        end_step_index = i
-                        break
-            if end_step_index is None:
+                if line.strip().lower() == "*end step":
+                    end_step_indices.append(i)
+            if not end_step_indices:
                 fallback["status"] = "failed"
                 fallback["warnings"].append("*End Step marker not found")
                 return fallback
-            new_lines = lines[:end_step_index] + output_lines + lines[end_step_index:]
+            end_step_lookup = {}
+            for index in end_step_indices:
+                end_step_lookup[index] = True
+            new_lines = []
+            injected_count = 0
+            for i, line in enumerate(lines):
+                if i in end_step_lookup:
+                    new_lines.extend(output_lines)
+                    injected_count += 1
+                new_lines.append(line)
             with open(inp_path, "w") as f:
                 f.write("\n".join(new_lines) + "\n")
             fallback["status"] = "injected"
-            fallback["line_count"] = len(output_lines)
+            fallback["step_count"] = injected_count
+            fallback["line_count"] = len(output_lines) * injected_count
         except Exception as exc:
             fallback["status"] = "failed"
             fallback["warnings"].append("keyword injection failed: {0}".format(exc))

@@ -149,6 +149,7 @@ function New-SmallSmokeJob {
     Set-JsonObjectProperty $mesh "lab_smoke_reduced_mesh" $true
     Set-JsonObjectProperty $analysis "effective_length_mm" ([double]$EffectiveLengthMm)
     Set-JsonObjectProperty $analysis "abaqus_output_intervals" ([int]$AbaqusOutputIntervals)
+    Set-JsonObjectProperty $analysis "abaqus_multistep_smoke" $true
     if ($analysis.PSObject.Properties["solver_steps"]) {
         $analysis.solver_steps = 25
     }

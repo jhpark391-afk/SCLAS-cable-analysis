@@ -514,11 +514,20 @@ Follow-up from Lab PC:
 - After that fix, `small_smoke_20260614_021258` completed quickly again and
   ODB extraction succeeded, but `rows_written` remained 2. This shows the CAE
   output-request API hints did not increase ODB frame count on Abaqus 2019.
-- The next commit injects an input-deck output keyword fallback before
+- The input-deck output keyword fallback was then tested in
+  `small_smoke_20260614_022141`. Abaqus accepted the keywords and completed,
+  but `history_rows_available` and `field_rows_available` were both still 2.
+  This means the step solved in a single increment, so ODB output requests
+  alone cannot create intermediate frames.
+- The next commit keeps solver increments automatic but changes `-SmallSmoke`
+  to a four-step smoke path: `+target -> 0 -> -target -> 0`. Each step can solve
+  quickly with Abaqus defaults, while the ODB extractor concatenates all
+  `SCLAS_CyclicBendingStep*` steps into one CSV.
+- The runner still injects an input-deck output keyword fallback before each
   `*End Step`:
   `*Output, field, number interval=4, time marks=NO` plus right-reference-point
   `*Node Output`. The ODB extractor now compares history and field extraction
-  counts and chooses the method with more rows.
+  counts across all bending steps and chooses the method with more rows.
 
 Next Lab-PC command after pulling the next commit:
 

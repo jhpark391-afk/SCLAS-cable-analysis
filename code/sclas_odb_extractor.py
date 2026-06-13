@@ -92,6 +92,33 @@ def find_step(odb, preferred_name):
     return None, None
 
 
+def find_steps(odb, preferred_name):
+    names = list(odb.steps.keys())
+    selected = []
+    if preferred_name and preferred_name in names:
+        selected.append(preferred_name)
+    prefix = (preferred_name or "").upper() + "_"
+    for name in names:
+        upper = name.upper()
+        if name not in selected and prefix and upper.startswith(prefix):
+            selected.append(name)
+    if selected:
+        return [(name, odb.steps[name]) for name in selected]
+    step_name, step = find_step(odb, preferred_name)
+    if step is None:
+        return []
+    return [(step_name, step)]
+
+
+def append_nonduplicate_rows(target_rows, source_rows):
+    for row in source_rows:
+        if target_rows:
+            prev = target_rows[-1]
+            if abs(prev[0] - row[0]) <= 1.0e-12 and abs(prev[1] - row[1]) <= 1.0e-12:
+                continue
+        target_rows.append(row)
+
+
 def find_node_set(assembly, tokens):
     node_sets = assembly.nodeSets
     names = list(node_sets.keys())
@@ -218,46 +245,59 @@ def extract_odb(odb_path, job_dir, input_data_path):
 
     odb = openOdb(path=odb_path, readOnly=True)
     try:
-        step_name, step = find_step(odb, "SCLAS_CyclicBendingStep")
-        if step is None:
+        steps = find_steps(odb, "SCLAS_CyclicBendingStep")
+        if not steps:
             return {
                 "status": "failed",
                 "reason": "No analysis step found in ODB",
                 "odb_file": os.path.basename(odb_path),
             }, []
 
-        history_rows, history_info = extract_from_history(step, effective_length_m)
+        history_rows = []
+        field_rows = []
+        history_info = None
+        field_info = None
+        step_names = []
+        node_set_name = None
+        node_set_name, node_set = find_node_set(odb.rootAssembly, RIGHT_RP_TOKENS)
+        for step_name, step in steps:
+            step_names.append(step_name)
+            step_history_rows, step_history_info = extract_from_history(step, effective_length_m)
+            if step_history_info and history_info is None:
+                history_info = step_history_info
+            append_nonduplicate_rows(history_rows, step_history_rows)
+            if node_set is not None:
+                step_field_rows, step_field_info = extract_from_fields(step, node_set, effective_length_m)
+                if step_field_info and field_info is None:
+                    field_info = step_field_info
+                append_nonduplicate_rows(field_rows, step_field_rows)
+
         rows = history_rows
         method_info = history_info
-        node_set_name = None
-        field_rows = []
-        field_info = None
-        node_set_name, node_set = find_node_set(odb.rootAssembly, RIGHT_RP_TOKENS)
-        if node_set is not None:
-            field_rows, field_info = extract_from_fields(step, node_set, effective_length_m)
         if field_rows and len(field_rows) > len(rows):
             rows = field_rows
             method_info = field_info
 
         if len(rows) < 2:
             available_field_outputs = []
-            if step.frames:
-                available_field_outputs = list(step.frames[-1].fieldOutputs.keys())
+            if steps[-1][1].frames:
+                available_field_outputs = list(steps[-1][1].frames[-1].fieldOutputs.keys())
             return {
                 "status": "failed",
                 "reason": "Could not find enough UR2/RM2 reference-point output rows",
                 "odb_file": os.path.basename(odb_path),
-                "step": step_name,
+                "steps": step_names,
                 "node_set": node_set_name,
                 "available_field_outputs": available_field_outputs,
-                "history_region_count": len(step.historyRegions.keys()),
+                "history_region_count": len(steps[-1][1].historyRegions.keys()),
                 "next_step": "Regenerate the input deck with SCLAS_RP_FieldOutput/SCLAS_RightRP_HistoryOutput enabled and rerun the smoke solve.",
             }, []
 
         summary = {
             "status": "extracted",
             "odb_file": os.path.basename(odb_path),
-            "step": step_name,
+            "step": step_names[0],
+            "steps": step_names,
             "effective_length_mm": effective_length_mm,
             "rows_written": len(rows),
             "history_rows_available": len(history_rows),
