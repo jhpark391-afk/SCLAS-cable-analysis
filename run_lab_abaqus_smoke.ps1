@@ -158,10 +158,18 @@ $extractPath = Join-Path $JobDir "solver_error_extract.txt"
 if ($logFiles.Count -eq 0) {
     Write-Host "No solver logs found."
 } else {
-    $matches = Select-String -Path $logFiles `
-        -Pattern "FATAL|ERROR|SEVERE|WARNING|UNKNOWN|INVALID|MISPLACED|COUPLING|KINEMATIC|REF NODE|SURFACE|THE PROGRAM HAS|Abaqus/Analysis exited" `
+    $blockingPattern = "\*\*\*ERROR|FATAL|SEVERE|THE PROGRAM HAS DISCOVERED|Abaqus Error|Abaqus/Analysis exited|UNKNOWN|INVALID|MISPLACED|ZERO PIVOT|OVERCONSTRAINT|TOO MANY|EXCESSIVE|DISTORTION"
+    $notablePattern = "WARNING|COUPLING|KINEMATIC|REF NODE"
+    $matches = @(Select-String -Path $logFiles `
+        -Pattern $blockingPattern `
         -Context 3,3 |
-        Select-Object -First 160
+        Select-Object -First 120)
+    if ($matches.Count -eq 0) {
+        $matches = @(Select-String -Path $logFiles `
+            -Pattern $notablePattern `
+            -Context 3,3 |
+            Select-Object -First 80)
+    }
     $matches | Out-File $extractPath -Encoding utf8
     if ($matches) {
         $matches | Select-Object -First 80

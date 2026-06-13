@@ -315,6 +315,14 @@ into the job folder, runs Abaqus/CAE noGUI generation, submits the generated
 normal Python is available, saves `offline_diagnostics_report.json` and
 `offline_diagnostics_report.md`.
 
+After the first Lab-PC run with this helper, `solver_error_extract.txt` was
+polluted by normal `CONTACTSURFACE` lines because the extractor searched broad
+terms such as `SURFACE` before true fatal/error markers. The helper and
+`code/sclas_offline_diagnostics.py` now search blocking patterns first
+(`***ERROR`, `FATAL`, `Abaqus Error`, `THE PROGRAM HAS DISCOVERED`, etc.) and
+only fall back to notable terms like coupling/reference-node warnings if no
+blocking lines are found.
+
 ## Important Files
 
 ```text

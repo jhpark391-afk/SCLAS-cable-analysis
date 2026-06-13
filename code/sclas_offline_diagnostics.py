@@ -13,16 +13,28 @@ import sys
 from pathlib import Path
 
 
-ERROR_PATTERNS = [
+BLOCKING_ERROR_PATTERNS = [
+    "***ERROR",
     "FATAL",
-    "ERROR",
+    "SEVERE",
+    "THE PROGRAM HAS DISCOVERED",
+    "Abaqus Error",
+    "Abaqus/Analysis exited",
     "UNKNOWN",
     "INVALID",
     "MISPLACED",
+    "ZERO PIVOT",
+    "OVERCONSTRAINT",
+    "TOO MANY",
+    "EXCESSIVE",
+    "DISTORTION",
+]
+
+NOTABLE_LOG_PATTERNS = [
+    "WARNING",
     "COUPLING",
     "KINEMATIC",
     "REF NODE",
-    "SURFACE",
 ]
 
 
@@ -201,20 +213,28 @@ def inspect_solver_logs(job_dir: Path, report: dict) -> None:
         add_issue(report, "info", "No Abaqus solver log files found")
         return
 
-    pattern = re.compile("|".join(re.escape(item) for item in ERROR_PATTERNS), re.IGNORECASE)
-    for path in unique_logs:
-        lines = read_text(path).splitlines()
-        for idx, line in enumerate(lines):
-            if pattern.search(line):
-                match = {
-                    "file": path.name,
-                    "line": idx + 1,
-                    "text": line.strip(),
-                    "context": context_block(lines, idx),
-                }
-                section["matches"].append(match)
-                if len(section["matches"]) >= 80:
-                    return
+    def collect_matches(pattern_items, limit):
+        pattern = re.compile("|".join(re.escape(item) for item in pattern_items), re.IGNORECASE)
+        collected = []
+        for path in unique_logs:
+            lines = read_text(path).splitlines()
+            for idx, line in enumerate(lines):
+                if pattern.search(line):
+                    collected.append({
+                        "file": path.name,
+                        "line": idx + 1,
+                        "text": line.strip(),
+                        "context": context_block(lines, idx),
+                    })
+                    if len(collected) >= limit:
+                        return collected
+        return collected
+
+    section["match_priority"] = "blocking"
+    section["matches"] = collect_matches(BLOCKING_ERROR_PATTERNS, 80)
+    if not section["matches"]:
+        section["match_priority"] = "notable"
+        section["matches"] = collect_matches(NOTABLE_LOG_PATTERNS, 40)
     if section["matches"]:
         add_issue(report, "warning", "Solver log contains notable Abaqus keywords/errors", len(section["matches"]))
 
