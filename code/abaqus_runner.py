@@ -883,7 +883,6 @@ def build_abaqus_mesh_model(payload, job_dir):
             output_intervals = 2
         if output_intervals > 100:
             output_intervals = 100
-        step_inc = 1.0 / float(output_intervals)
         record = {
             "status": "not_created",
             "step": "SCLAS_CyclicBendingStep",
@@ -898,8 +897,7 @@ def build_abaqus_mesh_model(payload, job_dir):
             "effective_length_mm": length,
             "target_rotation_rad": float(analysis.get("max_curvature_1_per_m", 0.08)) * (length / 1000.0),
             "output_intervals": output_intervals,
-            "step_initial_increment": step_inc,
-            "step_max_increment": step_inc,
+            "solver_increment_control": "abaqus_default",
             "created_regions": [],
             "optional_created_regions": [],
             "warnings": [],
@@ -913,26 +911,11 @@ def build_abaqus_mesh_model(payload, job_dir):
         required_expected = 5
         optional_created = 0
         try:
-            model.StaticStep(
-                name=record["step"],
-                previous="Initial",
-                timePeriod=1.0,
-                initialInc=step_inc,
-                maxInc=step_inc,
-                minInc=1.0e-06,
-                maxNumInc=max(100, output_intervals * 10),
-                nlgeom=ON,
-            )
+            model.StaticStep(name=record["step"], previous="Initial", nlgeom=ON)
             record["created_regions"].append("cyclic_bending_step")
             required_created += 1
         except Exception as exc:
-            record["optional_warnings"].append("cyclic bending step increment controls failed: {0}".format(exc))
-            try:
-                model.StaticStep(name=record["step"], previous="Initial", nlgeom=ON)
-                record["created_regions"].append("cyclic_bending_step")
-                required_created += 1
-            except Exception as inner_exc:
-                record["warnings"].append("cyclic bending step failed: {0}".format(inner_exc))
+            record["warnings"].append("cyclic bending step failed: {0}".format(exc))
 
         try:
             import abaqusConstants as ac
@@ -1096,16 +1079,28 @@ def build_abaqus_mesh_model(payload, job_dir):
                     name="SCLAS_RP_FieldOutput",
                     createStepName=record["step"],
                     variables=("U", "UR", "RF", "RM"),
-                    frequency=1,
+                    numIntervals=output_intervals,
+                    timeMarks=OFF,
                 )
+                record["optional_created_regions"].append("rp_field_output_num_intervals")
             except TypeError:
-                model.FieldOutputRequest(
-                    name="SCLAS_RP_FieldOutput",
-                    createStepName=record["step"],
-                    variables=("U", "UR", "RF", "RM"),
-                )
-                record["optional_warnings"].append("RP field output frequency option unavailable; used Abaqus default frequency")
-            record["optional_created_regions"].append("rp_field_output_request")
+                try:
+                    model.FieldOutputRequest(
+                        name="SCLAS_RP_FieldOutput",
+                        createStepName=record["step"],
+                        variables=("U", "UR", "RF", "RM"),
+                        frequency=1,
+                    )
+                    record["optional_created_regions"].append("rp_field_output_frequency")
+                    record["optional_warnings"].append("RP field output numIntervals option unavailable; used frequency=1")
+                except TypeError:
+                    model.FieldOutputRequest(
+                        name="SCLAS_RP_FieldOutput",
+                        createStepName=record["step"],
+                        variables=("U", "UR", "RF", "RM"),
+                    )
+                    record["optional_created_regions"].append("rp_field_output_default")
+                    record["optional_warnings"].append("RP field output interval/frequency options unavailable; used Abaqus default frequency")
             optional_created += 1
         except Exception as exc:
             record["optional_warnings"].append("RP field output request failed: {0}".format(exc))
@@ -1117,17 +1112,30 @@ def build_abaqus_mesh_model(payload, job_dir):
                     createStepName=record["step"],
                     variables=("UR2", "RM2"),
                     region=assembly.sets[record["right_reference_point_set"]],
-                    frequency=1,
+                    numIntervals=output_intervals,
+                    timeMarks=OFF,
                 )
+                record["optional_created_regions"].append("right_rp_history_output_num_intervals")
             except TypeError:
-                model.HistoryOutputRequest(
-                    name="SCLAS_RightRP_HistoryOutput",
-                    createStepName=record["step"],
-                    variables=("UR2", "RM2"),
-                    region=assembly.sets[record["right_reference_point_set"]],
-                )
-                record["optional_warnings"].append("RP history output frequency option unavailable; used Abaqus default frequency")
-            record["optional_created_regions"].append("right_rp_history_output_request")
+                try:
+                    model.HistoryOutputRequest(
+                        name="SCLAS_RightRP_HistoryOutput",
+                        createStepName=record["step"],
+                        variables=("UR2", "RM2"),
+                        region=assembly.sets[record["right_reference_point_set"]],
+                        frequency=1,
+                    )
+                    record["optional_created_regions"].append("right_rp_history_output_frequency")
+                    record["optional_warnings"].append("RP history output numIntervals option unavailable; used frequency=1")
+                except TypeError:
+                    model.HistoryOutputRequest(
+                        name="SCLAS_RightRP_HistoryOutput",
+                        createStepName=record["step"],
+                        variables=("UR2", "RM2"),
+                        region=assembly.sets[record["right_reference_point_set"]],
+                    )
+                    record["optional_created_regions"].append("right_rp_history_output_default")
+                    record["optional_warnings"].append("RP history output interval/frequency options unavailable; used Abaqus default frequency")
             optional_created += 1
         except Exception as exc:
             record["optional_warnings"].append("RP history output request failed: {0}".format(exc))

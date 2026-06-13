@@ -483,9 +483,11 @@ This handoff update also adds a small runner/helper change for the next Lab-PC
 test:
 
 - `code/abaqus_runner.py` reads
-  `analysis_conditions.abaqus_output_intervals` and uses it to set cyclic-step
-  `initialInc` / `maxInc`.
-- Field and history output requests now use `frequency=1`.
+  `analysis_conditions.abaqus_output_intervals` for ODB output request
+  intervals only. The cyclic step now leaves Abaqus solver increment control at
+  the Abaqus default.
+- Field and history output requests first try `numIntervals` with
+  `timeMarks=OFF`, then fall back to `frequency=1`, then to Abaqus defaults.
 - `run_lab_abaqus_smoke.ps1 -SmallSmoke` now writes
   `abaqus_output_intervals=4` by default and exposes
   `-SmallAbaqusOutputIntervals`.
@@ -501,6 +503,14 @@ Follow-up from Lab PC:
 - The 12-interval smoke is too slow for the current contact/nonlinear scaffold,
   so the default has been lowered to 4 intervals. Use a higher value only after
   a 4-interval smoke confirms ODB extraction still succeeds.
+- A follow-up 4-interval run, `small_smoke_20260614_020228`, was also
+  intentionally terminated because the forced-increment version remained at
+  `STEP TIME/LPF = 0.00` after repeated first-increment cutbacks. This confirms
+  that forcing `StaticStep(initialInc/maxInc)` is the wrong approach for this
+  scaffold.
+- The next commit removes the forced `initialInc` / `maxInc` controls and keeps
+  only output-request interval hints, so the Lab PC should regain the earlier
+  fast solve behavior while still attempting more ODB output rows.
 
 Next Lab-PC command after pulling the next commit:
 
