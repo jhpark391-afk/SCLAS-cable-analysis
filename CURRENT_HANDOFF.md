@@ -823,6 +823,28 @@ diagnostic_summary.issue_counts={'error': 0, 'warning': 0, 'info': 0}
 - The notable hits are completed-solver warnings/notes from child logs, not
   blocking errors. The next modelling task should reduce these warnings, but
   they do not invalidate the current Curve V0 endpoint baseline.
+- Offline diagnostics now classifies completed-child notable log hits into
+  warning categories so the next modelling target is visible without rereading
+  the full `.dat`/`.msg` files. On
+  `curve_v0_sweep_20260614_040136`, the largest categories were:
+
+```text
+numerical_singularity=1367
+overconstraint_check=605
+coupling_or_reference_node_note=60
+other_warning=40
+beam_contact_surface_to_node_fallback=20
+increment_cutback_or_excessive_reporting=15
+beam_curvature=10
+distorted_elements=10
+contact_pair_general_contact_overlap=5
+unconnected_regions=5
+```
+
+- This points the next backend modelling work toward stabilizing armour beam
+  constraints/contact and reducing numerical singularity/overconstraint warning
+  volume. Do not treat these as blocking for the current endpoint baseline
+  because all five child solvers completed and ODB extraction was validated.
 
 ## Important Files
 

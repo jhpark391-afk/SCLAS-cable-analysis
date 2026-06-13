@@ -138,13 +138,51 @@ def scan_solver_log_keywords(job_dir: Path):
                     "text": line.strip(),
                 })
 
+    warning_categories = {}
+    for item in notable:
+        category = classify_solver_warning(item.get("text", ""))
+        warning_categories[category] = warning_categories.get(category, 0) + 1
+
     return {
         "files": [path.name for path in unique_logs],
         "completed": completed,
         "failed": failed,
         "blocking_matches": blocking,
         "notable_matches": notable,
+        "warning_categories": warning_categories,
     }
+
+
+def classify_solver_warning(text):
+    upper = str(text).upper()
+    if "SURFACE TO SURFACE CONTACT APPROACH" in upper or "NODE TO SURFACE APPROACH" in upper:
+        return "beam_contact_surface_to_node_fallback"
+    if "BOTH CONTACT PAIRS AND GENERAL CONTACT" in upper:
+        return "contact_pair_general_contact_overlap"
+    if "STRICTLY-ENFORCED HARD CONTACT" in upper or "PENALTY-ENFORCED CONTACT" in upper:
+        return "contact_property_penalty_switch"
+    if "UNCONNECTED REGIONS" in upper:
+        return "unconnected_regions"
+    if "NUMERICAL SINGULARITY" in upper or "ZERO PIVOT" in upper:
+        return "numerical_singularity"
+    if "DISTORT" in upper:
+        return "distorted_elements"
+    if "BEAM" in upper and "CURVATURE" in upper:
+        return "beam_curvature"
+    if "CUT-BACK" in upper or "TOO MANY" in upper or "EXCESSIVE" in upper:
+        return "increment_cutback_or_excessive_reporting"
+    if "OVERCONSTRAINT" in upper:
+        return "overconstraint_check"
+    if "COUPLING" in upper or "KINEMATIC" in upper or "REF NODE" in upper:
+        return "coupling_or_reference_node_note"
+    if "WARNING" in upper:
+        return "other_warning"
+    return "other_notable"
+
+
+def merge_counts(target, source):
+    for key, value in source.items():
+        target[key] = target.get(key, 0) + value
 
 
 def inspect_endpoint_sweep_shape(job_dir: Path, report: dict, summary_data: dict) -> None:
@@ -267,6 +305,7 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
         "all_children_deep_validated": True,
         "blocking_log_hits": 0,
         "notable_log_hits": 0,
+        "warning_categories": {},
     }
     report["endpoint_sweep_children"] = section
     if not isinstance(child_jobs, list):
@@ -367,10 +406,12 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
         child_detail["solver_failed"] = log_scan["failed"]
         child_detail["blocking_log_hits"] = len(log_scan["blocking_matches"])
         child_detail["notable_log_hits"] = len(log_scan["notable_matches"])
+        child_detail["warning_categories"] = log_scan.get("warning_categories", {})
         if log_scan["blocking_matches"]:
             child_detail["first_blocking_log_hit"] = log_scan["blocking_matches"][0]
         section["blocking_log_hits"] += child_detail["blocking_log_hits"]
         section["notable_log_hits"] += child_detail["notable_log_hits"]
+        merge_counts(section["warning_categories"], child_detail["warning_categories"])
 
         if log_scan["failed"] or log_scan["blocking_matches"]:
             add_issue(report, "error", "Endpoint sweep child solver logs contain a blocking failure", child_detail)
@@ -727,6 +768,12 @@ def markdown_report(report: dict) -> str:
             return default
         return str(value)
 
+    def top_counts(counts, limit=5):
+        if not isinstance(counts, dict) or not counts:
+            return "-"
+        ordered = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+        return ", ".join("{0}={1}".format(key, value) for key, value in ordered[:limit])
+
     lines = [
         "# SCLAS Offline Diagnostics",
         "",
@@ -763,6 +810,7 @@ def markdown_report(report: dict) -> str:
         ("Sweep shape checks", scalar(sweep_shape_section.get("shape_checks_passed"))),
         ("Sweep child deep checks", scalar(sweep_children_section.get("all_children_deep_validated"))),
         ("Sweep child blocking hits", scalar(sweep_children_section.get("blocking_log_hits"))),
+        ("Sweep warning categories", top_counts(sweep_children_section.get("warning_categories"))),
         ("Sweep odd symmetry max rel", scalar(sweep_shape_section.get("odd_symmetry_max_relative_moment_sum"))),
         ("Sweep factor scale", scalar(sweep_shape_section.get("factor_curvature_scale"))),
         ("Input deck", scalar(deck_section.get("file"))),

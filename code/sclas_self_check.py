@@ -427,7 +427,11 @@ def check_endpoint_sweep_diagnostics() -> None:
         (child_dir / "result_summary.json").write_text(json.dumps(child_summary, indent=4), encoding="utf-8")
         (child_dir / "odb_extraction_summary.json").write_text(json.dumps(child_odb, indent=4), encoding="utf-8")
         (child_dir / "solver_stdout.txt").write_text(
-            f"Abaqus JOB curve_v0_child_{idx}_mesh COMPLETED\n",
+            "\n".join([
+                "Abaqus JOB curve_v0_child_{0}_mesh COMPLETED".format(idx),
+                "***WARNING: SURFACE TO SURFACE CONTACT APPROACH FOR CONTACT PAIR IS NOT YET AVAILABLE FOR 3D BEAM OR TRUSS SLAVE SURFACE. NODE TO SURFACE APPROACH WILL BE USED INSTEAD.",
+                "",
+            ]),
             encoding="utf-8",
         )
         summary["child_jobs"].append({
@@ -474,6 +478,9 @@ def check_endpoint_sweep_diagnostics() -> None:
         fail("Endpoint sweep child deep diagnostics did not pass: " + json.dumps(child_section, indent=2))
     if child_section.get("blocking_log_hits") != 0:
         fail("Endpoint sweep child diagnostics found blocking log hits")
+    warning_categories = child_section.get("warning_categories", {})
+    if warning_categories.get("beam_contact_surface_to_node_fallback") != 5:
+        fail("Endpoint sweep child warning taxonomy did not detect contact fallback warnings")
 
     print(f"[OK] Endpoint sweep diagnostics: {job_dir}")
 
