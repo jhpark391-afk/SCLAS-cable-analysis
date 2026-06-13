@@ -642,6 +642,132 @@ Expected:
   smaller factors, for example:
   `-CurveFactors -0.05,0,0.05`.
 
+## Lab Curve V0 Endpoint Sweep Success - 2026-06-14 KST
+
+The Lab PC pulled/verified the latest repository state at:
+
+```text
+506b871 Fix CurveV0 sweep row formatting
+```
+
+First `git pull --ff-only` needed unrestricted filesystem/network access to
+write `.git/FETCH_HEAD`; after approval it reported `Already up to date`.
+
+Fast bridge smoke was rerun with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -SmallSmoke
+```
+
+The first sandboxed attempt could not reach the FlexNet license server:
+
+```text
+FlexNet Licensing error:-15,10. System Error: 10013 "WinSock: Access denied"
+```
+
+The same command succeeded after running with license/network access. It
+created:
+
+```text
+jobs\SCLAS_jobs\small_smoke_20260614_035856
+```
+
+Verified:
+
+- Abaqus/Standard completed:
+  `Abaqus JOB small_smoke_20260614_035856_mesh COMPLETED`.
+- ODB extraction status was `extracted`.
+- `result_summary.json.source` was `SCLAS_ABAQUS_ODB_EXTRACTOR`.
+- `odb_extraction.rows_written` was `2`.
+- Offline diagnostics reported zero issues.
+
+Then the Curve V0 endpoint sweep was run with default factors:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_sweep.ps1
+```
+
+The sweep created:
+
+```text
+jobs\SCLAS_jobs\curve_v0_sweep_20260614_040136
+```
+
+Parent sweep validation:
+
+- `result_data.csv` exists with five data rows.
+- `result_summary.json.source` is `SCLAS_CURVE_V0_ENDPOINT_SWEEP`.
+- `endpoint_sweep_validation.all_child_jobs_validated` is `true`.
+- `rows_written` is `5`.
+- Aggregated endpoint rows:
+
+```csv
+curvature_1_per_m,moment_kn_m
+-0.0079999997979,-0.84404125
+-0.00399999989895,-0.4220246875
+0,0
+0.00399999989895,0.42202409375
+0.0079999997979,0.8440385625
+```
+
+Child jobs:
+
+```text
+curve_v0_20260614_040136  factor=-0.1   rows_written=2
+curve_v0_20260614_040456  factor=-0.05  rows_written=2
+curve_v0_20260614_040749  factor=0      rows_written=2
+curve_v0_20260614_041014  factor=0.05   rows_written=2
+curve_v0_20260614_041308  factor=0.1    rows_written=2
+```
+
+For every child:
+
+- `result_summary.json.source` was `SCLAS_ABAQUS_ODB_EXTRACTOR`.
+- `odb_extraction.status` was `extracted`.
+- `odb_extraction.rows_written` was `2`.
+- The last CSV row was numeric and matched the parent aggregation.
+- Searching `.dat`, `.msg`, and `.sta` for
+  `ERROR|FATAL|INVALID|MISPLACED|OVERCONSTRAINT` found zero hits.
+
+No code fix was needed for this run. The first blocking issue encountered was
+environmental only: sandboxed Abaqus could not reach the license server. Running
+the Abaqus helpers with license/network access resolved it.
+
+Local normal Python on the Lab PC needs attention:
+
+- `python` is not on `PATH`.
+- `.venv\Scripts\python.exe` exists but points to a missing
+  `C:\Users\user\AppData\Local\Programs\Python\Python312\python.exe`.
+- Verification was therefore run with the Codex bundled Python:
+
+```powershell
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m py_compile code\abaqus_runner.py code\SCLAS_test\abaqus_runner.py code\sclas_odb_extractor.py code\sclas_offline_diagnostics.py
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe code\sclas_self_check.py
+```
+
+Both commands passed. `code\sclas_self_check.py` created:
+
+```text
+jobs\SCLAS_jobs\self_check_20260614_041730
+jobs\SCLAS_jobs\self_check_endpoint_sweep_20260614_041730
+```
+
+Do not commit generated job artifacts from these runs.
+
+Recommended next backend work:
+
+1. Keep `SmallSmoke` as the quick bridge health check.
+2. Treat the current endpoint sweep as a candidate monotonic Curve V0 shape,
+   not a validated research hysteresis loop.
+3. Add a follow-up diagnostic/plot check for endpoint monotonicity, odd
+   symmetry, and factor-to-curvature scaling.
+4. Repair or recreate the Windows `.venv` when convenient so
+   `run_self_check.bat` works without using the Codex bundled Python.
+5. Start the next modelling increment only after this endpoint baseline is
+   committed: better contact quality, periodic-equivalent constraints, or a
+   reduced continuous bending path that does not exceed the 20-minute
+   interactive limit.
+
 ## Important Files
 
 ```text
