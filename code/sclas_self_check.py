@@ -388,9 +388,52 @@ def check_endpoint_sweep_diagnostics() -> None:
         (0.1, 0.008, 0.032),
     ]
     for idx, (factor, curvature, moment) in enumerate(child_values, start=1):
+        child_dir = job_dir / f"curve_v0_child_{idx}"
+        child_dir.mkdir(parents=True, exist_ok=True)
+        with (child_dir / "result_data.csv").open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle, lineterminator="\n")
+            writer.writerow(["curvature_1_per_m", "moment_kn_m"])
+            writer.writerow(["0", "0"])
+            writer.writerow([f"{curvature:.12g}", f"{moment:.12g}"])
+        child_odb = {
+            "status": "extracted",
+            "method": "history",
+            "rows_written": 2,
+        }
+        child_summary = {
+            "source": "SCLAS_ABAQUS_ODB_EXTRACTOR",
+            "status": "completed",
+            "num_points": 2,
+            "result_contract": {
+                "csv_file": "result_data.csv",
+                "required_columns": ["curvature_1_per_m", "moment_kn_m"],
+                "summary_file": "result_summary.json",
+            },
+            "mesh_status": {
+                "status": "abaqus_mesh_created",
+            },
+            "backend_readiness": {
+                "bending_stick_slip": {
+                    "requested": True,
+                    "status": "abaqus_odb_smoke_two_point",
+                },
+            },
+            "odb_extraction": child_odb,
+            "abaqus_result_quality": {
+                "curve_class": "two_point_odb_smoke",
+                "is_research_curve": False,
+            },
+        }
+        (child_dir / "result_summary.json").write_text(json.dumps(child_summary, indent=4), encoding="utf-8")
+        (child_dir / "odb_extraction_summary.json").write_text(json.dumps(child_odb, indent=4), encoding="utf-8")
+        (child_dir / "solver_stdout.txt").write_text(
+            f"Abaqus JOB curve_v0_child_{idx}_mesh COMPLETED\n",
+            encoding="utf-8",
+        )
         summary["child_jobs"].append({
             "factor": factor,
             "job": f"curve_v0_child_{idx}",
+            "path": str(child_dir),
             "source": "SCLAS_ABAQUS_ODB_EXTRACTOR",
             "odb_status": "extracted",
             "odb_rows_written": 2,
@@ -416,7 +459,7 @@ def check_endpoint_sweep_diagnostics() -> None:
     if any(item.get("severity") == "error" for item in report.get("issues", [])):
         fail("Endpoint sweep diagnostics reported errors: " + json.dumps(report.get("issues"), indent=2))
     action = report.get("diagnostic_summary", {}).get("recommended_next_action", "")
-    if "passed basic monotonic/odd-symmetry checks" not in action:
+    if "deep-validated child ODB/log artifacts" not in action:
         fail("Endpoint sweep diagnostics recommended the wrong next action: " + action)
     summary_section = report.get("result_summary_json", {})
     if summary_section.get("child_job_count") != 5 or summary_section.get("rows_written") != 5:
@@ -426,6 +469,11 @@ def check_endpoint_sweep_diagnostics() -> None:
         fail("Endpoint sweep shape diagnostics did not pass: " + json.dumps(shape_section, indent=2))
     if abs(shape_section.get("factor_curvature_scale", 0.0) - 0.08) > 1e-12:
         fail("Endpoint sweep factor-to-curvature scale was not detected")
+    child_section = report.get("endpoint_sweep_children", {})
+    if not child_section.get("all_children_deep_validated"):
+        fail("Endpoint sweep child deep diagnostics did not pass: " + json.dumps(child_section, indent=2))
+    if child_section.get("blocking_log_hits") != 0:
+        fail("Endpoint sweep child diagnostics found blocking log hits")
 
     print(f"[OK] Endpoint sweep diagnostics: {job_dir}")
 

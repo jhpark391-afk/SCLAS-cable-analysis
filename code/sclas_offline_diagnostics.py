@@ -72,8 +72,79 @@ def parse_float(value):
         return None
 
 
+def parse_int_like(value, default=0):
+    parsed = parse_float(value)
+    if parsed is None:
+        return default
+    return int(parsed)
+
+
 def nondecreasing(values, tolerance=1e-12):
     return all(values[idx] <= values[idx + 1] + tolerance for idx in range(len(values) - 1))
+
+
+def close_enough(left, right, tolerance=1e-9):
+    return abs(left - right) <= max(abs(left), abs(right), 1.0) * tolerance
+
+
+def read_numeric_csv_rows(path: Path):
+    numeric_rows = []
+    invalid_rows = []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for idx, row in enumerate(reader, start=2):
+            curvature = parse_float(row.get("curvature_1_per_m"))
+            moment = parse_float(row.get("moment_kn_m"))
+            if curvature is None or moment is None:
+                invalid_rows.append(idx)
+            else:
+                numeric_rows.append((curvature, moment))
+    return numeric_rows, invalid_rows
+
+
+def scan_solver_log_keywords(job_dir: Path):
+    log_files = []
+    for pattern in ["*.dat", "*.msg", "*.sta", "solver_stdout.txt", "abaqus_stdout.txt"]:
+        log_files.extend(sorted(job_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True))
+    seen = set()
+    unique_logs = []
+    for path in log_files:
+        if path not in seen:
+            unique_logs.append(path)
+            seen.add(path)
+
+    combined_text = "\n".join(read_text(path) for path in unique_logs)
+    completed = bool(re.search(r"Abaqus JOB .* COMPLETED|COMPLETED SUCCESSFULLY", combined_text, re.IGNORECASE))
+    failed = bool(re.search(r"Abaqus Error|Abaqus/Analysis exited with errors|exited with errors", combined_text, re.IGNORECASE))
+
+    blocking_pattern = re.compile("|".join(re.escape(item) for item in BLOCKING_ERROR_PATTERNS), re.IGNORECASE)
+    notable_pattern = re.compile("|".join(re.escape(item) for item in NOTABLE_LOG_PATTERNS), re.IGNORECASE)
+
+    blocking = []
+    notable = []
+    for path in unique_logs:
+        lines = read_text(path).splitlines()
+        for idx, line in enumerate(lines):
+            if blocking_pattern.search(line):
+                blocking.append({
+                    "file": path.name,
+                    "line": idx + 1,
+                    "text": line.strip(),
+                })
+            elif notable_pattern.search(line):
+                notable.append({
+                    "file": path.name,
+                    "line": idx + 1,
+                    "text": line.strip(),
+                })
+
+    return {
+        "files": [path.name for path in unique_logs],
+        "completed": completed,
+        "failed": failed,
+        "blocking_matches": blocking,
+        "notable_matches": notable,
+    }
 
 
 def inspect_endpoint_sweep_shape(job_dir: Path, report: dict, summary_data: dict) -> None:
@@ -88,17 +159,7 @@ def inspect_endpoint_sweep_shape(job_dir: Path, report: dict, summary_data: dict
     if not path.exists():
         return
 
-    numeric_rows = []
-    invalid_rows = []
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        for idx, row in enumerate(reader, start=2):
-            curvature = parse_float(row.get("curvature_1_per_m"))
-            moment = parse_float(row.get("moment_kn_m"))
-            if curvature is None or moment is None:
-                invalid_rows.append(idx)
-            else:
-                numeric_rows.append((curvature, moment))
+    numeric_rows, invalid_rows = read_numeric_csv_rows(path)
 
     section["numeric_rows"] = len(numeric_rows)
     section["invalid_numeric_rows"] = invalid_rows
@@ -194,6 +255,131 @@ def inspect_endpoint_sweep_shape(job_dir: Path, report: dict, summary_data: dict
     )
 
 
+def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: dict) -> None:
+    if summary_data.get("source") != "SCLAS_CURVE_V0_ENDPOINT_SWEEP":
+        return
+
+    child_jobs = summary_data.get("child_jobs", [])
+    section = {
+        "checked": True,
+        "child_count": len(child_jobs) if isinstance(child_jobs, list) else 0,
+        "children": [],
+        "all_children_deep_validated": True,
+        "blocking_log_hits": 0,
+        "notable_log_hits": 0,
+    }
+    report["endpoint_sweep_children"] = section
+    if not isinstance(child_jobs, list):
+        add_issue(report, "error", "Endpoint sweep child_jobs is not a list")
+        section["all_children_deep_validated"] = False
+        return
+
+    for idx, child in enumerate(child_jobs):
+        if not isinstance(child, dict):
+            add_issue(report, "error", "Endpoint sweep child record is not an object", idx)
+            section["all_children_deep_validated"] = False
+            continue
+
+        child_name = child.get("job", "child_{0}".format(idx))
+        raw_path = child.get("path")
+        child_path = Path(raw_path) if raw_path else (job_dir.parent / child_name)
+        child_detail = {
+            "job": child_name,
+            "path": str(child_path),
+            "exists": child_path.exists(),
+        }
+        section["children"].append(child_detail)
+        if not child_path.exists() or not child_path.is_dir():
+            add_issue(report, "error", "Endpoint sweep child job folder is missing", child_detail)
+            section["all_children_deep_validated"] = False
+            continue
+
+        child_summary_path = child_path / "result_summary.json"
+        odb_summary_path = child_path / "odb_extraction_summary.json"
+        child_csv_path = child_path / "result_data.csv"
+        child_detail["result_summary_exists"] = child_summary_path.exists()
+        child_detail["odb_extraction_summary_exists"] = odb_summary_path.exists()
+        child_detail["result_csv_exists"] = child_csv_path.exists()
+
+        child_summary = {}
+        odb_summary = {}
+        try:
+            child_summary = load_json(child_summary_path)
+        except Exception as exc:
+            add_issue(report, "error", "Could not parse child result_summary.json", {
+                "child": child_name,
+                "error": str(exc),
+            })
+            section["all_children_deep_validated"] = False
+        try:
+            odb_summary = load_json(odb_summary_path)
+        except Exception as exc:
+            add_issue(report, "error", "Could not parse child odb_extraction_summary.json", {
+                "child": child_name,
+                "error": str(exc),
+            })
+            section["all_children_deep_validated"] = False
+
+        child_odb = child_summary.get("odb_extraction", {}) if isinstance(child_summary, dict) else {}
+        child_detail["source"] = child_summary.get("source") if isinstance(child_summary, dict) else None
+        child_detail["status"] = child_summary.get("status") if isinstance(child_summary, dict) else None
+        child_detail["odb_status"] = child_odb.get("status") or odb_summary.get("status")
+        child_detail["odb_rows_written"] = child_odb.get("rows_written") or odb_summary.get("rows_written")
+
+        if child_detail["source"] != "SCLAS_ABAQUS_ODB_EXTRACTOR":
+            add_issue(report, "error", "Endpoint sweep child source is not ODB extractor", child_detail)
+            section["all_children_deep_validated"] = False
+        if child_detail["status"] != "completed":
+            add_issue(report, "error", "Endpoint sweep child summary status is not completed", child_detail)
+            section["all_children_deep_validated"] = False
+        if child_detail["odb_status"] != "extracted":
+            add_issue(report, "error", "Endpoint sweep child ODB extraction did not succeed", child_detail)
+            section["all_children_deep_validated"] = False
+        if parse_int_like(child_detail["odb_rows_written"]) < 2:
+            add_issue(report, "error", "Endpoint sweep child wrote too few ODB rows", child_detail)
+            section["all_children_deep_validated"] = False
+
+        if child_csv_path.exists():
+            numeric_rows, invalid_rows = read_numeric_csv_rows(child_csv_path)
+            child_detail["csv_rows"] = len(numeric_rows)
+            child_detail["invalid_numeric_rows"] = invalid_rows
+            if invalid_rows or not numeric_rows:
+                add_issue(report, "error", "Endpoint sweep child result_data.csv has invalid numeric rows", child_detail)
+                section["all_children_deep_validated"] = False
+            else:
+                last_curvature, last_moment = numeric_rows[-1]
+                child_detail["last_curvature_1_per_m"] = last_curvature
+                child_detail["last_moment_kn_m"] = last_moment
+                parent_curvature = parse_float(child.get("curvature_1_per_m"))
+                parent_moment = parse_float(child.get("moment_kn_m"))
+                if parent_curvature is not None and not close_enough(parent_curvature, last_curvature):
+                    add_issue(report, "error", "Endpoint sweep child curvature does not match actual last CSV row", child_detail)
+                    section["all_children_deep_validated"] = False
+                if parent_moment is not None and not close_enough(parent_moment, last_moment):
+                    add_issue(report, "error", "Endpoint sweep child moment does not match actual last CSV row", child_detail)
+                    section["all_children_deep_validated"] = False
+        else:
+            add_issue(report, "error", "Endpoint sweep child result_data.csv is missing", child_detail)
+            section["all_children_deep_validated"] = False
+
+        log_scan = scan_solver_log_keywords(child_path)
+        child_detail["solver_completed"] = log_scan["completed"]
+        child_detail["solver_failed"] = log_scan["failed"]
+        child_detail["blocking_log_hits"] = len(log_scan["blocking_matches"])
+        child_detail["notable_log_hits"] = len(log_scan["notable_matches"])
+        if log_scan["blocking_matches"]:
+            child_detail["first_blocking_log_hit"] = log_scan["blocking_matches"][0]
+        section["blocking_log_hits"] += child_detail["blocking_log_hits"]
+        section["notable_log_hits"] += child_detail["notable_log_hits"]
+
+        if log_scan["failed"] or log_scan["blocking_matches"]:
+            add_issue(report, "error", "Endpoint sweep child solver logs contain a blocking failure", child_detail)
+            section["all_children_deep_validated"] = False
+        elif not log_scan["completed"]:
+            add_issue(report, "warning", "Endpoint sweep child solver completion was not confirmed in logs", child_detail)
+            section["all_children_deep_validated"] = False
+
+
 def inspect_result_csv(job_dir: Path, report: dict) -> None:
     path = job_dir / "result_data.csv"
     section = {"exists": path.exists()}
@@ -271,6 +457,7 @@ def inspect_summary(job_dir: Path, report: dict) -> None:
                 "csv_rows": csv_rows,
             })
         inspect_endpoint_sweep_shape(job_dir, report, data)
+        inspect_endpoint_sweep_children(job_dir, report, data)
     for key in required:
         if key not in data:
             add_issue(report, "warning", "result_summary.json missing key", key)
@@ -434,6 +621,7 @@ def summarize_report(report: dict) -> None:
     manifest = report.get("abaqus_mesh_manifest_json", {})
     summary = report.get("result_summary_json", {})
     sweep_shape = report.get("endpoint_sweep_shape", {})
+    sweep_children = report.get("endpoint_sweep_children", {})
     log_match_text = "\n".join(
         "{0}\n{1}".format(item.get("text", ""), item.get("context", ""))
         for item in logs.get("matches", [])
@@ -451,8 +639,10 @@ def summarize_report(report: dict) -> None:
             action = "Fix the first error in this report before expanding the backend."
     elif summary.get("source") == "SCLAS_CURVE_V0_ENDPOINT_SWEEP":
         if int(summary.get("rows_written") or 0) >= 5:
-            if sweep_shape.get("shape_checks_passed"):
-                action = "Endpoint sweep curve-v0 aggregated at least five validated ODB child endpoints and passed basic monotonic/odd-symmetry checks; validate it against a continuous bending path before research use."
+            if sweep_shape.get("shape_checks_passed") and sweep_children.get("all_children_deep_validated"):
+                action = "Endpoint sweep curve-v0 aggregated at least five validated ODB child endpoints, passed basic shape checks, and deep-validated child ODB/log artifacts; validate it against a continuous bending path before research use."
+            elif sweep_shape.get("shape_checks_passed"):
+                action = "Endpoint sweep curve-v0 passed parent shape checks, but inspect child deep-validation diagnostics before promoting it."
             else:
                 action = "Endpoint sweep curve-v0 aggregated at least five validated ODB child endpoints; inspect the shape diagnostics and child solver warnings before promoting it."
         else:
@@ -554,6 +744,7 @@ def markdown_report(report: dict) -> str:
     deck_section = report.get("input_deck", {})
     logs_section = report.get("solver_logs", {})
     sweep_shape_section = report.get("endpoint_sweep_shape", {})
+    sweep_children_section = report.get("endpoint_sweep_children", {})
     diagnostic_summary = report.get("diagnostic_summary", {})
     issue_counts = diagnostic_summary.get("issue_counts", {})
 
@@ -570,6 +761,8 @@ def markdown_report(report: dict) -> str:
         ("Sweep child jobs", scalar(summary_section.get("child_job_count"))),
         ("Sweep rows", scalar(summary_section.get("rows_written"))),
         ("Sweep shape checks", scalar(sweep_shape_section.get("shape_checks_passed"))),
+        ("Sweep child deep checks", scalar(sweep_children_section.get("all_children_deep_validated"))),
+        ("Sweep child blocking hits", scalar(sweep_children_section.get("blocking_log_hits"))),
         ("Sweep odd symmetry max rel", scalar(sweep_shape_section.get("odd_symmetry_max_relative_moment_sum"))),
         ("Sweep factor scale", scalar(sweep_shape_section.get("factor_curvature_scale"))),
         ("Input deck", scalar(deck_section.get("file"))),
@@ -643,7 +836,7 @@ def print_report(report: dict) -> None:
     print("Issue counts:", issue_counts)
     print()
 
-    for key in ["result_data_csv", "result_summary_json", "endpoint_sweep_shape", "abaqus_mesh_manifest_json", "input_deck", "solver_logs"]:
+    for key in ["result_data_csv", "result_summary_json", "endpoint_sweep_shape", "endpoint_sweep_children", "abaqus_mesh_manifest_json", "input_deck", "solver_logs"]:
         section = report.get(key, {})
         print("[{0}]".format(key))
         for item_key, value in section.items():

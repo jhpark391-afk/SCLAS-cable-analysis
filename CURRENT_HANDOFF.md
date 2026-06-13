@@ -798,6 +798,32 @@ C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\py
 
 Both commands passed.
 
+Additional diagnostics hardening:
+
+- `code/sclas_offline_diagnostics.py` now deep-validates endpoint sweep child
+  jobs from the parent `child_jobs[*].path` records.
+- For each child it checks:
+  `result_summary.json`, `odb_extraction_summary.json`, `result_data.csv`,
+  last-row numeric agreement with the parent aggregation, solver completion,
+  solver failure flags, and blocking log keyword hits.
+- Parent endpoint diagnostics now report `endpoint_sweep_children` with
+  `all_children_deep_validated`, per-child CSV/ODB/log status, total blocking
+  hits, and total notable warning hits.
+- The real Lab sweep
+  `jobs\SCLAS_jobs\curve_v0_sweep_20260614_040136` was rechecked with the new
+  parent diagnostics:
+
+```text
+endpoint_sweep_children.all_children_deep_validated=true
+endpoint_sweep_children.blocking_log_hits=0
+endpoint_sweep_children.notable_log_hits=2137
+diagnostic_summary.issue_counts={'error': 0, 'warning': 0, 'info': 0}
+```
+
+- The notable hits are completed-solver warnings/notes from child logs, not
+  blocking errors. The next modelling task should reduce these warnings, but
+  they do not invalidate the current Curve V0 endpoint baseline.
+
 ## Important Files
 
 ```text
