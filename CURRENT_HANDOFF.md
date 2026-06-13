@@ -561,6 +561,17 @@ Latest Lab-PC follow-up:
   the two-frame smoke output below the minimum two rows.
 - The extractor now only removes a duplicate first row when concatenating a new
   step to a previous step. Rows within a single step are preserved.
+- After pulling that fix, default fast `-SmallSmoke` created
+  `small_smoke_20260614_024704` with `multistep_smoke=False`. Abaqus/Standard
+  completed, ODB extraction succeeded, and diagnostics reported no issues:
+  `history_rows_available=2`, `field_rows_available=2`, `rows_written=2`,
+  `source=SCLAS_ABAQUS_ODB_EXTRACTOR`, `completed=True`, `failed=False`.
+- Treat this as the current stable Lab-PC backend smoke baseline. The
+  end-to-end bridge is confirmed for a fast two-row ODB extraction:
+  `input_data.json -> Abaqus .inp/.odb -> result_data.csv/result_summary.json`.
+- Do not spend more interactive Lab-PC time trying to force more rows with
+  small smoke. Multi-point curves should be designed as a separate backend
+  task, likely with a lower-cost load path or different step/output strategy.
 
 ## Important Files
 
