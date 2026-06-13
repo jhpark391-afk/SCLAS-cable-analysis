@@ -362,6 +362,13 @@ Optional knobs:
 -SmallAxialDivisions 4 -SmallCoreCircumferentialDivisions 8 -SmallArmourCircumferentialDivisions 4 -SmallEffectiveLengthMm 50
 ```
 
+The first `-SmallSmoke` attempt failed before mesh generation because
+PowerShell rewrote `input_data.json` with a UTF-8 BOM, which Abaqus 2019's
+Python 2.7 `json.load` reported as `ValueError: No JSON object could be
+decoded`. The helper now writes the reduced JSON as UTF-8 without BOM, and
+`code/abaqus_runner.py` defensively strips UTF-8 BOM / decodes UTF-16 input
+payloads before `json.loads`.
+
 ## Important Files
 
 ```text

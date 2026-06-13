@@ -32,8 +32,15 @@ def timestamp_seconds():
 
 
 def load_payload(path):
-    with open(path_text(path), "r") as f:
-        return json.load(f)
+    with open(path_text(path), "rb") as f:
+        raw = f.read()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        text = raw.decode("utf-16")
+    else:
+        text = raw.decode("utf-8")
+    return json.loads(text)
 
 
 def write_json(path, data):

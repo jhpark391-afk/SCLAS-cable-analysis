@@ -152,9 +152,9 @@ function New-SmallSmokeJob {
     Set-JsonObjectProperty $metadata "job_id" $smallName
     Set-JsonObjectProperty $metadata "lab_smoke_source_job" (Split-Path -Leaf $SourceJobDir)
 
-    $payload |
-        ConvertTo-Json -Depth 100 |
-        Set-Content $inputPath -Encoding UTF8
+    $jsonText = $payload | ConvertTo-Json -Depth 100
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($inputPath, $jsonText + [Environment]::NewLine, $utf8NoBom)
 
     Write-Host "Created reduced smoke job: $smallDir"
     Write-Host "  axial_divisions=$AxialDivisions, core_circ=$CoreCircumferentialDivisions, armour_circ=$ArmourCircumferentialDivisions, effective_length_mm=$EffectiveLengthMm"
