@@ -602,6 +602,34 @@ Next implementation target:
 - Keep Abaqus solver increment control automatic unless a later diagnostic
   proves a specific increment setting is needed.
 
+Implemented next:
+
+- `run_lab_abaqus_smoke.ps1` now has `-CurveV0`.
+- `-CurveV0` creates a reduced `curve_v0_YYYYMMDD_HHMMSS` job, sets
+  `analysis_conditions.abaqus_curve_v0=true`, and keeps default
+  `-SmallSmoke` as the fast two-row bridge check.
+- The first curve-v0 path uses `-CurveV0CurvatureScale 0.25` by default:
+  `+0.25*kmax -> 0 -> -0.25*kmax -> 0`.
+- `code/abaqus_runner.py` reads
+  `analysis_conditions.abaqus_curve_v0_path_factors` so later curve-v0 load
+  paths can be changed from the helper without editing the runner.
+
+Next Lab-PC curve-v0 command:
+
+```powershell
+cd $env:USERPROFILE\Documents\SCLAS-cable-analysis
+git pull
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e" -CurveV0
+```
+
+Expected:
+
+- It may run longer than `-SmallSmoke`.
+- If it completes, check `rows_written`, `steps`, and
+  `abaqus_result_quality.curve_class`.
+- If it is too slow, stop it and lower the first attempt with
+  `-CurveV0CurvatureScale 0.1`.
+
 ## Important Files
 
 ```text

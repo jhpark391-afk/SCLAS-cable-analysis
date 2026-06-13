@@ -8,7 +8,9 @@ param(
     [int]$SmallArmourCircumferentialDivisions = 4,
     [double]$SmallEffectiveLengthMm = 50.0,
     [int]$SmallAbaqusOutputIntervals = 4,
-    [switch]$MultiStepSmoke
+    [switch]$MultiStepSmoke,
+    [switch]$CurveV0,
+    [double]$CurveV0CurvatureScale = 0.25
 )
 
 $ErrorActionPreference = "Stop"
@@ -117,14 +119,17 @@ function New-SmallSmokeJob {
         [Parameter(Mandatory=$true)][int]$ArmourCircumferentialDivisions,
         [Parameter(Mandatory=$true)][double]$EffectiveLengthMm,
         [Parameter(Mandatory=$true)][int]$AbaqusOutputIntervals,
-        [Parameter(Mandatory=$true)][bool]$UseMultiStepSmoke
+        [Parameter(Mandatory=$true)][bool]$UseMultiStepSmoke,
+        [Parameter(Mandatory=$true)][bool]$UseCurveV0,
+        [Parameter(Mandatory=$true)][double]$CurveV0CurvatureScale
     )
 
     $jobsRoot = Join-Path $ProjectRoot "jobs\SCLAS_jobs"
     if (-not (Test-Path $jobsRoot)) {
         New-Item -ItemType Directory -Path $jobsRoot -Force | Out-Null
     }
-    $smallName = "small_smoke_" + (Get-Date -Format "yyyyMMdd_HHmmss")
+    $jobPrefix = if ($UseCurveV0) { "curve_v0_" } else { "small_smoke_" }
+    $smallName = $jobPrefix + (Get-Date -Format "yyyyMMdd_HHmmss")
     $smallDir = Join-Path $jobsRoot $smallName
     New-Item -ItemType Directory -Path $smallDir -Force | Out-Null
 
@@ -151,19 +156,31 @@ function New-SmallSmokeJob {
     Set-JsonObjectProperty $mesh "lab_smoke_reduced_mesh" $true
     Set-JsonObjectProperty $analysis "effective_length_mm" ([double]$EffectiveLengthMm)
     Set-JsonObjectProperty $analysis "abaqus_output_intervals" ([int]$AbaqusOutputIntervals)
-    Set-JsonObjectProperty $analysis "abaqus_multistep_smoke" ([bool]$UseMultiStepSmoke)
+    Set-JsonObjectProperty $analysis "abaqus_multistep_smoke" ([bool]($UseMultiStepSmoke -or $UseCurveV0))
+    Set-JsonObjectProperty $analysis "abaqus_curve_v0" ([bool]$UseCurveV0)
+    Set-JsonObjectProperty $analysis "abaqus_curve_v0_curvature_scale" ([double]$CurveV0CurvatureScale)
+    if ($UseCurveV0) {
+        $curvePath = @(
+            [double]$CurveV0CurvatureScale,
+            0.0,
+            (-1.0 * [double]$CurveV0CurvatureScale),
+            0.0
+        )
+        Set-JsonObjectProperty $analysis "abaqus_curve_v0_path_factors" $curvePath
+    }
     if ($analysis.PSObject.Properties["solver_steps"]) {
         $analysis.solver_steps = 25
     }
     Set-JsonObjectProperty $metadata "job_id" $smallName
     Set-JsonObjectProperty $metadata "lab_smoke_source_job" (Split-Path -Leaf $SourceJobDir)
+    Set-JsonObjectProperty $metadata "analysis_mode" $(if ($UseCurveV0) { "curve_v0" } else { "small_smoke" })
 
     $jsonText = $payload | ConvertTo-Json -Depth 100
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($inputPath, $jsonText + [Environment]::NewLine, $utf8NoBom)
 
     Write-Host "Created reduced smoke job: $smallDir"
-    Write-Host "  axial_divisions=$AxialDivisions, core_circ=$CoreCircumferentialDivisions, armour_circ=$ArmourCircumferentialDivisions, effective_length_mm=$EffectiveLengthMm, abaqus_output_intervals=$AbaqusOutputIntervals, multistep_smoke=$UseMultiStepSmoke"
+    Write-Host "  axial_divisions=$AxialDivisions, core_circ=$CoreCircumferentialDivisions, armour_circ=$ArmourCircumferentialDivisions, effective_length_mm=$EffectiveLengthMm, abaqus_output_intervals=$AbaqusOutputIntervals, multistep_smoke=$($UseMultiStepSmoke -or $UseCurveV0), curve_v0=$UseCurveV0, curve_scale=$CurveV0CurvatureScale"
     return $smallDir
 }
 
@@ -172,10 +189,10 @@ if (-not $JobDir) {
     $JobDir = Find-LatestJobDir $ProjectRoot
 }
 $SourceJobDir = (Resolve-Path $JobDir).Path
-if ($SmallSmoke -and $SkipGeneration) {
-    throw "-SmallSmoke cannot be combined with -SkipGeneration because the reduced job has no generated .inp yet."
+if (($SmallSmoke -or $CurveV0) -and $SkipGeneration) {
+    throw "-SmallSmoke/-CurveV0 cannot be combined with -SkipGeneration because the reduced job has no generated .inp yet."
 }
-if ($SmallSmoke) {
+if ($SmallSmoke -or $CurveV0) {
     $JobDir = New-SmallSmokeJob `
         -ProjectRoot $ProjectRoot `
         -SourceJobDir $SourceJobDir `
@@ -184,7 +201,9 @@ if ($SmallSmoke) {
         -ArmourCircumferentialDivisions $SmallArmourCircumferentialDivisions `
         -EffectiveLengthMm $SmallEffectiveLengthMm `
         -AbaqusOutputIntervals $SmallAbaqusOutputIntervals `
-        -UseMultiStepSmoke ([bool]$MultiStepSmoke)
+        -UseMultiStepSmoke ([bool]$MultiStepSmoke) `
+        -UseCurveV0 ([bool]$CurveV0) `
+        -CurveV0CurvatureScale $CurveV0CurvatureScale
 } else {
     $JobDir = $SourceJobDir
 }
@@ -203,11 +222,11 @@ if (-not (Test-Path (Join-Path $JobDir "input_data.json"))) {
 
 Write-Section "SCLAS Lab Abaqus Smoke"
 Write-Host "Project: $ProjectRoot"
-if ($SmallSmoke) {
+if ($SmallSmoke -or $CurveV0) {
     Write-Host "Source:  $SourceJobDir"
 }
 Write-Host "Job:     $JobDir"
-Write-Host "Mode:    $(if ($SmallSmoke -and $GenerateOnly) { 'small smoke generate only' } elseif ($SmallSmoke) { 'small smoke generate + solver' } elseif ($GenerateOnly) { 'generate only' } elseif ($SkipGeneration) { 'solver only' } else { 'generate + solver' })"
+Write-Host "Mode:    $(if ($CurveV0 -and $GenerateOnly) { 'curve v0 generate only' } elseif ($CurveV0) { 'curve v0 generate + solver' } elseif ($SmallSmoke -and $GenerateOnly) { 'small smoke generate only' } elseif ($SmallSmoke) { 'small smoke generate + solver' } elseif ($GenerateOnly) { 'generate only' } elseif ($SkipGeneration) { 'solver only' } else { 'generate + solver' })"
 
 Copy-Item $RunnerSource $RunnerDest -Force
 Write-Host "Copied latest code\abaqus_runner.py into the job folder."

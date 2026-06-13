@@ -883,7 +883,23 @@ def build_abaqus_mesh_model(payload, job_dir):
             output_intervals = 2
         if output_intervals > 100:
             output_intervals = 100
-        multistep_smoke = bool(analysis.get("abaqus_multistep_smoke", False))
+        curve_v0_mode = bool(analysis.get("abaqus_curve_v0", False))
+        multistep_smoke = bool(analysis.get("abaqus_multistep_smoke", False)) or curve_v0_mode
+        default_path = [1.0, 0.0, -1.0, 0.0]
+        if curve_v0_mode:
+            scale = float(analysis.get("abaqus_curve_v0_curvature_scale", 0.25))
+            default_path = [scale, 0.0, -scale, 0.0]
+        raw_path = analysis.get("abaqus_curve_v0_path_factors", default_path)
+        if not isinstance(raw_path, list):
+            raw_path = default_path
+        load_path_factors = []
+        for factor in raw_path[:20]:
+            try:
+                load_path_factors.append(float(factor))
+            except Exception:
+                pass
+        if len(load_path_factors) < 2:
+            load_path_factors = default_path
         record = {
             "status": "not_created",
             "step": "SCLAS_CyclicBendingStep",
@@ -900,6 +916,8 @@ def build_abaqus_mesh_model(payload, job_dir):
             "output_intervals": output_intervals,
             "solver_increment_control": "abaqus_default",
             "multistep_smoke": multistep_smoke,
+            "curve_v0_mode": curve_v0_mode,
+            "load_path_factors": load_path_factors,
             "created_regions": [],
             "optional_created_regions": [],
             "warnings": [],
@@ -914,10 +932,9 @@ def build_abaqus_mesh_model(payload, job_dir):
         optional_created = 0
         try:
             if multistep_smoke:
-                smoke_amplitudes = [1.0, 0.0, -1.0, 0.0]
                 step_sequence = []
                 previous_step = "Initial"
-                for index, amplitude_value in enumerate(smoke_amplitudes):
+                for index, amplitude_value in enumerate(load_path_factors):
                     if index == 0:
                         step_name = record["step"]
                     else:
@@ -932,7 +949,10 @@ def build_abaqus_mesh_model(payload, job_dir):
                     )
                     previous_step = step_name
                 record["step_sequence"] = step_sequence
-                record["created_regions"].append("cyclic_bending_multistep_smoke")
+                if curve_v0_mode:
+                    record["created_regions"].append("curve_v0_multistep_path")
+                else:
+                    record["created_regions"].append("cyclic_bending_multistep_smoke")
             else:
                 model.StaticStep(name=record["step"], previous="Initial", nlgeom=ON)
                 record["created_regions"].append("cyclic_bending_step")

@@ -78,6 +78,25 @@ Recommended v0 approach:
 7. After curve-v0 works, add contact pressure/slip summaries to JSON rather
    than widening `result_data.csv`.
 
+Current command shape:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 `
+  -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e" `
+  -CurveV0
+```
+
+The first curve-v0 attempt intentionally uses a small curvature scale
+(`-CurveV0CurvatureScale 0.25` by default) and the path:
+
+```text
++0.25*kmax -> 0 -> -0.25*kmax -> 0
+```
+
+This mode may take longer than the default two-row smoke. Stop the run if it
+stays at the first increment for too long, and keep the default `-SmallSmoke`
+as the fast bridge health check.
+
 ## Phase 1: Mesh scaffold verification
 
 1. Run a GUI-exported job in Abaqus:
