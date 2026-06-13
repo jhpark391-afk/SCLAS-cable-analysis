@@ -1266,6 +1266,74 @@ def build_abaqus_mesh_model(payload, job_dir):
             fallback["warnings"].append("keyword injection failed: {0}".format(exc))
         return fallback
 
+    def inject_odb_output_keyword_fallback(inp_path, boundary_record):
+        output_intervals = int(boundary_record.get("output_intervals", 4))
+        if output_intervals < 2:
+            output_intervals = 2
+        if output_intervals > 100:
+            output_intervals = 100
+        right_set = boundary_record.get("right_reference_point_set", "SCLAS_RP_RightEnd")
+        fallback = {
+            "status": "not_attempted",
+            "inp_file": os.path.basename(inp_path),
+            "right_reference_point_set": right_set,
+            "output_intervals": output_intervals,
+            "warnings": [],
+            "notes": [
+                "Keyword fallback requests right-reference-point field/history output for ODB moment-curvature extraction without forcing solver increments."
+            ],
+        }
+        if not os.path.exists(inp_path):
+            fallback["status"] = "failed"
+            fallback["warnings"].append("input file not found")
+            return fallback
+
+        output_lines = [
+            "**",
+            "** SCLAS ODB output keyword fallback",
+            "** Request RP output frames without changing Abaqus solver increment controls.",
+            "*Output, field, number interval={0}, time marks=NO".format(output_intervals),
+            "*Node Output, nset={0}".format(right_set),
+            "U, UR, RF, RM",
+            "*Output, history, frequency=1",
+            "*Node Output, nset={0}".format(right_set),
+            "UR2, RM2",
+            "** End SCLAS ODB output keyword fallback",
+            "**",
+        ]
+        try:
+            with open(inp_path, "r") as f:
+                lines = f.read().splitlines()
+            step_index = None
+            end_step_index = None
+            step_name = str(boundary_record.get("step", "SCLAS_CyclicBendingStep")).lower()
+            for i, line in enumerate(lines):
+                lowered = line.strip().lower()
+                if lowered.startswith("*step") and step_name in lowered:
+                    step_index = i
+                    continue
+                if step_index is not None and lowered == "*end step":
+                    end_step_index = i
+                    break
+            if end_step_index is None:
+                for i, line in enumerate(lines):
+                    if line.strip().lower() == "*end step":
+                        end_step_index = i
+                        break
+            if end_step_index is None:
+                fallback["status"] = "failed"
+                fallback["warnings"].append("*End Step marker not found")
+                return fallback
+            new_lines = lines[:end_step_index] + output_lines + lines[end_step_index:]
+            with open(inp_path, "w") as f:
+                f.write("\n".join(new_lines) + "\n")
+            fallback["status"] = "injected"
+            fallback["line_count"] = len(output_lines)
+        except Exception as exc:
+            fallback["status"] = "failed"
+            fallback["warnings"].append("keyword injection failed: {0}".format(exc))
+        return fallback
+
     def elem_code_for_solid():
         import abaqusConstants as ac
 
@@ -1479,6 +1547,15 @@ def build_abaqus_mesh_model(payload, job_dir):
         else:
             boundary_conditions.setdefault("optional_warnings", []).append(
                 "inp keyword coupling fallback {0}".format(keyword_fallback.get("status", "unknown"))
+            )
+        output_keyword_fallback = inject_odb_output_keyword_fallback(inp_path, boundary_conditions)
+        boundary_conditions["keyword_output_fallback"] = output_keyword_fallback
+        if output_keyword_fallback.get("status") == "injected":
+            if "inp_keyword_output_fallback" not in boundary_conditions.get("optional_created_regions", []):
+                boundary_conditions.setdefault("optional_created_regions", []).append("inp_keyword_output_fallback")
+        else:
+            boundary_conditions.setdefault("optional_warnings", []).append(
+                "inp keyword output fallback {0}".format(output_keyword_fallback.get("status", "unknown"))
             )
         cae_path = os.path.join(path_text(job_dir), "sclas_mesh_model.cae")
         mdb.saveAs(pathName=str(cae_path))

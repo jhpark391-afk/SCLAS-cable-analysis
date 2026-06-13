@@ -476,8 +476,8 @@ Important limitation:
 
 - `rows_written` is only 2, so this is still a connection/extraction smoke
   test, not a useful moment-curvature loop.
-- The next backend task is to force more Abaqus increments/output frames so the
-  extractor produces a multi-point curve.
+- The next backend task is to request more ODB output frames without forcing
+  smaller Abaqus solver increments.
 
 This handoff update also adds a small runner/helper change for the next Lab-PC
 test:
@@ -511,6 +511,14 @@ Follow-up from Lab PC:
 - The next commit removes the forced `initialInc` / `maxInc` controls and keeps
   only output-request interval hints, so the Lab PC should regain the earlier
   fast solve behavior while still attempting more ODB output rows.
+- After that fix, `small_smoke_20260614_021258` completed quickly again and
+  ODB extraction succeeded, but `rows_written` remained 2. This shows the CAE
+  output-request API hints did not increase ODB frame count on Abaqus 2019.
+- The next commit injects an input-deck output keyword fallback before
+  `*End Step`:
+  `*Output, field, number interval=4, time marks=NO` plus right-reference-point
+  `*Node Output`. The ODB extractor now compares history and field extraction
+  counts and chooses the method with more rows.
 
 Next Lab-PC command after pulling the next commit:
 
@@ -526,6 +534,8 @@ Expected next check:
 - `result_summary.json` source remains `SCLAS_ABAQUS_ODB_EXTRACTOR`
 - `odb_rows_written` should be greater than 2, ideally about 4-5 rows for the
   default 4 intervals.
+- `odb_extraction_summary.json` should include `history_rows_available` and
+  `field_rows_available`.
 
 ## Important Files
 

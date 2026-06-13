@@ -226,12 +226,18 @@ def extract_odb(odb_path, job_dir, input_data_path):
                 "odb_file": os.path.basename(odb_path),
             }, []
 
-        rows, method_info = extract_from_history(step, effective_length_m)
+        history_rows, history_info = extract_from_history(step, effective_length_m)
+        rows = history_rows
+        method_info = history_info
         node_set_name = None
-        if not rows:
-            node_set_name, node_set = find_node_set(odb.rootAssembly, RIGHT_RP_TOKENS)
-            if node_set is not None:
-                rows, method_info = extract_from_fields(step, node_set, effective_length_m)
+        field_rows = []
+        field_info = None
+        node_set_name, node_set = find_node_set(odb.rootAssembly, RIGHT_RP_TOKENS)
+        if node_set is not None:
+            field_rows, field_info = extract_from_fields(step, node_set, effective_length_m)
+        if field_rows and len(field_rows) > len(rows):
+            rows = field_rows
+            method_info = field_info
 
         if len(rows) < 2:
             available_field_outputs = []
@@ -254,6 +260,8 @@ def extract_odb(odb_path, job_dir, input_data_path):
             "step": step_name,
             "effective_length_mm": effective_length_mm,
             "rows_written": len(rows),
+            "history_rows_available": len(history_rows),
+            "field_rows_available": len(field_rows),
             "moment_units_assumed": "N-mm converted to kN-m",
             "curvature_definition": "UR2 / effective_length_m",
         }
