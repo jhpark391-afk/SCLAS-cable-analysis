@@ -236,6 +236,7 @@ def write_mesh_manifest(
     contact_regions=None,
     contact_interactions=None,
     contact_pairs=None,
+    contact_pair_keyword_adjustment=None,
     boundary_conditions=None,
 ):
     geometry = payload.get("derived_geometry_mm", {})
@@ -298,6 +299,10 @@ def write_mesh_manifest(
         "contact_interaction_scaffold": contact_interactions,
         "contact_pair_scaffold_status": contact_pair_status,
         "contact_pair_scaffold": contact_pairs,
+        "contact_pair_keyword_adjustment": contact_pair_keyword_adjustment or {
+            "status": "not_attempted",
+            "reason": "Abaqus input deck was not generated or no contact pair keyword adjustment was requested.",
+        },
         "boundary_condition_scaffold_status": boundary_condition_status,
         "boundary_condition_scaffold": boundary_conditions,
         "components": [
@@ -1410,6 +1415,86 @@ def build_abaqus_mesh_model(payload, job_dir):
             fallback["warnings"].append("keyword injection failed: {0}".format(exc))
         return fallback
 
+    def adjust_beam_contact_pair_keywords(inp_path, contact_pair_records):
+        adjustment = {
+            "status": "not_attempted",
+            "inp_file": os.path.basename(inp_path),
+            "target_type": "NODE TO SURFACE",
+            "adjusted_count": 0,
+            "beam_surfaces": [],
+            "warnings": [],
+            "notes": [
+                "Abaqus/Standard automatically falls back to node-to-surface for 3D beam/truss slave surfaces; this records that choice explicitly in the generated input deck."
+            ],
+        }
+        if not os.path.exists(inp_path):
+            adjustment["status"] = "failed"
+            adjustment["warnings"].append("input file not found")
+            return adjustment
+
+        beam_surfaces = []
+        for record in contact_pair_records or []:
+            if record.get("status") != "created":
+                continue
+            for role in ["master", "slave"]:
+                surface_name = record.get(role + "_surface")
+                surface_kind = record.get(role + "_surface_kind")
+                if surface_name and surface_kind == "beam_line":
+                    beam_surfaces.append(str(surface_name))
+        beam_surfaces = sorted(set(beam_surfaces))
+        adjustment["beam_surfaces"] = beam_surfaces
+        if not beam_surfaces:
+            adjustment["status"] = "skipped"
+            adjustment["warnings"].append("no created contact pairs reference beam-line surfaces")
+            return adjustment
+
+        try:
+            with open(inp_path, "r") as f:
+                lines = f.read().splitlines()
+            new_lines = list(lines)
+            adjusted_pairs = []
+            lower_beam_surfaces = [item.lower() for item in beam_surfaces]
+            for index, line in enumerate(lines):
+                stripped = line.strip()
+                if not stripped.lower().startswith("*contact pair"):
+                    continue
+                data_index = None
+                for candidate in range(index + 1, min(index + 6, len(lines))):
+                    candidate_text = lines[candidate].strip()
+                    if not candidate_text or candidate_text.startswith("**"):
+                        continue
+                    if candidate_text.startswith("*"):
+                        break
+                    data_index = candidate
+                    break
+                if data_index is None:
+                    continue
+                data_lower = lines[data_index].lower()
+                if not any(surface in data_lower for surface in lower_beam_surfaces):
+                    continue
+                if "surface to surface" in line.lower():
+                    new_line = re.sub("type\\s*=\\s*SURFACE\\s+TO\\s+SURFACE", "type=NODE TO SURFACE", line, flags=re.IGNORECASE)
+                elif "node to surface" in line.lower():
+                    new_line = line
+                else:
+                    new_line = line.rstrip() + ", type=NODE TO SURFACE"
+                if new_line != new_lines[index]:
+                    new_lines[index] = new_line
+                    adjusted_pairs.append(lines[data_index].strip())
+            if adjusted_pairs:
+                with open(inp_path, "w") as f:
+                    f.write("\n".join(new_lines) + "\n")
+                adjustment["status"] = "adjusted"
+                adjustment["adjusted_count"] = len(adjusted_pairs)
+                adjustment["adjusted_pairs"] = adjusted_pairs
+            else:
+                adjustment["status"] = "skipped"
+                adjustment["warnings"].append("no matching surface-to-surface contact-pair keywords were found")
+        except Exception as exc:
+            adjustment["status"] = "failed"
+            adjustment["warnings"].append("contact pair keyword adjustment failed: {0}".format(exc))
+        return adjustment
+
     def elem_code_for_solid():
         import abaqusConstants as ac
 
@@ -1614,6 +1699,10 @@ def build_abaqus_mesh_model(payload, job_dir):
     try:
         mdb.Job(name=job_name, model=model_name, type=ANALYSIS, description="SCLAS GUI generated mesh scaffold")
         mdb.jobs[job_name].writeInput(consistencyChecking=OFF)
+        contact_keyword_adjustment = adjust_beam_contact_pair_keywords(inp_path, contact_pairs)
+        for contact_pair in contact_pairs:
+            if contact_keyword_adjustment.get("status") == "adjusted" and contact_pair.get("status") == "created":
+                contact_pair["input_deck_contact_pair_type"] = contact_keyword_adjustment.get("target_type")
         keyword_fallback = inject_end_coupling_keyword_fallback(inp_path, boundary_conditions)
         boundary_conditions["keyword_coupling_fallback"] = keyword_fallback
         if keyword_fallback.get("status") == "injected":
@@ -1647,6 +1736,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         "contact_region_scaffold": contact_regions,
         "contact_interaction_scaffold": contact_interactions,
         "contact_pair_scaffold": contact_pairs,
+        "contact_pair_keyword_adjustment": contact_keyword_adjustment,
         "boundary_condition_scaffold": boundary_conditions,
         "node_element_note": "See generated .inp/.cae for Abaqus node and element counts.",
     }
@@ -1793,6 +1883,7 @@ def main(argv):
                 contact_regions=mesh_status.get("contact_region_scaffold"),
                 contact_interactions=mesh_status.get("contact_interaction_scaffold"),
                 contact_pairs=mesh_status.get("contact_pair_scaffold"),
+                contact_pair_keyword_adjustment=mesh_status.get("contact_pair_keyword_adjustment"),
                 boundary_conditions=mesh_status.get("boundary_condition_scaffold"),
             )
             print("Wrote Abaqus mesh scaffold: {0}".format(", ".join(mesh_status.get("files", []))))

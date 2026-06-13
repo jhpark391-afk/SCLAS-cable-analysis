@@ -846,6 +846,72 @@ unconnected_regions=5
   volume. Do not treat these as blocking for the current endpoint baseline
   because all five child solvers completed and ODB extraction was validated.
 
+## Lab Contact Keyword Adjustment - 2026-06-14 KST
+
+The runner now post-processes generated Abaqus input decks so contact pairs
+that include armour B31 beam-line contact surfaces are written explicitly as:
+
+```text
+*Contact Pair, interaction=SCLAS_RegularizedContact, type=NODE TO SURFACE
+```
+
+This matches the fallback Abaqus/Standard was already applying implicitly for
+3D beam/truss slave surfaces, but removes the repeated warning:
+
+```text
+SURFACE TO SURFACE CONTACT APPROACH ... IS NOT YET AVAILABLE FOR 3D BEAM OR
+TRUSS SLAVE SURFACE. NODE TO SURFACE APPROACH WILL BE USED INSTEAD.
+```
+
+Implementation details:
+
+- `code/abaqus_runner.py` adds `adjust_beam_contact_pair_keywords()` after
+  `writeInput()`.
+- The function only changes generated `*Contact Pair` keyword lines whose data
+  line contains a created beam-line contact surface.
+- `abaqus_mesh_manifest.json.contact_pair_keyword_adjustment` records status,
+  target type, adjusted count, beam surfaces, and adjusted pair data lines.
+- `code/SCLAS_test/abaqus_runner.py` was synchronized.
+
+Verification:
+
+```powershell
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m py_compile code\abaqus_runner.py code\SCLAS_test\abaqus_runner.py code\sclas_odb_extractor.py code\sclas_offline_diagnostics.py
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe code\sclas_self_check.py
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -SmallSmoke
+```
+
+The final Lab-PC SmallSmoke created:
+
+```text
+jobs\SCLAS_jobs\small_smoke_20260614_045330
+```
+
+Result:
+
+- Abaqus job completed.
+- ODB extraction status was `extracted`.
+- `result_summary.json.source` was `SCLAS_ABAQUS_ODB_EXTRACTOR`.
+- `odb_extraction.rows_written` was `2`.
+- `contact_pair_keyword_adjustment.status` was `adjusted`.
+- `contact_pair_keyword_adjustment.adjusted_count` was `4`.
+- The generated `.inp` contains four
+  `*Contact Pair ... type=NODE TO SURFACE` records.
+- Searching the final `.dat` for
+  `SURFACE TO SURFACE CONTACT APPROACH|NODE TO SURFACE APPROACH` returned
+  zero hits.
+- The completed solver warning count dropped to:
+
+```text
+WITH      5 WARNING MESSAGES ON THE DAT FILE
+AND     689 WARNING MESSAGES ON THE MSG FILE
+129 WARNINGS ARE FOR NUMERICAL PROBLEMS
+```
+
+Remaining non-blocking warning classes are still dominated by armour beam
+constraint/contact quality: numerical singularity, overconstraint checks,
+unconnected regions, beam curvature, and general-contact/contact-pair overlap.
+
 ## Important Files
 
 ```text
