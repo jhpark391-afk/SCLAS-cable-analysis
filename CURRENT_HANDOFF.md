@@ -768,6 +768,36 @@ Recommended next backend work:
    reduced continuous bending path that does not exceed the 20-minute
    interactive limit.
 
+Follow-up diagnostics hardening in the next commit:
+
+- `code/sclas_offline_diagnostics.py` now adds
+  `endpoint_sweep_shape` for parent sweep folders.
+- The shape check verifies numeric CSV rows, monotonic curvature, monotonic
+  moment, a near-zero endpoint, basic odd symmetry between +/- endpoints, child
+  endpoint numeric values, and factor-to-curvature scale consistency.
+- Endpoint sweep parent folders now skip manifest/input-deck/solver-log checks
+  because those Abaqus artifacts live in the child job folders.
+- The latest parent sweep
+  `jobs\SCLAS_jobs\curve_v0_sweep_20260614_040136` passed the new checks with:
+
+```text
+shape_checks_passed=true
+odd_symmetry_max_relative_moment_sum=3.184086085824686e-06
+factor_curvature_scale=0.079999997979
+factor_curvature_scale_max_relative_deviation=0.0
+issue_counts={'error': 0, 'warning': 0, 'info': 0}
+```
+
+- `code\sclas_self_check.py` now includes this endpoint-shape diagnostics path.
+- Verification was rerun with the Codex bundled Python:
+
+```powershell
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m py_compile code\abaqus_runner.py code\SCLAS_test\abaqus_runner.py code\sclas_odb_extractor.py code\sclas_offline_diagnostics.py
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe code\sclas_self_check.py
+```
+
+Both commands passed.
+
 ## Important Files
 
 ```text

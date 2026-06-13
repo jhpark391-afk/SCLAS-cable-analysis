@@ -65,6 +65,135 @@ def find_first(job_dir: Path, patterns) -> Path:
     return None
 
 
+def parse_float(value):
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def nondecreasing(values, tolerance=1e-12):
+    return all(values[idx] <= values[idx + 1] + tolerance for idx in range(len(values) - 1))
+
+
+def inspect_endpoint_sweep_shape(job_dir: Path, report: dict, summary_data: dict) -> None:
+    if summary_data.get("source") != "SCLAS_CURVE_V0_ENDPOINT_SWEEP":
+        return
+
+    path = job_dir / "result_data.csv"
+    section = {
+        "checked": path.exists(),
+    }
+    report["endpoint_sweep_shape"] = section
+    if not path.exists():
+        return
+
+    numeric_rows = []
+    invalid_rows = []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for idx, row in enumerate(reader, start=2):
+            curvature = parse_float(row.get("curvature_1_per_m"))
+            moment = parse_float(row.get("moment_kn_m"))
+            if curvature is None or moment is None:
+                invalid_rows.append(idx)
+            else:
+                numeric_rows.append((curvature, moment))
+
+    section["numeric_rows"] = len(numeric_rows)
+    section["invalid_numeric_rows"] = invalid_rows
+    section["numeric_format_valid"] = not invalid_rows
+    if invalid_rows:
+        add_issue(report, "error", "Endpoint sweep result_data.csv contains non-numeric rows", invalid_rows)
+        return
+    if not numeric_rows:
+        return
+
+    curvatures = [row[0] for row in numeric_rows]
+    moments = [row[1] for row in numeric_rows]
+    max_abs_moment = max([abs(value) for value in moments] + [1.0])
+
+    section["curvature_monotonic_non_decreasing"] = nondecreasing(curvatures)
+    section["moment_monotonic_non_decreasing"] = nondecreasing(moments, max_abs_moment * 1e-9)
+    section["zero_endpoint_present"] = any(abs(c) <= 1e-12 and abs(m) <= max_abs_moment * 1e-9 for c, m in numeric_rows)
+
+    positive = [(c, m) for c, m in numeric_rows if c > 1e-12]
+    negative = [(c, m) for c, m in numeric_rows if c < -1e-12]
+    symmetry_errors = []
+    for pos_c, pos_m in positive:
+        candidates = [
+            (neg_c, neg_m)
+            for neg_c, neg_m in negative
+            if abs(abs(neg_c) - pos_c) <= max(abs(pos_c) * 1e-6, 1e-12)
+        ]
+        if not candidates:
+            continue
+        neg_c, neg_m = min(candidates, key=lambda item: abs(abs(item[0]) - pos_c))
+        abs_error = abs(pos_m + neg_m)
+        rel_error = abs_error / max(abs(pos_m), abs(neg_m), 1e-12)
+        symmetry_errors.append({
+            "positive_curvature": pos_c,
+            "negative_curvature": neg_c,
+            "moment_sum_abs": abs_error,
+            "moment_sum_relative": rel_error,
+        })
+    max_symmetry_rel = max([item["moment_sum_relative"] for item in symmetry_errors] + [0.0])
+    section["odd_symmetry_pairs"] = len(symmetry_errors)
+    section["odd_symmetry_max_relative_moment_sum"] = max_symmetry_rel
+    section["odd_symmetry_pass"] = bool(symmetry_errors) and max_symmetry_rel <= 0.05
+
+    child_jobs = summary_data.get("child_jobs", [])
+    factor_scales = []
+    child_numeric_invalid = []
+    if isinstance(child_jobs, list):
+        for idx, child in enumerate(child_jobs):
+            if not isinstance(child, dict):
+                continue
+            factor = parse_float(child.get("factor"))
+            curvature = parse_float(child.get("curvature_1_per_m"))
+            moment = parse_float(child.get("moment_kn_m"))
+            if curvature is None or moment is None:
+                child_numeric_invalid.append(child.get("job", "child_{0}".format(idx)))
+            if factor is not None and curvature is not None and abs(factor) > 1e-12:
+                factor_scales.append(curvature / factor)
+
+    section["child_endpoint_numeric_format_valid"] = not child_numeric_invalid
+    section["child_endpoint_numeric_invalid"] = child_numeric_invalid
+    if child_numeric_invalid:
+        add_issue(report, "error", "Endpoint sweep child summary has non-numeric endpoint rows", child_numeric_invalid)
+
+    if factor_scales:
+        mean_scale = sum(factor_scales) / float(len(factor_scales))
+        deviations = [
+            abs(scale - mean_scale) / max(abs(mean_scale), 1e-12)
+            for scale in factor_scales
+        ]
+        section["factor_curvature_scale"] = mean_scale
+        section["factor_curvature_scale_max_relative_deviation"] = max(deviations)
+        section["factor_curvature_scale_consistent"] = max(deviations) <= 0.01 and mean_scale > 0
+
+    if not section["curvature_monotonic_non_decreasing"]:
+        add_issue(report, "warning", "Endpoint sweep curvature values are not monotonic")
+    if not section["moment_monotonic_non_decreasing"]:
+        add_issue(report, "warning", "Endpoint sweep moment values are not monotonic with curvature")
+    if not section["zero_endpoint_present"]:
+        add_issue(report, "warning", "Endpoint sweep does not include a near-zero endpoint")
+    if not section["odd_symmetry_pass"]:
+        add_issue(report, "warning", "Endpoint sweep failed the basic odd-symmetry check", max_symmetry_rel)
+    if factor_scales and not section.get("factor_curvature_scale_consistent"):
+        add_issue(report, "warning", "Endpoint sweep factor-to-curvature scale is inconsistent", section.get("factor_curvature_scale_max_relative_deviation"))
+
+    section["shape_checks_passed"] = (
+        section["numeric_format_valid"]
+        and section["curvature_monotonic_non_decreasing"]
+        and section["moment_monotonic_non_decreasing"]
+        and section["zero_endpoint_present"]
+        and section["odd_symmetry_pass"]
+        and section.get("factor_curvature_scale_consistent", True)
+        and section["child_endpoint_numeric_format_valid"]
+    )
+
+
 def inspect_result_csv(job_dir: Path, report: dict) -> None:
     path = job_dir / "result_data.csv"
     section = {"exists": path.exists()}
@@ -135,6 +264,13 @@ def inspect_summary(job_dir: Path, report: dict) -> None:
         rows_written = int(data.get("rows_written") or 0)
         if rows_written < 5:
             add_issue(report, "warning", "Endpoint sweep has fewer than five aggregated rows", rows_written)
+        csv_rows = report.get("result_data_csv", {}).get("data_rows")
+        if csv_rows is not None and rows_written != csv_rows:
+            add_issue(report, "warning", "Endpoint sweep rows_written does not match result_data.csv rows", {
+                "rows_written": rows_written,
+                "csv_rows": csv_rows,
+            })
+        inspect_endpoint_sweep_shape(job_dir, report, data)
     for key in required:
         if key not in data:
             add_issue(report, "warning", "result_summary.json missing key", key)
@@ -297,6 +433,7 @@ def summarize_report(report: dict) -> None:
     logs = report.get("solver_logs", {})
     manifest = report.get("abaqus_mesh_manifest_json", {})
     summary = report.get("result_summary_json", {})
+    sweep_shape = report.get("endpoint_sweep_shape", {})
     log_match_text = "\n".join(
         "{0}\n{1}".format(item.get("text", ""), item.get("context", ""))
         for item in logs.get("matches", [])
@@ -314,7 +451,10 @@ def summarize_report(report: dict) -> None:
             action = "Fix the first error in this report before expanding the backend."
     elif summary.get("source") == "SCLAS_CURVE_V0_ENDPOINT_SWEEP":
         if int(summary.get("rows_written") or 0) >= 5:
-            action = "Endpoint sweep curve-v0 aggregated at least five validated ODB child endpoints; inspect curve shape and child solver warnings before promoting it."
+            if sweep_shape.get("shape_checks_passed"):
+                action = "Endpoint sweep curve-v0 aggregated at least five validated ODB child endpoints and passed basic monotonic/odd-symmetry checks; validate it against a continuous bending path before research use."
+            else:
+                action = "Endpoint sweep curve-v0 aggregated at least five validated ODB child endpoints; inspect the shape diagnostics and child solver warnings before promoting it."
         else:
             action = "Endpoint sweep completed partially; add more validated ODB child endpoints or reduce the curvature factors further."
     elif logs.get("completed"):
@@ -356,9 +496,30 @@ def build_report(job_dir: Path) -> dict:
 
     inspect_result_csv(job_dir, report)
     inspect_summary(job_dir, report)
-    inspect_manifest(job_dir, report)
-    inspect_inp(job_dir, report)
-    inspect_solver_logs(job_dir, report)
+    is_endpoint_parent = report.get("result_summary_json", {}).get("source") == "SCLAS_CURVE_V0_ENDPOINT_SWEEP"
+    if is_endpoint_parent:
+        report["abaqus_mesh_manifest_json"] = {
+            "exists": False,
+            "skipped": True,
+            "reason": "Endpoint sweep parent; Abaqus artifacts are stored in child job folders.",
+        }
+        report["input_deck"] = {
+            "exists": False,
+            "skipped": True,
+            "reason": "Endpoint sweep parent; input decks are stored in child job folders.",
+        }
+        report["solver_logs"] = {
+            "files": [],
+            "matches": [],
+            "completed": False,
+            "failed": False,
+            "skipped": True,
+            "reason": "Endpoint sweep parent; solver logs are stored in child job folders.",
+        }
+    else:
+        inspect_manifest(job_dir, report)
+        inspect_inp(job_dir, report)
+        inspect_solver_logs(job_dir, report)
     summarize_report(report)
     return report
 
@@ -392,6 +553,7 @@ def markdown_report(report: dict) -> str:
     manifest_section = report.get("abaqus_mesh_manifest_json", {})
     deck_section = report.get("input_deck", {})
     logs_section = report.get("solver_logs", {})
+    sweep_shape_section = report.get("endpoint_sweep_shape", {})
     diagnostic_summary = report.get("diagnostic_summary", {})
     issue_counts = diagnostic_summary.get("issue_counts", {})
 
@@ -407,6 +569,9 @@ def markdown_report(report: dict) -> str:
         ("Boundary scaffold", scalar(manifest_section.get("boundary_condition_scaffold_status"))),
         ("Sweep child jobs", scalar(summary_section.get("child_job_count"))),
         ("Sweep rows", scalar(summary_section.get("rows_written"))),
+        ("Sweep shape checks", scalar(sweep_shape_section.get("shape_checks_passed"))),
+        ("Sweep odd symmetry max rel", scalar(sweep_shape_section.get("odd_symmetry_max_relative_moment_sum"))),
+        ("Sweep factor scale", scalar(sweep_shape_section.get("factor_curvature_scale"))),
         ("Input deck", scalar(deck_section.get("file"))),
         ("Couplings after End Assembly", scalar(deck_section.get("coupling_after_end_assembly"))),
         ("Solver log matches", scalar(len(logs_section.get("matches", [])))),
@@ -478,7 +643,7 @@ def print_report(report: dict) -> None:
     print("Issue counts:", issue_counts)
     print()
 
-    for key in ["result_data_csv", "result_summary_json", "abaqus_mesh_manifest_json", "input_deck", "solver_logs"]:
+    for key in ["result_data_csv", "result_summary_json", "endpoint_sweep_shape", "abaqus_mesh_manifest_json", "input_deck", "solver_logs"]:
         section = report.get(key, {})
         print("[{0}]".format(key))
         for item_key, value in section.items():

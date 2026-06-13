@@ -335,8 +335,8 @@ def check_endpoint_sweep_diagnostics() -> None:
     job_dir.mkdir(parents=True, exist_ok=True)
     rows = [
         ["curvature_1_per_m", "moment_kn_m"],
-        ["-0.008", "-0.031"],
-        ["-0.004", "-0.015"],
+        ["-0.008", "-0.032"],
+        ["-0.004", "-0.016"],
         ["0", "0"],
         ["0.004", "0.016"],
         ["0.008", "0.032"],
@@ -378,18 +378,26 @@ def check_endpoint_sweep_diagnostics() -> None:
             "all_child_jobs_validated": True,
             "aggregation_rule": "last ODB-extracted CSV row from each child job",
         },
-        "child_jobs": [
-            {
-                "factor": factor,
-                "job": f"curve_v0_child_{idx}",
-                "source": "SCLAS_ABAQUS_ODB_EXTRACTOR",
-                "odb_status": "extracted",
-                "odb_rows_written": 2,
-                "curve_class": "two_point_odb_smoke",
-            }
-            for idx, factor in enumerate([-0.1, -0.05, 0.0, 0.05, 0.1], start=1)
-        ],
+        "child_jobs": [],
     }
+    child_values = [
+        (-0.1, -0.008, -0.032),
+        (-0.05, -0.004, -0.016),
+        (0.0, 0.0, 0.0),
+        (0.05, 0.004, 0.016),
+        (0.1, 0.008, 0.032),
+    ]
+    for idx, (factor, curvature, moment) in enumerate(child_values, start=1):
+        summary["child_jobs"].append({
+            "factor": factor,
+            "job": f"curve_v0_child_{idx}",
+            "source": "SCLAS_ABAQUS_ODB_EXTRACTOR",
+            "odb_status": "extracted",
+            "odb_rows_written": 2,
+            "curve_class": "two_point_odb_smoke",
+            "curvature_1_per_m": curvature,
+            "moment_kn_m": moment,
+        })
     (job_dir / "result_summary.json").write_text(json.dumps(summary, indent=4), encoding="utf-8")
 
     proc = subprocess.run(
@@ -408,11 +416,16 @@ def check_endpoint_sweep_diagnostics() -> None:
     if any(item.get("severity") == "error" for item in report.get("issues", [])):
         fail("Endpoint sweep diagnostics reported errors: " + json.dumps(report.get("issues"), indent=2))
     action = report.get("diagnostic_summary", {}).get("recommended_next_action", "")
-    if "Endpoint sweep curve-v0 aggregated" not in action:
+    if "passed basic monotonic/odd-symmetry checks" not in action:
         fail("Endpoint sweep diagnostics recommended the wrong next action: " + action)
     summary_section = report.get("result_summary_json", {})
     if summary_section.get("child_job_count") != 5 or summary_section.get("rows_written") != 5:
         fail("Endpoint sweep diagnostics did not read parent sweep row/child counts")
+    shape_section = report.get("endpoint_sweep_shape", {})
+    if not shape_section.get("shape_checks_passed"):
+        fail("Endpoint sweep shape diagnostics did not pass: " + json.dumps(shape_section, indent=2))
+    if abs(shape_section.get("factor_curvature_scale", 0.0) - 0.08) > 1e-12:
+        fail("Endpoint sweep factor-to-curvature scale was not detected")
 
     print(f"[OK] Endpoint sweep diagnostics: {job_dir}")
 
