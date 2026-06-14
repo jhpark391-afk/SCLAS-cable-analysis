@@ -616,6 +616,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Job Index": "작업 목록",
             "Load best": "추천 작업 불러오기",
             "Acceptance": "통과 판정",
+            "Validate All": "전체 검증",
             "Handoff": "인수인계",
             "Open folder": "폴더 열기",
             "No result jobs found": "결과 작업 없음",
@@ -1415,6 +1416,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_job_index = QPushButton("Job Index")
         self.btn_load_best_job = QPushButton("Load best")
         self.btn_acceptance_gate = QPushButton("Acceptance")
+        self.btn_validate_all = QPushButton("Validate All")
         self.btn_handoff_snapshot = QPushButton("Handoff")
         self.btn_open_job_folder = QPushButton("Open folder")
         self.btn_refresh_jobs.setToolTip("Scan the job root for recent SCLAS result folders.")
@@ -1425,6 +1427,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_job_index.setToolTip("Show a handoff inventory of recent real SCLAS job folders.")
         self.btn_load_best_job.setToolTip("Load the best current job candidate selected by the Job Index readiness score.")
         self.btn_acceptance_gate.setToolTip("Evaluate whether the latest Abaqus result is research-ready.")
+        self.btn_validate_all.setToolTip("Run self-check, acceptance gate, handoff snapshot, and next prompt generation.")
         self.btn_handoff_snapshot.setToolTip("Save and show a compact handoff snapshot for the next Codex session.")
         self.btn_open_job_folder.setToolTip("Open the selected job folder in Finder or Explorer.")
         self.btn_refresh_jobs.clicked.connect(self.refresh_job_history)
@@ -1435,6 +1438,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_job_index.clicked.connect(self.show_job_index)
         self.btn_load_best_job.clicked.connect(self.load_best_job)
         self.btn_acceptance_gate.clicked.connect(self.show_acceptance_gate)
+        self.btn_validate_all.clicked.connect(self.run_validation_suite)
         self.btn_handoff_snapshot.clicked.connect(self.show_handoff_snapshot)
         self.btn_open_job_folder.clicked.connect(self.open_selected_job_folder)
         history_layout.addWidget(self.job_history_combo, 0, 0, 1, 3)
@@ -1448,6 +1452,7 @@ class SCLASRemoteGUI(QMainWindow):
         history_layout.addWidget(self.btn_load_best_job, 3, 2)
         history_layout.addWidget(self.btn_acceptance_gate, 4, 0, 1, 2)
         history_layout.addWidget(self.btn_handoff_snapshot, 4, 2)
+        history_layout.addWidget(self.btn_validate_all, 5, 0, 1, 3)
         right.addWidget(self.history_box)
 
         left_scroll = self.scroll_panel(left_panel, min_width=360)
@@ -2252,6 +2257,63 @@ class SCLASRemoteGUI(QMainWindow):
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Handoff snapshot error", str(exc))
+
+    def run_validation_suite(self) -> None:
+        self.btn_validate_all.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            from sclas_acceptance_gate import build_gate, human_report as gate_human_report, save_markdown_report as save_gate_markdown, save_report as save_gate_report
+            from sclas_handoff_snapshot import build_snapshot, save_markdown_report as save_snapshot_markdown, save_report as save_snapshot_report
+            from sclas_next_prompt import prompt_text, save_prompt
+
+            self.log("[VALIDATE] Running local validation suite...")
+            proc = subprocess.run(
+                [sys.executable, str(APP_DIR / "sclas_self_check.py")],
+                cwd=str(PROJECT_DIR),
+                text=True,
+                capture_output=True,
+            )
+            if proc.stdout:
+                self.log(proc.stdout.strip())
+            if proc.stderr:
+                self.log(proc.stderr.strip())
+            if proc.returncode != 0:
+                raise RuntimeError("sclas_self_check.py failed with exit code {0}".format(proc.returncode))
+
+            job_root = Path(self.job_root_input.text().strip()).expanduser()
+            acceptance = build_gate(job_root)
+            gate_json = save_gate_report(acceptance)
+            acceptance["saved_report"] = str(gate_json)
+            gate_md = save_gate_markdown(acceptance)
+            acceptance["saved_markdown_report"] = str(gate_md)
+
+            snapshot = build_snapshot(job_root, limit=15)
+            snapshot_json = save_snapshot_report(snapshot)
+            snapshot["saved_report"] = str(snapshot_json)
+            snapshot_md = save_snapshot_markdown(snapshot)
+            snapshot["saved_markdown_report"] = str(snapshot_md)
+
+            prompt_path = save_prompt(prompt_text(snapshot))
+            self.last_summary_data = {}
+            self.summary_text.setPlainText(gate_human_report(acceptance))
+            status = acceptance.get("overall_status")
+            tone = "good" if status == "accepted" else "warn" if status == "review" else "error"
+            label = "Result: ready" if status in ("accepted", "review") else "Result: error"
+            self.set_badge(self.lbl_result_status, label, tone)
+            self.log(
+                "[VALIDATE] Complete | acceptance={0} | handoff={1} | prompt={2}".format(
+                    status,
+                    snapshot_json,
+                    prompt_path,
+                )
+            )
+            self.refresh_job_history()
+        except Exception as exc:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
+            QMessageBox.critical(self, "Validation suite error", str(exc))
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.btn_validate_all.setEnabled(True)
 
     @staticmethod
     def counts_text(counts, limit: int = 4) -> str:
