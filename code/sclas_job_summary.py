@@ -11,6 +11,7 @@ import json
 import sys
 from pathlib import Path
 
+from sclas_job_filters import candidate_job_dirs, describe_filter
 from sclas_offline_diagnostics import build_report
 
 
@@ -61,18 +62,18 @@ def names_to_counts(names):
     return counts
 
 
-def latest_job_dir(job_root: Path) -> Path:
+def latest_job_dir(job_root: Path, include_self_check: bool = False) -> Path:
     if not job_root.exists():
         raise FileNotFoundError("Job root does not exist: {0}".format(job_root))
 
-    candidates = []
-    for path in job_root.iterdir():
-        if not path.is_dir():
-            continue
-        if (path / "result_data.csv").exists() or (path / "result_summary.json").exists():
-            candidates.append(path)
+    candidates = candidate_job_dirs(job_root, include_self_check=include_self_check)
     if not candidates:
-        raise FileNotFoundError("No SCLAS job folders were found under: {0}".format(job_root))
+        raise FileNotFoundError(
+            "No SCLAS job folders were found under {0} ({1})".format(
+                job_root,
+                describe_filter(include_self_check),
+            )
+        )
     def job_mtime(path: Path) -> float:
         mtimes = []
         for file_name in ["result_summary.json", "result_data.csv", "offline_diagnostics_report.json", "curve_v0_comparison_report.json"]:
@@ -374,6 +375,7 @@ def parse_args(argv=None):
     parser.add_argument("job_dir", nargs="?", help="Job folder to inspect. Defaults to the latest job folder.")
     parser.add_argument("--latest", action="store_true", help="Inspect the newest job folder under --job-root.")
     parser.add_argument("--job-root", default=str(DEFAULT_JOB_ROOT), help="Folder that contains SCLAS job folders.")
+    parser.add_argument("--include-self-check", action="store_true", help="Allow synthetic self_check job folders in --latest selection.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON instead of human text.")
     return parser.parse_args(argv)
 
@@ -384,7 +386,7 @@ def main(argv=None) -> int:
         if args.job_dir and not args.latest:
             job_dir = Path(args.job_dir).expanduser().resolve()
         else:
-            job_dir = latest_job_dir(Path(args.job_root).expanduser().resolve())
+            job_dir = latest_job_dir(Path(args.job_root).expanduser().resolve(), include_self_check=args.include_self_check)
         report = build_report(job_dir)
         summary = collect_summary(report)
         if args.json:

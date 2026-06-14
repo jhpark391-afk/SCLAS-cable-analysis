@@ -28,6 +28,7 @@
     <Compile Include="code\sclas_job_summary.py" />
     <Compile Include="code\sclas_curve_compare.py" />
     <Compile Include="code\sclas_project_status.py" />
+    <Compile Include="code\sclas_job_filters.py" />
     <Compile Include="code\sclas_odb_extractor.py" />
     <Compile Include="code\sclas_mac_vscode.py" />
     <Compile Include="code\sclas_remote_gui.py" />

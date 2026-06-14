@@ -2410,6 +2410,10 @@ python code/sclas_project_status.py --json
 python code/sclas_project_status.py --save-report --save-markdown
 ```
 
+Latest-job commands now exclude synthetic `self_check*` folders by default.
+Use `--include-self-check` only when validating the synthetic fixtures
+themselves.
+
 It summarizes:
 
 - latest job health/source/curve class

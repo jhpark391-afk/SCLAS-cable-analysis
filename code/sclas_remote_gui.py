@@ -67,6 +67,8 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
+from sclas_job_filters import candidate_job_dirs
+
 APP_VERSION = "12.0-abaqus-quality-summary"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
@@ -1974,8 +1976,7 @@ class SCLASRemoteGUI(QMainWindow):
         for root in roots:
             if not root.exists():
                 continue
-            for csv_path in root.glob("*/result_data.csv"):
-                jobs.append(csv_path.parent)
+            jobs.extend(candidate_job_dirs(root, include_self_check=False, require_csv=True))
         jobs = sorted(set(jobs), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)[:25]
 
         self.job_history_paths = jobs

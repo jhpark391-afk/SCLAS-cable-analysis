@@ -12,6 +12,8 @@ import json
 import sys
 from pathlib import Path
 
+from sclas_job_filters import candidate_job_dirs, describe_filter
+
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_JOB_ROOT = PROJECT_DIR / "jobs" / "SCLAS_jobs"
@@ -85,13 +87,11 @@ def load_job(job_dir: Path) -> dict:
     }
 
 
-def latest_job(job_root: Path, kind: str) -> dict:
+def latest_job(job_root: Path, kind: str, include_self_check: bool = False) -> dict:
     candidates = []
     if not job_root.exists():
         raise FileNotFoundError("Job root does not exist: {0}".format(job_root))
-    for path in job_root.iterdir():
-        if not path.is_dir() or not (path / "result_summary.json").exists() or not (path / "result_data.csv").exists():
-            continue
+    for path in candidate_job_dirs(job_root, include_self_check=include_self_check, require_csv=True, require_summary=True):
         try:
             loaded = load_job(path)
         except Exception:
@@ -99,7 +99,13 @@ def latest_job(job_root: Path, kind: str) -> dict:
         if loaded["kind"] == kind:
             candidates.append(loaded)
     if not candidates:
-        raise FileNotFoundError("No {0} CurveV0 job folder was found under: {1}".format(kind, job_root))
+        raise FileNotFoundError(
+            "No {0} CurveV0 job folder was found under {1} ({2})".format(
+                kind,
+                job_root,
+                describe_filter(include_self_check),
+            )
+        )
     return max(candidates, key=lambda item: item["mtime"])
 
 
@@ -304,6 +310,7 @@ def parse_args(argv=None):
     parser.add_argument("--endpoint", help="Endpoint sweep job folder. Defaults to latest endpoint sweep.")
     parser.add_argument("--continuous", help="Continuous CurveV0 job folder. Defaults to latest continuous CurveV0.")
     parser.add_argument("--job-root", default=str(DEFAULT_JOB_ROOT), help="Folder that contains SCLAS job folders.")
+    parser.add_argument("--include-self-check", action="store_true", help="Allow synthetic self_check job folders in automatic latest selection.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     parser.add_argument("--save-report", action="store_true", help="Save curve_v0_comparison_report.json.")
     parser.add_argument("--save-markdown", action="store_true", help="Save curve_v0_comparison_report.md.")
@@ -316,8 +323,8 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     try:
         job_root = Path(args.job_root).expanduser().resolve()
-        endpoint = load_job(Path(args.endpoint).expanduser().resolve()) if args.endpoint else latest_job(job_root, "endpoint")
-        continuous = load_job(Path(args.continuous).expanduser().resolve()) if args.continuous else latest_job(job_root, "continuous")
+        endpoint = load_job(Path(args.endpoint).expanduser().resolve()) if args.endpoint else latest_job(job_root, "endpoint", include_self_check=args.include_self_check)
+        continuous = load_job(Path(args.continuous).expanduser().resolve()) if args.continuous else latest_job(job_root, "continuous", include_self_check=args.include_self_check)
         report = compare(endpoint, continuous)
         if args.save_report:
             output_path = Path(args.output).expanduser().resolve() if args.output else None

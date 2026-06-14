@@ -10,6 +10,7 @@ import compileall
 import csv
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -694,15 +695,16 @@ def check_continuous_curve_v0_diagnostics() -> None:
             str(CODE_DIR / "sclas_job_summary.py"),
             "--latest",
             "--json",
+            "--include-self-check",
         ],
         text=True,
         capture_output=True,
     )
     if latest_proc.returncode != 0:
-        fail("sclas_job_summary.py --latest failed:\n" + latest_proc.stdout + latest_proc.stderr)
+        fail("sclas_job_summary.py --latest --include-self-check failed:\n" + latest_proc.stdout + latest_proc.stderr)
     latest_summary = json.loads(latest_proc.stdout)
     if Path(latest_summary.get("job_dir", "")).resolve() != job_dir.resolve():
-        fail("Job summary --latest did not select the newest continuous CurveV0 self-check job")
+        fail("Job summary --latest --include-self-check did not select the newest continuous CurveV0 self-check job")
 
     print(f"[OK] Continuous CurveV0 diagnostics: {job_dir}")
 
@@ -713,6 +715,7 @@ def check_curve_v0_comparison() -> None:
             sys.executable,
             str(CODE_DIR / "sclas_curve_compare.py"),
             "--json",
+            "--include-self-check",
             "--save-report",
             "--save-markdown",
         ],
@@ -765,12 +768,69 @@ def check_curve_v0_comparison() -> None:
     print("[OK] CurveV0 endpoint/continuous comparison")
 
 
+def write_minimal_job(job_dir: Path, source: str) -> None:
+    job_dir.mkdir(parents=True, exist_ok=True)
+    with (job_dir / "result_data.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(["curvature_1_per_m", "moment_kn_m"])
+        writer.writerow(["0", "0"])
+        writer.writerow(["0.01", "0.04"])
+    summary = {
+        "source": source,
+        "status": "completed",
+        "num_points": 2,
+        "rows_written": 2,
+        "result_contract": {
+            "csv_file": "result_data.csv",
+            "required_columns": ["curvature_1_per_m", "moment_kn_m"],
+            "summary_file": "result_summary.json",
+        },
+    }
+    (job_dir / "result_summary.json").write_text(json.dumps(summary, indent=4), encoding="utf-8")
+
+
+def check_latest_job_filtering() -> None:
+    root = JOBS_DIR / ("self_check_filter_root_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
+    user_job = root / "job_filter_user"
+    self_job = root / "self_check_filter_newer"
+    write_minimal_job(user_job, "FILTER_USER_JOB")
+    write_minimal_job(self_job, "FILTER_SELF_CHECK_JOB")
+    newer_time = datetime.now().timestamp() + 10
+    for path in [self_job / "result_data.csv", self_job / "result_summary.json"]:
+        os.utime(path, (newer_time, newer_time))
+
+    base_cmd = [
+        sys.executable,
+        str(CODE_DIR / "sclas_job_summary.py"),
+        "--latest",
+        "--json",
+        "--job-root",
+        str(root),
+    ]
+    default_proc = subprocess.run(base_cmd, text=True, capture_output=True)
+    if default_proc.returncode != 0:
+        fail("Default latest job filtering failed:\n" + default_proc.stdout + default_proc.stderr)
+    default_summary = json.loads(default_proc.stdout)
+    if Path(default_summary.get("job_dir", "")).name != user_job.name:
+        fail("Default latest job selection did not exclude self_check jobs")
+
+    include_proc = subprocess.run(base_cmd + ["--include-self-check"], text=True, capture_output=True)
+    if include_proc.returncode != 0:
+        fail("Latest job filtering with --include-self-check failed:\n" + include_proc.stdout + include_proc.stderr)
+    include_summary = json.loads(include_proc.stdout)
+    if Path(include_summary.get("job_dir", "")).name != self_job.name:
+        fail("--include-self-check did not allow the newer self_check job")
+
+    print("[OK] Latest job filtering excludes self_check by default")
+
+
 def check_project_status() -> None:
     proc = subprocess.run(
         [
             sys.executable,
             str(CODE_DIR / "sclas_project_status.py"),
             "--json",
+            "--include-self-check",
             "--save-report",
             "--save-markdown",
         ],
@@ -807,6 +867,7 @@ def main() -> int:
         check_endpoint_sweep_diagnostics,
         check_continuous_curve_v0_diagnostics,
         check_curve_v0_comparison,
+        check_latest_job_filtering,
         check_project_status,
     ]
     try:

@@ -77,6 +77,10 @@ python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder> --save-rep
 python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder> --save-markdown
 ```
 
+By default, `--latest`, `sclas_project_status.py`, `sclas_curve_compare.py`,
+and the GUI Recent Jobs panel ignore synthetic `self_check*` folders. Add
+`--include-self-check` only when validating the test fixtures themselves.
+
 Use `sclas_job_summary.py` first when you only need the current health,
 curve class, warning totals, and next action. Use
 `sclas_offline_diagnostics.py` when you need the full JSON/Markdown report.

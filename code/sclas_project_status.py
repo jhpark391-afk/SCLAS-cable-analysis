@@ -24,14 +24,14 @@ def safe_call(fn, default=None):
         return {"error": str(exc)} if default is None else default
 
 
-def latest_summary(job_root: Path) -> dict:
-    job_dir = latest_job_dir(job_root)
+def latest_summary(job_root: Path, include_self_check: bool = False) -> dict:
+    job_dir = latest_job_dir(job_root, include_self_check=include_self_check)
     return collect_summary(build_report(job_dir))
 
 
-def latest_curve_comparison(job_root: Path) -> dict:
-    endpoint = latest_job(job_root, "endpoint")
-    continuous = latest_job(job_root, "continuous")
+def latest_curve_comparison(job_root: Path, include_self_check: bool = False) -> dict:
+    endpoint = latest_job(job_root, "endpoint", include_self_check=include_self_check)
+    continuous = latest_job(job_root, "continuous", include_self_check=include_self_check)
     return compare(endpoint, continuous)
 
 
@@ -91,12 +91,13 @@ def choose_next_action(summary: dict, comparison: dict, flags: list) -> str:
     return "Run the stable validation loop and inspect the latest job summary."
 
 
-def build_status(job_root: Path) -> dict:
-    summary = safe_call(lambda: latest_summary(job_root), default={"health": "unknown"})
-    comparison = safe_call(lambda: latest_curve_comparison(job_root), default={})
+def build_status(job_root: Path, include_self_check: bool = False) -> dict:
+    summary = safe_call(lambda: latest_summary(job_root, include_self_check=include_self_check), default={"health": "unknown"})
+    comparison = safe_call(lambda: latest_curve_comparison(job_root, include_self_check=include_self_check))
     flags = completion_flags(summary, comparison)
     return {
         "job_root": str(job_root),
+        "include_self_check": include_self_check,
         "latest_job": summary.get("job_dir"),
         "latest_job_health": summary.get("health"),
         "latest_source": summary.get("source"),
@@ -235,6 +236,7 @@ def print_human(status: dict) -> None:
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Print the current HELIX/SCLAS project status.")
     parser.add_argument("--job-root", default=str(DEFAULT_JOB_ROOT), help="Folder that contains SCLAS job folders.")
+    parser.add_argument("--include-self-check", action="store_true", help="Allow synthetic self_check job folders in latest status selection.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     parser.add_argument("--save-report", action="store_true", help="Save project_status_report.json.")
     parser.add_argument("--save-markdown", action="store_true", help="Save project_status_report.md.")
@@ -246,7 +248,7 @@ def parse_args(argv=None):
 def main(argv=None) -> int:
     args = parse_args(argv)
     try:
-        status = build_status(Path(args.job_root).expanduser().resolve())
+        status = build_status(Path(args.job_root).expanduser().resolve(), include_self_check=args.include_self_check)
         if args.save_report or args.output:
             saved_path = save_report(status, Path(args.output).expanduser().resolve() if args.output else None)
             status["saved_report"] = str(saved_path)
