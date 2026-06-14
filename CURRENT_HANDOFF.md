@@ -1748,6 +1748,114 @@ Interpretation:
   parents. It separately aggregates `WarnBeamCurvature1` and `WarnBeamTwist`
   and recommends a minimal B31 helix probe when those warnings remain.
 
+## B31 Armour Beam Orientation Stabilization - 2026-06-14 KST
+
+The next Lab-PC pass targeted the remaining completed-solver B31 warning sets:
+
+```text
+WarnBeamCurvature1=1 per SmallSmoke
+WarnBeamTwist=1 per SmallSmoke
+WarnBeamCurvature1=5 and WarnBeamTwist=5 per five-child CurveV0 sweep
+```
+
+Tested orientation probes:
+
+- `abaqus_default` / no explicit beam orientation:
+  - completed and extracted ODB, but kept both `WarnBeamCurvature1=1` and
+    `WarnBeamTwist=1`.
+- `radial_segment`:
+  - projected a cable-radial normal onto each B31 segment tangent.
+  - removed `WarnBeamCurvature1`, but left `WarnBeamTwist=1`.
+- `bishop_segment`:
+  - uses a discrete parallel-transport frame per helical wire.
+  - starts from the radial normal and then minimally rotates the beam normal as
+    each segment tangent changes, reducing artificial section twist about the
+    beam tangent.
+  - removed both `WarnBeamCurvature1` and `WarnBeamTwist` in SmallSmoke and
+    CurveV0.
+
+Implemented stabilization:
+
+- `mesh.armour_beam_orientation_mode` now defaults to `bishop_segment`.
+- Supported modes are still available for debugging:
+  `bishop_segment`, `transport_segment`, `minimum_twist`, `radial_segment`,
+  `global_z`/`legacy`, and `abaqus_default`.
+- `abaqus_mesh_manifest.json` records `beam_orientation_adjustments` for each
+  armour layer, including mode, orientation frame, expected segment count,
+  assigned segment count, fallback status, and warnings.
+- `code\SCLAS_test\abaqus_runner.py` is synchronized with
+  `code\abaqus_runner.py`.
+
+Final default SmallSmoke verification:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -SmallSmoke -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e"
+```
+
+```text
+jobs\SCLAS_jobs\small_smoke_20260614_144003
+Abaqus JOB small_smoke_20260614_144003_mesh COMPLETED
+result_summary.json.source=SCLAS_ABAQUS_ODB_EXTRACTOR
+odb_extraction.status=extracted
+odb_extraction.rows_written=2
+blocking_match_count=0
+actual_warning_match_count=0
+warning_sets={}
+distorted_reported_element_count=0
+InnerArmourHelix orientation=created:bishop_segment:880/880
+OuterArmourHelix orientation=created:bishop_segment:944/944
+```
+
+Final default CurveV0 endpoint sweep verification:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_sweep.ps1
+```
+
+```text
+jobs\SCLAS_jobs\curve_v0_sweep_20260614_144042
+source=SCLAS_CURVE_V0_ENDPOINT_SWEEP
+rows_written=5
+csv_rows=5
+endpoint_sweep_validation.all_child_jobs_validated=true
+child_count=5
+```
+
+Parent result rows:
+
+```text
+curvature_1_per_m,moment_kn_m
+-0.0079999997979,-2.58670125
+-0.00399999989895,-1.29338025
+0,0
+0.00399999989895,1.293391125
+0.0079999997979,2.58674475
+```
+
+All five child jobs:
+
+```text
+source=SCLAS_ABAQUS_ODB_EXTRACTOR
+odb_extraction.status=extracted
+odb_extraction.rows_written=2
+blocking_match_count=0
+actual_warning_match_count=0
+warning_sets={}
+distorted_reported_element_count=0
+InnerArmourHelix orientation=created:bishop_segment:880/880
+OuterArmourHelix orientation=created:bishop_segment:944/944
+```
+
+Interpretation:
+
+- The current reduced SmallSmoke and five-factor CurveV0 endpoint sweep now
+  complete with no completed-solver actual warning sets.
+- The remaining `contact_pair_scaffold_status=partial` is still the known
+  skipped B31 beam-beam cross-layer contact pair, not a solver blocker.
+- The next backend step should move from bridge/mesh warning stabilization to
+  richer Abaqus physics: continuous bending path validation, contact/friction
+  refinement, and local ODB field extraction.
+
 ## Important Files
 
 ```text
@@ -1877,10 +1985,10 @@ Still needed for a paper-level implementation:
    - `input_data.json` as backend input
    - `result_data.csv` with `curvature_1_per_m,moment_kn_m`
    - `result_summary.json` for optional metrics
-4. Reduce the remaining completed-solver warning classes only after isolating a
-   concrete mechanism in `.dat`/`.msg`/manifest data:
-   distorted elements, beam curvature, and any real overconstraint warning
-   beyond the current overconstraint-check progress notes.
+4. If completed-solver warning classes reappear, isolate the first concrete
+   mechanism in `.dat`/`.msg`/manifest data before changing the model. The
+   current reduced SmallSmoke and CurveV0 baseline has
+   `actual_warning_match_count=0`.
 5. Add true periodic boundary equations or a documented equivalent-cell
    approximation.
 6. Extend ODB extraction beyond the current endpoint rows toward local slip,

@@ -251,6 +251,7 @@ def write_mesh_manifest(
     contact_pair_keyword_adjustment=None,
     boundary_conditions=None,
     mesh_control_adjustments=None,
+    beam_orientation_adjustments=None,
 ):
     geometry = payload.get("derived_geometry_mm", {})
     armour = payload.get("armour", {})
@@ -278,6 +279,7 @@ def write_mesh_manifest(
             contact_interaction_status = "partial"
     contact_pairs = contact_pairs or []
     mesh_control_adjustments = mesh_control_adjustments or []
+    beam_orientation_adjustments = beam_orientation_adjustments or []
     contact_pair_status = "not_created"
     if contact_pairs:
         contact_pair_status = "created"
@@ -300,6 +302,7 @@ def write_mesh_manifest(
             "core_circumferential_divisions": int(mesh_cfg.get("core_circumferential_divisions", 24)),
             "armour_circumferential_divisions": int(mesh_cfg.get("armour_circumferential_divisions", 8)),
             "annular_partition_quadrants": bool_from_payload(mesh_cfg.get("annular_partition_quadrants"), True),
+            "armour_beam_orientation_mode": mesh_cfg.get("armour_beam_orientation_mode", "bishop_segment"),
             "contact_regularization_beta": float(analysis.get("contact_regularization_beta", 0.001)),
         },
         "contact_interfaces": numerical_model.get("contact_interfaces", []),
@@ -321,6 +324,7 @@ def write_mesh_manifest(
             "reason": "Abaqus input deck was not generated or no contact pair keyword adjustment was requested.",
         },
         "mesh_control_adjustments": mesh_control_adjustments,
+        "beam_orientation_adjustments": beam_orientation_adjustments,
         "boundary_condition_scaffold_status": boundary_condition_status,
         "boundary_condition_scaffold": boundary_conditions,
         "components": [
@@ -501,6 +505,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         YZPLANE,
     )
     from mesh import ElemType
+    from regionToolset import Region
 
     geometry = payload["derived_geometry_mm"]
     armour = payload["armour"]
@@ -513,6 +518,7 @@ def build_abaqus_mesh_model(payload, job_dir):
     armour_circ = max(4, int(mesh_cfg.get("armour_circumferential_divisions", 8)))
     requested_elem = str(mesh_cfg.get("requested_element_type", "C3D8R")).upper()
     annular_partition_quadrants = bool_from_payload(mesh_cfg.get("annular_partition_quadrants"), True)
+    armour_beam_orientation_mode = str(mesh_cfg.get("armour_beam_orientation_mode", "bishop_segment")).strip().lower()
     model_name = safe_name(payload.get("metadata", {}).get("job_id", "SCLAS_CableMesh"), 32)
     job_name = safe_name(model_name + "_mesh", 32)
 
@@ -1625,6 +1631,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         return getattr(ac, requested_elem, ac.C3D8R)
 
     mesh_control_adjustments = []
+    beam_orientation_adjustments = []
 
     def apply_annular_quadrant_partition(part, component_name):
         record = {
@@ -1782,6 +1789,81 @@ def build_abaqus_mesh_model(payload, job_dir):
         angle_rad = math.radians(float(lay_angle_deg))
         angular_rate = hand * math.tan(angle_rad) / max(center_radius, 1.0e-6)
         wire_segments = []
+        segment_orientation_specs = []
+
+        def vector_dot(a, b):
+            return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+        def vector_cross(a, b):
+            return (
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            )
+
+        def vector_length(vector):
+            return math.sqrt(max(vector_dot(vector, vector), 0.0))
+
+        def normalize_vector(vector, fallback):
+            magnitude = vector_length(vector)
+            if magnitude <= 1.0e-12:
+                return fallback
+            return (vector[0] / magnitude, vector[1] / magnitude, vector[2] / magnitude)
+
+        def project_perpendicular(vector, tangent, fallback):
+            projected = (
+                vector[0] - vector_dot(vector, tangent) * tangent[0],
+                vector[1] - vector_dot(vector, tangent) * tangent[1],
+                vector[2] - vector_dot(vector, tangent) * tangent[2],
+            )
+            if vector_length(projected) > 1.0e-12:
+                return normalize_vector(projected, fallback)
+            candidate = (0.0, 0.0, 1.0) if abs(tangent[2]) < 0.9 else (1.0, 0.0, 0.0)
+            projected = (
+                candidate[0] - vector_dot(candidate, tangent) * tangent[0],
+                candidate[1] - vector_dot(candidate, tangent) * tangent[1],
+                candidate[2] - vector_dot(candidate, tangent) * tangent[2],
+            )
+            return normalize_vector(projected, fallback)
+
+        def rotate_vector(vector, axis, angle):
+            cos_angle = math.cos(angle)
+            sin_angle = math.sin(angle)
+            axis_cross_vector = vector_cross(axis, vector)
+            axis_dot_vector = vector_dot(axis, vector)
+            return (
+                vector[0] * cos_angle
+                + axis_cross_vector[0] * sin_angle
+                + axis[0] * axis_dot_vector * (1.0 - cos_angle),
+                vector[1] * cos_angle
+                + axis_cross_vector[1] * sin_angle
+                + axis[1] * axis_dot_vector * (1.0 - cos_angle),
+                vector[2] * cos_angle
+                + axis_cross_vector[2] * sin_angle
+                + axis[2] * axis_dot_vector * (1.0 - cos_angle),
+            )
+
+        def add_transport_orientation(wire_specs):
+            if not wire_specs:
+                return
+            previous_tangent = wire_specs[0]["tangent"]
+            previous_n1 = wire_specs[0]["radial_n1"]
+            wire_specs[0]["transport_n1"] = previous_n1
+            for spec in wire_specs[1:]:
+                tangent = spec["tangent"]
+                axis = vector_cross(previous_tangent, tangent)
+                axis_length = vector_length(axis)
+                if axis_length > 1.0e-12:
+                    axis = (axis[0] / axis_length, axis[1] / axis_length, axis[2] / axis_length)
+                    tangent_dot = max(-1.0, min(1.0, vector_dot(previous_tangent, tangent)))
+                    transported = rotate_vector(previous_n1, axis, math.atan2(axis_length, tangent_dot))
+                else:
+                    transported = previous_n1
+                transported = project_perpendicular(transported, tangent, spec["radial_n1"])
+                spec["transport_n1"] = transported
+                previous_tangent = tangent
+                previous_n1 = transported
+
         for i in range(int(count)):
             theta0 = 2.0 * math.pi * i / float(count)
             points = []
@@ -1789,11 +1871,103 @@ def build_abaqus_mesh_model(payload, job_dir):
                 z = -0.5 * length + length * j / float(segments)
                 theta = theta0 + angular_rate * (z + 0.5 * length)
                 points.append((center_radius * math.cos(theta), center_radius * math.sin(theta), z))
-            wire_segments.extend((points[j], points[j + 1]) for j in range(segments))
+            wire_orientation_specs = []
+            for j in range(segments):
+                p0 = points[j]
+                p1 = points[j + 1]
+                midpoint = ((p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5, (p0[2] + p1[2]) * 0.5)
+                tangent = normalize_vector((p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]), (0.0, 0.0, 1.0))
+                radial_norm = max(math.hypot(midpoint[0], midpoint[1]), 1.0e-6)
+                radial_n1 = project_perpendicular(
+                    (midpoint[0] / radial_norm, midpoint[1] / radial_norm, 0.0),
+                    tangent,
+                    (1.0, 0.0, 0.0),
+                )
+                wire_segments.append((p0, p1))
+                wire_orientation_specs.append(
+                    {
+                        "midpoint": midpoint,
+                        "radial_n1": radial_n1,
+                        "tangent": tangent,
+                        "wire_index": i,
+                        "segment_index": j,
+                    }
+                )
+            add_transport_orientation(wire_orientation_specs)
+            segment_orientation_specs.extend(wire_orientation_specs)
         part.WirePolyLine(points=tuple(wire_segments), mergeType=IMPRINT, meshable=ON)
         region = part.Set(edges=part.edges[:], name="AllEdges")
         part.SectionAssignment(region=region, sectionName=section_name)
-        part.assignBeamSectionOrientation(region=region, method=N1_COSINES, n1=(0.0, 0.0, -1.0))
+        orientation_record = {
+            "component": name,
+            "mode": armour_beam_orientation_mode,
+            "expected_segments": len(segment_orientation_specs),
+            "assigned_count": 0,
+            "warnings": [],
+        }
+
+        def append_orientation_warning(message):
+            if len(orientation_record["warnings"]) < 10:
+                orientation_record["warnings"].append(message)
+
+        def assign_global_z_orientation(reason=None):
+            try:
+                part.assignBeamSectionOrientation(region=region, method=N1_COSINES, n1=(0.0, 0.0, -1.0))
+                orientation_record["fallback_status"] = "created"
+                if reason:
+                    orientation_record.setdefault("fallback_reasons", []).append(reason)
+                return True
+            except Exception as exc:
+                orientation_record["fallback_status"] = "failed"
+                append_orientation_warning("global z beam orientation failed: {0}".format(exc))
+                return False
+
+        per_segment_orientation_key = None
+        if armour_beam_orientation_mode in ("radial_segment", "radial_segments", "segment_radial"):
+            per_segment_orientation_key = "radial_n1"
+            orientation_record["orientation_frame"] = "radial_projected_to_segment_tangent"
+        elif armour_beam_orientation_mode in ("transport_segment", "transport_segments", "bishop_segment", "minimum_twist"):
+            per_segment_orientation_key = "transport_n1"
+            orientation_record["orientation_frame"] = "parallel_transport_minimum_twist"
+
+        if per_segment_orientation_key:
+            assign_global_z_orientation("preassign global_z before per-segment orientation override")
+            for segment_index, spec in enumerate(segment_orientation_specs):
+                try:
+                    edge = part.edges.findAt((spec["midpoint"],))
+                    assigned_for_segment = 0
+                    for found_edge in region_sequence(edge):
+                        edge_sequence = part.edges[found_edge.index : found_edge.index + 1]
+                        part.assignBeamSectionOrientation(
+                            region=Region(edges=edge_sequence),
+                            method=N1_COSINES,
+                            n1=spec[per_segment_orientation_key],
+                        )
+                        assigned_for_segment += len(edge_sequence)
+                    if assigned_for_segment == 0:
+                        raise RuntimeError("no edge sequence found at segment midpoint")
+                    orientation_record["assigned_count"] += assigned_for_segment
+                except Exception as exc:
+                    append_orientation_warning(
+                        "segment {0} per-segment beam orientation failed: {1}".format(segment_index, exc)
+                    )
+            if orientation_record["assigned_count"] >= orientation_record["expected_segments"]:
+                orientation_record["status"] = "created"
+            elif orientation_record["assigned_count"] > 0:
+                orientation_record["status"] = "partial"
+            else:
+                orientation_record["status"] = "failed"
+        elif armour_beam_orientation_mode in ("none", "auto", "abaqus_default"):
+            orientation_record["status"] = "skipped"
+            orientation_record["reason"] = "beam orientation left to Abaqus default"
+        else:
+            if armour_beam_orientation_mode not in ("global_z", "global-z", "legacy"):
+                append_orientation_warning(
+                    "unknown armour_beam_orientation_mode {0}; using global_z".format(armour_beam_orientation_mode)
+                )
+            orientation_record["assigned_count"] = len(part.edges[:]) if assign_global_z_orientation() else 0
+            orientation_record["status"] = "created" if orientation_record["assigned_count"] else "failed"
+        beam_orientation_adjustments.append(orientation_record)
         part.seedPart(size=max(0.1, length / float(z_elem)), deviationFactor=0.1, minSizeFactor=0.1)
         part.setElementType(regions=(part.edges[:],), elemTypes=(ElemType(elemCode=B31, elemLibrary=STANDARD),))
         part.generateMesh()
@@ -1916,6 +2090,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         "contact_pair_keyword_adjustment": contact_keyword_adjustment,
         "boundary_condition_scaffold": boundary_conditions,
         "mesh_control_adjustments": mesh_control_adjustments,
+        "beam_orientation_adjustments": beam_orientation_adjustments,
         "node_element_note": "See generated .inp/.cae for Abaqus node and element counts.",
     }
 
@@ -2064,6 +2239,7 @@ def main(argv):
                 contact_pair_keyword_adjustment=mesh_status.get("contact_pair_keyword_adjustment"),
                 boundary_conditions=mesh_status.get("boundary_condition_scaffold"),
                 mesh_control_adjustments=mesh_status.get("mesh_control_adjustments"),
+                beam_orientation_adjustments=mesh_status.get("beam_orientation_adjustments"),
             )
             print("Wrote Abaqus mesh scaffold: {0}".format(", ".join(mesh_status.get("files", []))))
         except Exception as exc:
