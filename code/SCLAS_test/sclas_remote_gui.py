@@ -615,6 +615,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Project Status": "프로젝트 상태",
             "Job Index": "작업 목록",
             "Load best": "추천 작업 불러오기",
+            "Timeline": "진행 타임라인",
             "Intake": "결과 점검",
             "Acceptance": "통과 판정",
             "Session Brief": "세션 브리프",
@@ -1418,6 +1419,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_project_status = QPushButton("Project Status")
         self.btn_job_index = QPushButton("Job Index")
         self.btn_load_best_job = QPushButton("Load best")
+        self.btn_progress_timeline = QPushButton("Timeline")
         self.btn_result_intake = QPushButton("Intake")
         self.btn_acceptance_gate = QPushButton("Acceptance")
         self.btn_session_brief = QPushButton("Session Brief")
@@ -1432,11 +1434,12 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_project_status.setToolTip("Show the overall HELIX/SCLAS project status and next action.")
         self.btn_job_index.setToolTip("Show a handoff inventory of recent real SCLAS job folders.")
         self.btn_load_best_job.setToolTip("Load the best current job candidate selected by the Job Index readiness score.")
+        self.btn_progress_timeline.setToolTip("Show chronological progress across recent jobs, acceptance gates, and contact milestones.")
         self.btn_result_intake.setToolTip("Check the selected or latest copied Abaqus result folder before acceptance.")
         self.btn_acceptance_gate.setToolTip("Evaluate whether the latest Abaqus result is research-ready.")
         self.btn_session_brief.setToolTip("Show the one-page git, intake, acceptance, and next-action startup brief.")
         self.btn_research_report.setToolTip("Generate a compact engineering interpretation report for the selected or latest job.")
-        self.btn_validate_all.setToolTip("Run self-check, result intake, acceptance gate, handoff snapshot, and next prompt generation.")
+        self.btn_validate_all.setToolTip("Run self-check, result intake, research report, progress timeline, handoff snapshot, and next prompt generation.")
         self.btn_handoff_snapshot.setToolTip("Save and show a compact handoff snapshot for the next Codex session.")
         self.btn_open_job_folder.setToolTip("Open the selected job folder in Finder or Explorer.")
         self.btn_refresh_jobs.clicked.connect(self.refresh_job_history)
@@ -1446,6 +1449,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_project_status.clicked.connect(self.show_project_status)
         self.btn_job_index.clicked.connect(self.show_job_index)
         self.btn_load_best_job.clicked.connect(self.load_best_job)
+        self.btn_progress_timeline.clicked.connect(self.show_progress_timeline)
         self.btn_result_intake.clicked.connect(self.show_result_intake)
         self.btn_acceptance_gate.clicked.connect(self.show_acceptance_gate)
         self.btn_session_brief.clicked.connect(self.show_session_brief)
@@ -1460,8 +1464,9 @@ class SCLASRemoteGUI(QMainWindow):
         history_layout.addWidget(self.btn_compare_curve_v0, 2, 0)
         history_layout.addWidget(self.btn_project_status, 2, 1)
         history_layout.addWidget(self.btn_open_job_folder, 2, 2)
-        history_layout.addWidget(self.btn_job_index, 3, 0, 1, 2)
-        history_layout.addWidget(self.btn_load_best_job, 3, 2)
+        history_layout.addWidget(self.btn_job_index, 3, 0)
+        history_layout.addWidget(self.btn_load_best_job, 3, 1)
+        history_layout.addWidget(self.btn_progress_timeline, 3, 2)
         history_layout.addWidget(self.btn_result_intake, 4, 0)
         history_layout.addWidget(self.btn_acceptance_gate, 4, 1)
         history_layout.addWidget(self.btn_handoff_snapshot, 4, 2)
@@ -2209,6 +2214,35 @@ class SCLASRemoteGUI(QMainWindow):
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Load best job error", str(exc))
+
+    def show_progress_timeline(self) -> None:
+        try:
+            from sclas_progress_timeline import build_timeline, human_report, save_markdown_report, save_report
+
+            job_root = Path(self.job_root_input.text().strip()).expanduser()
+            report = build_timeline(job_root, limit=20)
+            saved_path = save_report(report)
+            report["saved_report"] = str(saved_path)
+            saved_markdown_path = save_markdown_report(report)
+            report["saved_markdown_report"] = str(saved_markdown_path)
+            self.last_summary_data = {}
+            self.summary_text.setPlainText(human_report(report))
+            latest_status = report.get("latest_acceptance_status")
+            tone = "good" if latest_status == "accepted" else "warn" if latest_status == "review" else "error"
+            label = "Result: ready" if latest_status in ("accepted", "review") else "Result: error"
+            self.set_badge(self.lbl_result_status, label, tone)
+            self.log(
+                "[TIMELINE] Progress timeline | reported={0}/{1} | latest_acceptance={2}".format(
+                    report.get("reported_count", 0),
+                    report.get("total_candidates", 0),
+                    latest_status,
+                )
+            )
+            self.log(f"[TIMELINE] Saved report: {saved_path}")
+            self.log(f"[TIMELINE] Saved Markdown report: {saved_markdown_path}")
+        except Exception as exc:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
+            QMessageBox.critical(self, "Progress timeline error", str(exc))
 
     def show_result_intake(self) -> None:
         try:
