@@ -49,6 +49,8 @@
     <Content Include="requirements.txt" />
     <Content Include="git_sclas.bat" />
     <Content Include="github_connect.bat" />
+    <Content Include="run_handoff_snapshot.bat" />
+    <Content Include="run_handoff_snapshot.sh" />
     <Content Include="run_sclas.bat" />
     <Content Include="run_self_check.bat" />
     <Content Include="run_sclas.sh" />

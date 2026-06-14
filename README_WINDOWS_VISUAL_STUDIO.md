@@ -47,6 +47,16 @@ To verify the local project contract after edits, run:
 run_self_check.bat
 ```
 
+Before switching computers or handing work to another Codex session, save a
+compact project snapshot with:
+
+```bat
+run_handoff_snapshot.bat
+```
+
+This writes `handoff_snapshot.json` and `handoff_snapshot.md` at the project
+root.
+
 ## Backend command on Windows
 
 For placeholder backend testing, use:

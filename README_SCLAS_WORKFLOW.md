@@ -60,6 +60,18 @@ Run the local smoke checks with:
 run_self_check.bat
 ```
 
+Save a handoff snapshot from the shell with:
+
+```bash
+./run_handoff_snapshot.sh
+```
+
+On Windows:
+
+```bat
+run_handoff_snapshot.bat
+```
+
 Inspect a generated or copied Abaqus job folder without Abaqus:
 
 ```bash
