@@ -1029,6 +1029,8 @@ def check_validation_suite() -> None:
     report = json.loads(proc.stdout)
     if report.get("self_check", {}).get("status") != "skipped":
         fail("Validation suite did not honor --skip-self-check")
+    if not report.get("git", {}).get("head"):
+        fail("Validation suite did not embed git head")
     if not report.get("acceptance_gate", {}).get("overall_status"):
         fail("Validation suite did not embed acceptance gate status")
     if not report.get("handoff_snapshot", {}).get("saved_report"):

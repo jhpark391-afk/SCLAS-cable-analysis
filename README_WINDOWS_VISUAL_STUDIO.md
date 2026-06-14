@@ -55,7 +55,8 @@ run_validation_suite.bat
 
 This runs self-check, saves the acceptance gate report, saves the handoff
 snapshot, regenerates the next Codex prompt, and writes
-`validation_suite_report.json` / `validation_suite_report.md`.
+`validation_suite_report.json` / `validation_suite_report.md` with the current
+git branch/head.
 
 After copying or pulling a remote Abaqus result folder, run:
 

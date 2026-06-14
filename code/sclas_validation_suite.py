@@ -14,6 +14,7 @@ from sclas_acceptance_gate import human_report as acceptance_human_report
 from sclas_acceptance_gate import save_markdown_report as save_acceptance_markdown
 from sclas_acceptance_gate import save_report as save_acceptance_report
 from sclas_handoff_snapshot import build_snapshot
+from sclas_handoff_snapshot import git_state
 from sclas_handoff_snapshot import save_markdown_report as save_snapshot_markdown
 from sclas_handoff_snapshot import save_report as save_snapshot_report
 from sclas_job_summary import DEFAULT_JOB_ROOT
@@ -76,6 +77,7 @@ def build_suite(job_root: Path, limit: int = 15, include_self_check: bool = Fals
         "project_dir": str(PROJECT_DIR),
         "job_root": str(job_root),
         "include_self_check": include_self_check,
+        "git": git_state(),
         "status": status,
         "self_check": self_check,
         "acceptance_gate": acceptance,
@@ -119,10 +121,12 @@ def markdown_report(report: dict) -> str:
     handoff = report.get("handoff_snapshot", {})
     self_check = report.get("self_check", {})
     prompt = report.get("next_prompt", {})
+    git = report.get("git", {})
     lines = [
         "# HELIX / SCLAS Validation Suite",
         "",
         "- Status: `{0}`".format(report.get("status", "-")),
+        "- Git: `{0}` @ `{1}`".format(git.get("branch", "-"), git.get("head", "-")),
         "- Project: `{0}`".format(report.get("project_dir", "-")),
         "- Job root: `{0}`".format(report.get("job_root", "-")),
         "- Self-check: `{0}` return code `{1}`".format(
@@ -158,10 +162,12 @@ def human_report(report: dict) -> str:
     handoff = report.get("handoff_snapshot", {})
     prompt = report.get("next_prompt", {})
     self_check = report.get("self_check", {})
+    git = report.get("git", {})
     lines = [
         "HELIX / SCLAS Validation Suite",
         "==============================",
         "Status: {0}".format(report.get("status", "-")),
+        "Git: {0} @ {1}".format(git.get("branch", "-"), git.get("head", "-")),
         "Project: {0}".format(report.get("project_dir", "-")),
         "Job root: {0}".format(report.get("job_root", "-")),
         "Self-check: {0} (return code {1})".format(
