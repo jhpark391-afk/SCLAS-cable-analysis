@@ -50,6 +50,8 @@ validation_suite_report.json
 validation_suite_report.md
 session_brief.json
 session_brief.md
+progress_timeline.json
+progress_timeline.md
 
 # Presentation/build scratch output
 outputs/

@@ -1,0 +1,9 @@
+@echo off
+setlocal
+cd /d "%~dp0"
+
+set "PYTHON_BIN=python"
+if exist "..\90_env\venv\Scripts\python.exe" set "PYTHON_BIN=..\90_env\venv\Scripts\python.exe"
+
+"%PYTHON_BIN%" code\sclas_progress_timeline.py --save-report --save-markdown %*
+exit /b %ERRORLEVEL%

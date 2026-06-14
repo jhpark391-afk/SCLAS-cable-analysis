@@ -1254,6 +1254,7 @@ def check_next_prompt() -> None:
         "python code/sclas_session_brief.py --save-report --save-markdown",
         "python code/sclas_result_intake.py --save-report --save-markdown",
         "python code/sclas_research_report.py --save-report --save-markdown",
+        "python code/sclas_progress_timeline.py --save-report --save-markdown",
         "python code/sclas_handoff_snapshot.py --save-report --save-markdown",
         "python code/sclas_acceptance_gate.py --save-report --save-markdown",
         "python code/sclas_self_check.py",
@@ -1341,6 +1342,8 @@ def check_validation_suite() -> None:
         fail("Validation suite did not embed result intake status")
     if not report.get("research_report", {}).get("status"):
         fail("Validation suite did not embed research report status")
+    if not report.get("progress_timeline", {}).get("reported_count"):
+        fail("Validation suite did not embed the progress timeline")
     if not report.get("acceptance_gate", {}).get("overall_status"):
         fail("Validation suite did not embed acceptance gate status")
     if not report.get("handoff_snapshot", {}).get("saved_report"):
@@ -1349,6 +1352,8 @@ def check_validation_suite() -> None:
         fail("Validation suite did not save a session brief")
     if not report.get("research_report", {}).get("saved_report"):
         fail("Validation suite did not save a research report")
+    if not report.get("progress_timeline", {}).get("saved_report"):
+        fail("Validation suite did not save a progress timeline")
     if not report.get("next_prompt", {}).get("saved_prompt"):
         fail("Validation suite did not save the next prompt")
     saved_report = Path(report.get("saved_report", ""))
@@ -1359,6 +1364,40 @@ def check_validation_suite() -> None:
         fail("Validation suite Markdown report does not contain the expected heading")
 
     print("[OK] Validation suite")
+
+
+def check_progress_timeline() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_progress_timeline.py"),
+            "--include-self-check",
+            "--json",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("sclas_progress_timeline.py failed:\n" + proc.stdout + proc.stderr)
+    report = json.loads(proc.stdout)
+    if not report.get("reported_count"):
+        fail("Progress timeline did not report any jobs")
+    if not report.get("acceptance_counts"):
+        fail("Progress timeline did not expose acceptance counts")
+    if not report.get("progress_markers"):
+        fail("Progress timeline did not expose progress markers")
+    if not report.get("timeline"):
+        fail("Progress timeline did not expose timeline rows")
+    saved_report = Path(report.get("saved_report", ""))
+    saved_markdown = Path(report.get("saved_markdown_report", ""))
+    if not saved_report.exists() or not saved_markdown.exists():
+        fail("Progress timeline did not save JSON and Markdown reports")
+    if "HELIX / SCLAS Progress Timeline" not in saved_markdown.read_text(encoding="utf-8"):
+        fail("Progress timeline Markdown report does not contain the expected heading")
+
+    print("[OK] Progress timeline")
 
 
 def check_result_intake() -> None:
@@ -1458,6 +1497,7 @@ def main() -> int:
         check_research_ready_acceptance_fixture,
         check_result_intake,
         check_research_report,
+        check_progress_timeline,
         check_handoff_snapshot,
         check_next_prompt,
         check_session_brief,

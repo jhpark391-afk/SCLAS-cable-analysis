@@ -68,6 +68,7 @@ Save a handoff snapshot from the shell with:
 ./run_validation_suite.sh
 ./run_acceptance_gate.sh
 ./run_research_report.sh
+./run_progress_timeline.sh
 ./run_handoff_snapshot.sh
 ./run_next_prompt.sh
 ```
@@ -79,6 +80,7 @@ run_session_brief.bat
 run_validation_suite.bat
 run_acceptance_gate.bat
 run_research_report.bat
+run_progress_timeline.bat
 run_handoff_snapshot.bat
 run_next_prompt.bat
 ```
@@ -102,6 +104,8 @@ python code/sclas_acceptance_gate.py
 python code/sclas_acceptance_gate.py --save-report --save-markdown
 python code/sclas_research_report.py
 python code/sclas_research_report.py jobs/SCLAS_jobs/<job_folder> --save-report --save-markdown
+python code/sclas_progress_timeline.py
+python code/sclas_progress_timeline.py --save-report --save-markdown
 python code/sclas_curve_compare.py
 python code/sclas_curve_compare.py \
   --endpoint jobs/SCLAS_jobs/<endpoint_sweep_folder> \
@@ -163,9 +167,17 @@ remote Abaqus result. It writes `research_report.json` and `research_report.md`
 into the inspected job folder with acceptance gates, CurveV0 comparison, ODB
 field evidence, contact/slip/stress metrics, and notes about whether the result
 is research-ready or still blocked/review-only.
+Use `sclas_progress_timeline.py` or `run_progress_timeline.sh`/`.bat` when the
+remote Abaqus PC has produced several job folders and you want to see progress
+over time. It scans recent jobs chronologically, records acceptance status,
+readiness score, CurveV0 status, CPRESS/slip values, blocked gates, progress
+milestones, and the latest delta versus the previous run. With
+`--save-report` and `--save-markdown`, it writes `progress_timeline.json` and
+`progress_timeline.md` at the project root; both are ignored by git.
 Use `run_validation_suite.sh` or `run_validation_suite.bat` before a major
 handoff or commit when you want self-check, result intake, acceptance gate,
-handoff snapshot, and next-session prompt generation in one repeatable pass. The suite writes
+research report, progress timeline, handoff snapshot, and next-session prompt
+generation in one repeatable pass. The suite writes
 `validation_suite_report.json` and `validation_suite_report.md` at the project
 root, including the current git branch/head for traceability; both are local
 generated artifacts and are ignored by git. The report also records dirty
