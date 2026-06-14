@@ -2024,6 +2024,7 @@ class SCLASRemoteGUI(QMainWindow):
         first_issue = diagnostic_summary.get("first_blocking_issue") or {}
         sweep_shape = report.get("endpoint_sweep_shape", {})
         sweep_children = report.get("endpoint_sweep_children", {})
+        continuous_shape = report.get("continuous_curve_v0_shape", {})
         sweep_mesh = sweep_children.get("mesh_quality_warning_details", {}) if isinstance(sweep_children, dict) else {}
         sweep_b31 = sweep_children.get("b31_beam_warning_details", {}) if isinstance(sweep_children, dict) else {}
         lines = [
@@ -2051,6 +2052,17 @@ class SCLASRemoteGUI(QMainWindow):
                 f"actual_warning_hits: {sweep_children.get('actual_warning_log_hits', '-')}",
                 f"B31 warnings: {self.counts_text(sweep_b31.get('warning_sets'))}",
                 f"distorted elements: {sweep_mesh.get('distorted_reported_element_count', '-')}",
+                "",
+            ])
+        if continuous_shape:
+            lines.extend([
+                "[Continuous CurveV0]",
+                f"shape_checks_passed: {continuous_shape.get('shape_checks_passed', '-')}",
+                f"numeric_rows: {continuous_shape.get('numeric_rows', '-')}",
+                f"near_zero_count: {continuous_shape.get('near_zero_count', '-')}",
+                f"odd_symmetry_max_relative: {continuous_shape.get('odd_symmetry_max_relative_moment_sum', '-')}",
+                f"max_abs_curvature_1_per_m: {continuous_shape.get('max_abs_curvature_1_per_m', '-')}",
+                f"max_abs_moment_kn_m: {continuous_shape.get('max_abs_moment_kn_m', '-')}",
                 "",
             ])
         for key, title in [

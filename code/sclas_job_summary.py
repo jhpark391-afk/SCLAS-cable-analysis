@@ -50,7 +50,15 @@ def latest_job_dir(job_root: Path) -> Path:
             candidates.append(path)
     if not candidates:
         raise FileNotFoundError("No SCLAS job folders were found under: {0}".format(job_root))
-    return max(candidates, key=lambda path: path.stat().st_mtime)
+    def job_mtime(path: Path) -> float:
+        mtimes = []
+        for file_name in ["result_summary.json", "result_data.csv", "offline_diagnostics_report.json"]:
+            candidate = path / file_name
+            if candidate.exists():
+                mtimes.append(candidate.stat().st_mtime)
+        return max(mtimes) if mtimes else path.stat().st_mtime
+
+    return max(candidates, key=job_mtime)
 
 
 def quality_details(report: dict):
@@ -96,10 +104,13 @@ def quality_details(report: dict):
 
 def health_label(report: dict, details: dict) -> str:
     counts = report.get("diagnostic_summary", {}).get("issue_counts", {})
+    manifest = report.get("abaqus_mesh_manifest_json", {})
     if int_scalar(counts.get("error")):
         return "BLOCKED"
     if details.get("blocking_log_hits"):
         return "BLOCKED"
+    if manifest.get("contact_pair_scaffold_status") in ("partial", "failed"):
+        return "REVIEW"
     if int_scalar(counts.get("warning")) or details.get("actual_warning_hits") or details.get("b31_total_warning_sets"):
         return "REVIEW"
     return "PASS"
@@ -110,6 +121,7 @@ def collect_summary(report: dict) -> dict:
     result_summary = report.get("result_summary_json", {})
     sweep_shape = report.get("endpoint_sweep_shape", {})
     sweep_children = report.get("endpoint_sweep_children", {})
+    continuous_shape = report.get("continuous_curve_v0_shape", {})
     manifest = report.get("abaqus_mesh_manifest_json", {})
     logs = report.get("solver_logs", {})
     diagnostic = report.get("diagnostic_summary", {})
@@ -135,6 +147,12 @@ def collect_summary(report: dict) -> dict:
         "endpoint_sweep_validated": result_summary.get("endpoint_sweep_validated"),
         "endpoint_sweep_shape_passed": sweep_shape.get("shape_checks_passed"),
         "endpoint_sweep_children_deep_validated": sweep_children.get("all_children_deep_validated") if isinstance(sweep_children, dict) else None,
+        "continuous_curve_v0_shape_passed": continuous_shape.get("shape_checks_passed"),
+        "continuous_curve_v0_rows": continuous_shape.get("numeric_rows"),
+        "continuous_curve_v0_near_zero_count": continuous_shape.get("near_zero_count"),
+        "continuous_curve_v0_symmetry_error": continuous_shape.get("odd_symmetry_max_relative_moment_sum"),
+        "continuous_curve_v0_max_abs_curvature": continuous_shape.get("max_abs_curvature_1_per_m"),
+        "continuous_curve_v0_max_abs_moment": continuous_shape.get("max_abs_moment_kn_m"),
         "issue_counts": issue_counts,
         "recommended_next_action": diagnostic.get("recommended_next_action"),
     }
@@ -160,6 +178,16 @@ def print_human(summary: dict) -> None:
         scalar(summary.get("endpoint_sweep_shape_passed")),
         scalar(summary.get("endpoint_sweep_children_deep_validated")),
         scalar(summary.get("child_job_count")),
+    ))
+    print("Continuous CurveV0: shape={0}, rows={1}, zero_returns={2}, symmetry_error={3}".format(
+        scalar(summary.get("continuous_curve_v0_shape_passed")),
+        scalar(summary.get("continuous_curve_v0_rows")),
+        scalar(summary.get("continuous_curve_v0_near_zero_count")),
+        scalar(summary.get("continuous_curve_v0_symmetry_error")),
+    ))
+    print("Continuous CurveV0 scale: max|kappa|={0}, max|M|={1}".format(
+        scalar(summary.get("continuous_curve_v0_max_abs_curvature")),
+        scalar(summary.get("continuous_curve_v0_max_abs_moment")),
     ))
     print("Warnings: actual={0}, blocking={1}, categories={2}".format(
         scalar(summary.get("actual_warning_hits")),

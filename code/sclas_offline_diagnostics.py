@@ -429,6 +429,95 @@ def inspect_endpoint_sweep_shape(job_dir: Path, report: dict, summary_data: dict
     )
 
 
+def inspect_continuous_curve_v0_shape(job_dir: Path, report: dict, summary_data: dict, summary_section: dict) -> None:
+    if summary_data.get("source") != "SCLAS_ABAQUS_ODB_EXTRACTOR":
+        return
+    if summary_section.get("abaqus_curve_class") != "multi_point_curve_v0":
+        return
+
+    path = job_dir / "result_data.csv"
+    section = {
+        "checked": path.exists(),
+    }
+    report["continuous_curve_v0_shape"] = section
+    if not path.exists():
+        return
+
+    numeric_rows, invalid_rows = read_numeric_csv_rows(path)
+    section["numeric_rows"] = len(numeric_rows)
+    section["invalid_numeric_rows"] = invalid_rows
+    section["numeric_format_valid"] = not invalid_rows
+    if invalid_rows:
+        add_issue(report, "error", "Continuous CurveV0 result_data.csv contains non-numeric rows", invalid_rows)
+        return
+    if not numeric_rows:
+        return
+
+    curvatures = [row[0] for row in numeric_rows]
+    moments = [row[1] for row in numeric_rows]
+    max_abs_curvature = max([abs(value) for value in curvatures] + [0.0])
+    max_abs_moment = max([abs(value) for value in moments] + [0.0])
+    curvature_tol = max(max(max_abs_curvature, 1.0) * 1e-6, 1e-12)
+    moment_tol = max(max(max_abs_moment, 1.0) * 1e-6, 1e-9)
+
+    positive = [(c, m) for c, m in numeric_rows if c > curvature_tol]
+    negative = [(c, m) for c, m in numeric_rows if c < -curvature_tol]
+    near_zero = [(c, m) for c, m in numeric_rows if abs(c) <= curvature_tol]
+    sign_consistent = all(c * m >= -moment_tol for c, m in positive + negative)
+
+    symmetry_errors = []
+    for pos_c, pos_m in positive:
+        candidates = [
+            (neg_c, neg_m)
+            for neg_c, neg_m in negative
+            if abs(abs(neg_c) - pos_c) <= max(abs(pos_c) * 0.02, curvature_tol)
+        ]
+        if not candidates:
+            continue
+        neg_c, neg_m = min(candidates, key=lambda item: abs(abs(item[0]) - pos_c))
+        abs_error = abs(pos_m + neg_m)
+        rel_error = abs_error / max(abs(pos_m), abs(neg_m), moment_tol)
+        symmetry_errors.append({
+            "positive_curvature": pos_c,
+            "negative_curvature": neg_c,
+            "moment_sum_abs": abs_error,
+            "moment_sum_relative": rel_error,
+        })
+
+    max_symmetry_rel = max([item["moment_sum_relative"] for item in symmetry_errors] + [0.0])
+    section["has_positive_branch"] = bool(positive)
+    section["has_negative_branch"] = bool(negative)
+    section["near_zero_count"] = len(near_zero)
+    section["return_to_zero_present"] = len(near_zero) >= 2
+    section["sign_consistent"] = sign_consistent
+    section["odd_symmetry_pairs"] = len(symmetry_errors)
+    section["odd_symmetry_max_relative_moment_sum"] = max_symmetry_rel
+    section["odd_symmetry_pass"] = bool(symmetry_errors) and max_symmetry_rel <= 0.05
+    section["max_abs_curvature_1_per_m"] = max_abs_curvature
+    section["max_abs_moment_kn_m"] = max_abs_moment
+
+    if len(numeric_rows) < 5:
+        add_issue(report, "warning", "Continuous CurveV0 has fewer than five numeric rows", len(numeric_rows))
+    if not section["has_positive_branch"] or not section["has_negative_branch"]:
+        add_issue(report, "warning", "Continuous CurveV0 does not contain both positive and negative curvature branches")
+    if not section["return_to_zero_present"]:
+        add_issue(report, "warning", "Continuous CurveV0 does not return near zero at least twice")
+    if not section["sign_consistent"]:
+        add_issue(report, "warning", "Continuous CurveV0 moment sign is not consistent with curvature sign")
+    if not section["odd_symmetry_pass"]:
+        add_issue(report, "warning", "Continuous CurveV0 failed the basic odd-symmetry check", max_symmetry_rel)
+
+    section["shape_checks_passed"] = (
+        section["numeric_format_valid"]
+        and len(numeric_rows) >= 5
+        and section["has_positive_branch"]
+        and section["has_negative_branch"]
+        and section["return_to_zero_present"]
+        and section["sign_consistent"]
+        and section["odd_symmetry_pass"]
+    )
+
+
 def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: dict) -> None:
     if summary_data.get("source") != "SCLAS_CURVE_V0_ENDPOINT_SWEEP":
         return
@@ -688,6 +777,7 @@ def inspect_summary(job_dir: Path, report: dict) -> None:
             })
         inspect_endpoint_sweep_shape(job_dir, report, data)
         inspect_endpoint_sweep_children(job_dir, report, data)
+    inspect_continuous_curve_v0_shape(job_dir, report, data, section)
     for key in required:
         if key not in data:
             add_issue(report, "warning", "result_summary.json missing key", key)
@@ -880,6 +970,7 @@ def summarize_report(report: dict) -> None:
     manifest = report.get("abaqus_mesh_manifest_json", {})
     summary = report.get("result_summary_json", {})
     sweep_shape = report.get("endpoint_sweep_shape", {})
+    continuous_shape = report.get("continuous_curve_v0_shape", {})
     sweep_children = report.get("endpoint_sweep_children", {})
     sweep_b31 = sweep_children.get("b31_beam_warning_details", {}) if isinstance(sweep_children, dict) else {}
     solver_b31 = logs.get("b31_beam_warning_details", {}) if isinstance(logs, dict) else {}
@@ -920,6 +1011,8 @@ def summarize_report(report: dict) -> None:
                 action = "Stable two-row Abaqus ODB smoke completed; keep it as the bridge baseline and design the multi-point curve as a separate backend task."
         elif summary.get("abaqus_curve_class") == "endpoint_sweep_curve_v0":
             action = "Endpoint sweep curve-v0 was extracted; validate it against a continuous bending path before treating it as research data."
+        elif summary.get("abaqus_curve_class") == "multi_point_curve_v0" and continuous_shape.get("shape_checks_passed"):
+            action = "Continuous CurveV0 multi-point ODB curve passed the basic shape checks; next compare it against the endpoint sweep and start adding calibrated contact/friction outputs."
         elif summary.get("abaqus_is_research_curve"):
             action = "A multi-point Abaqus ODB curve was extracted; validate contact warnings, curve shape, and calibration metrics next."
         else:
@@ -1018,6 +1111,7 @@ def markdown_report(report: dict) -> str:
     deck_section = report.get("input_deck", {})
     logs_section = report.get("solver_logs", {})
     sweep_shape_section = report.get("endpoint_sweep_shape", {})
+    continuous_shape_section = report.get("continuous_curve_v0_shape", {})
     sweep_children_section = report.get("endpoint_sweep_children", {})
     sweep_mesh_quality = sweep_children_section.get("mesh_quality_warning_details", {}) if isinstance(sweep_children_section, dict) else {}
     sweep_b31_quality = sweep_children_section.get("b31_beam_warning_details", {}) if isinstance(sweep_children_section, dict) else {}
@@ -1055,6 +1149,12 @@ def markdown_report(report: dict) -> str:
         ("Sweep distorted sample min angle", scalar(sweep_mesh_quality.get("distorted_sample_min_angle"))),
         ("Sweep odd symmetry max rel", scalar(sweep_shape_section.get("odd_symmetry_max_relative_moment_sum"))),
         ("Sweep factor scale", scalar(sweep_shape_section.get("factor_curvature_scale"))),
+        ("Continuous CurveV0 shape checks", scalar(continuous_shape_section.get("shape_checks_passed"))),
+        ("Continuous CurveV0 rows", scalar(continuous_shape_section.get("numeric_rows"))),
+        ("Continuous CurveV0 zero returns", scalar(continuous_shape_section.get("near_zero_count"))),
+        ("Continuous CurveV0 odd symmetry max rel", scalar(continuous_shape_section.get("odd_symmetry_max_relative_moment_sum"))),
+        ("Continuous CurveV0 max |kappa|", scalar(continuous_shape_section.get("max_abs_curvature_1_per_m"))),
+        ("Continuous CurveV0 max |M|", scalar(continuous_shape_section.get("max_abs_moment_kn_m"))),
         ("Input deck", scalar(deck_section.get("file"))),
         ("Couplings after End Assembly", scalar(deck_section.get("coupling_after_end_assembly"))),
         ("Solver log matches", scalar(len(logs_section.get("matches", [])))),
@@ -1138,7 +1238,7 @@ def print_report(report: dict) -> None:
     print("Issue counts:", issue_counts)
     print()
 
-    for key in ["result_data_csv", "result_summary_json", "endpoint_sweep_shape", "endpoint_sweep_children", "abaqus_mesh_manifest_json", "input_deck", "solver_logs"]:
+    for key in ["result_data_csv", "result_summary_json", "endpoint_sweep_shape", "endpoint_sweep_children", "continuous_curve_v0_shape", "abaqus_mesh_manifest_json", "input_deck", "solver_logs"]:
         section = report.get(key, {})
         print("[{0}]".format(key))
         for item_key, value in section.items():

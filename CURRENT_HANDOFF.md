@@ -2087,6 +2087,26 @@ endpoint sweep validation, actual warning counts, mesh distortion counts, B31
 warning sets, beam-orientation manifest status, and the same recommended next
 action used by offline diagnostics.
 
+## 2026-06-14 Mac Support Update - Continuous CurveV0 Diagnostics
+
+Mac-side diagnostics now recognize
+`abaqus_result_quality.curve_class=multi_point_curve_v0` jobs from
+`run_curve_v0_continuous.ps1`.
+
+`code/sclas_offline_diagnostics.py` adds `continuous_curve_v0_shape` with:
+
+- numeric row count and numeric-format status
+- positive/negative curvature branch detection
+- return-to-zero row count
+- moment-curvature sign consistency
+- odd-symmetry relative error
+- max absolute curvature and moment
+- `shape_checks_passed`
+
+`code/sclas_job_summary.py` and the GUI Diagnose selected panel surface the
+same continuous CurveV0 shape fields. `code/sclas_self_check.py` now creates a
+synthetic continuous CurveV0 ODB-style job and verifies this path.
+
 Verification on Mac:
 
 ```bash

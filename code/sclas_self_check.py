@@ -549,6 +549,164 @@ def check_endpoint_sweep_diagnostics() -> None:
     print(f"[OK] Endpoint sweep diagnostics: {job_dir}")
 
 
+def check_continuous_curve_v0_diagnostics() -> None:
+    job_dir = JOBS_DIR / ("self_check_continuous_curve_v0_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
+    job_dir.mkdir(parents=True, exist_ok=True)
+    rows = [
+        ["curvature_1_per_m", "moment_kn_m"],
+        ["0", "0"],
+        ["0.008", "2.58674475"],
+        ["0", "-4.57153059542e-08"],
+        ["-0.008", "-2.586701"],
+        ["0", "-8.23443464469e-10"],
+    ]
+    with (job_dir / "result_data.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerows(rows)
+
+    odb_summary = {
+        "status": "extracted",
+        "method": "history",
+        "rows_written": 5,
+    }
+    summary = {
+        "source": "SCLAS_ABAQUS_ODB_EXTRACTOR",
+        "status": "completed",
+        "rows_written": 5,
+        "num_points": 5,
+        "max_abs_moment_kn_m": 2.58674475,
+        "result_contract": {
+            "csv_file": "result_data.csv",
+            "required_columns": ["curvature_1_per_m", "moment_kn_m"],
+            "summary_file": "result_summary.json",
+            "primary_result": "bending moment-curvature loop",
+        },
+        "mesh_status": {
+            "status": "abaqus_mesh_created",
+        },
+        "backend_readiness": {
+            "bending_stick_slip": {
+                "requested": True,
+                "status": "abaqus_odb_curve_v0",
+            },
+            "source": "SCLAS_ABAQUS_ODB_EXTRACTOR",
+        },
+        "odb_extraction": odb_summary,
+        "abaqus_result_quality": {
+            "curve_class": "multi_point_curve_v0",
+            "is_research_curve": True,
+            "backend_readiness_status": "abaqus_odb_curve_v0",
+        },
+    }
+    manifest = {
+        "status": "abaqus_mesh_created",
+        "contact_region_scaffold_status": "created",
+        "contact_interaction_scaffold_status": "created",
+        "contact_pair_scaffold_status": "partial",
+        "boundary_condition_scaffold_status": "created",
+        "abaqus_files": ["continuous_curve_v0.inp"],
+        "contact_binding_scaffold": [],
+        "components": [],
+        "beam_orientation_adjustments": [
+            {
+                "component": "ARMOUR",
+                "status": "assigned",
+                "assigned_count": 48,
+                "expected_segments": 48,
+                "mode": "bishop_segment",
+            }
+        ],
+    }
+    (job_dir / "result_summary.json").write_text(json.dumps(summary, indent=4), encoding="utf-8")
+    (job_dir / "odb_extraction_summary.json").write_text(json.dumps(odb_summary, indent=4), encoding="utf-8")
+    (job_dir / "abaqus_mesh_manifest.json").write_text(json.dumps(manifest, indent=4), encoding="utf-8")
+    (job_dir / "continuous_curve_v0.inp").write_text(
+        "\n".join([
+            "*Heading",
+            "** synthetic continuous CurveV0 self-check input deck",
+            "*Assembly, name=Assembly",
+            "*End Assembly",
+            "*Step, name=SCLAS_CyclicBendingStep, nlgeom=YES",
+            "*Static",
+            "1., 1.",
+            "*End Step",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    (job_dir / "solver_stdout.txt").write_text(
+        "\n".join([
+            "Abaqus JOB continuous_curve_v0 COMPLETED",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_offline_diagnostics.py"),
+            str(job_dir),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("Continuous CurveV0 diagnostics failed:\n" + proc.stdout + proc.stderr)
+    report = json.loads(proc.stdout)
+    if any(item.get("severity") == "error" for item in report.get("issues", [])):
+        fail("Continuous CurveV0 diagnostics reported errors: " + json.dumps(report.get("issues"), indent=2))
+    shape = report.get("continuous_curve_v0_shape", {})
+    if not shape.get("shape_checks_passed"):
+        fail("Continuous CurveV0 shape diagnostics did not pass: " + json.dumps(shape, indent=2))
+    if shape.get("numeric_rows") != 5 or shape.get("near_zero_count") < 3:
+        fail("Continuous CurveV0 shape diagnostics did not read the expected path rows")
+    if abs(shape.get("max_abs_curvature_1_per_m", 0.0) - 0.008) > 1e-12:
+        fail("Continuous CurveV0 shape diagnostics reported the wrong max curvature")
+    action = report.get("diagnostic_summary", {}).get("recommended_next_action", "")
+    if "Continuous CurveV0 multi-point ODB curve passed" not in action:
+        fail("Continuous CurveV0 diagnostics recommended the wrong next action: " + action)
+
+    summary_proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_job_summary.py"),
+            str(job_dir),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if summary_proc.returncode != 0:
+        fail("sclas_job_summary.py failed for continuous CurveV0:\n" + summary_proc.stdout + summary_proc.stderr)
+    job_summary = json.loads(summary_proc.stdout)
+    if job_summary.get("health") != "REVIEW":
+        fail("Job summary should classify partial contact scaffold continuous CurveV0 as REVIEW")
+    if not job_summary.get("continuous_curve_v0_shape_passed"):
+        fail("Job summary did not expose continuous CurveV0 shape status")
+    if job_summary.get("continuous_curve_v0_rows") != 5:
+        fail("Job summary did not expose continuous CurveV0 row count")
+
+    latest_proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_job_summary.py"),
+            "--latest",
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if latest_proc.returncode != 0:
+        fail("sclas_job_summary.py --latest failed:\n" + latest_proc.stdout + latest_proc.stderr)
+    latest_summary = json.loads(latest_proc.stdout)
+    if Path(latest_summary.get("job_dir", "")).resolve() != job_dir.resolve():
+        fail("Job summary --latest did not select the newest continuous CurveV0 self-check job")
+
+    print(f"[OK] Continuous CurveV0 diagnostics: {job_dir}")
+
+
 def main() -> int:
     checks = [
         check_pyproj_references,
@@ -556,6 +714,7 @@ def main() -> int:
         check_compile,
         check_backend_contract,
         check_endpoint_sweep_diagnostics,
+        check_continuous_curve_v0_diagnostics,
     ]
     try:
         for check in checks:
