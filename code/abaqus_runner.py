@@ -1238,7 +1238,35 @@ def build_abaqus_mesh_model(payload, job_dir):
                 createStepName="Initial",
                 region=assembly.sets[record["left_reference_point_set"]],
             )
-            if multistep_smoke:
+            if multistep_smoke and hasattr(model, "VelocityBC"):
+                previous_rotation = 0.0
+                first_rotation = record["step_sequence"][0]["target_rotation_rad"]
+                model.VelocityBC(
+                    name="SCLAS_RightEnd_CyclicRotation",
+                    createStepName=record["step"],
+                    region=assembly.sets[record["right_reference_point_set"]],
+                    v1=0.0,
+                    v2=0.0,
+                    v3=0.0,
+                    vr1=0.0,
+                    vr2=first_rotation - previous_rotation,
+                    vr3=0.0,
+                )
+                previous_rotation = first_rotation
+                for step_item in record.get("step_sequence", [])[1:]:
+                    target_rotation = step_item["target_rotation_rad"]
+                    model.boundaryConditions["SCLAS_RightEnd_CyclicRotation"].setValuesInStep(
+                        stepName=step_item["name"],
+                        vr2=target_rotation - previous_rotation,
+                    )
+                    previous_rotation = target_rotation
+                record["rotation_bc_type"] = "velocity_delta"
+                record["notes"].append(
+                    "Multistep finite rotations use VelocityBC deltas to avoid Abaqus finite-rotation displacement warnings."
+                )
+            elif multistep_smoke:
+                if not hasattr(model, "VelocityBC"):
+                    record["optional_warnings"].append("model.VelocityBC unavailable; using displacement multistep rotation BC")
                 model.DisplacementBC(
                     name="SCLAS_RightEnd_CyclicRotation",
                     createStepName=record["step"],
@@ -1255,6 +1283,7 @@ def build_abaqus_mesh_model(payload, job_dir):
                         stepName=step_item["name"],
                         ur2=step_item["target_rotation_rad"],
                     )
+                record["rotation_bc_type"] = "displacement_target"
             else:
                 if curve_endpoint_mode:
                     model.DisplacementBC(
@@ -1281,6 +1310,7 @@ def build_abaqus_mesh_model(payload, job_dir):
                         ur3=0.0,
                         amplitude=record["amplitude"],
                     )
+                record["rotation_bc_type"] = "displacement_target"
             record["created_regions"].append("reference_point_bcs")
             required_created += 1
         except Exception as exc:

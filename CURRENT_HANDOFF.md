@@ -1861,6 +1861,94 @@ Interpretation:
   counts, and beam-orientation manifest summaries. This is display-only and
   does not change the Abaqus runner.
 
+## Continuous CurveV0 Single-Job Path - 2026-06-14 KST
+
+After the endpoint sweep stabilized, the next Lab-PC pass revisited a single
+Abaqus job with multiple accepted bending states. Earlier multi-step attempts
+were too slow because they used the full GUI curvature. The successful reduced
+path scales the GUI `max_curvature_1_per_m` by `0.1`, matching the endpoint
+sweep magnitude, then runs:
+
+```text
+0 -> +k -> 0 -> -k -> 0
+```
+
+New automation:
+
+```text
+run_curve_v0_continuous.ps1
+```
+
+Default command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_continuous.ps1
+```
+
+What it does:
+
+- Finds the latest GUI `job_*` source unless `-JobDir` is supplied.
+- Creates a temporary `continuous_curve_v0_source_...` source job with
+  `max_curvature_1_per_m = source.max_curvature_1_per_m * CurveScale`.
+- Calls `run_lab_abaqus_smoke.ps1 -CurveV0 -MultiStepSmoke` with
+  `-CurveV0CurvatureScale 1.0` so the reduced curvature is not scaled twice.
+- Validates that the generated child job has:
+  `result_summary.json.source=SCLAS_ABAQUS_ODB_EXTRACTOR`,
+  `odb_extraction.status=extracted`, at least five ODB rows, at least five CSV
+  rows, and `abaqus_result_quality.curve_class=multi_point_curve_v0`.
+
+The first automated run before the finite-rotation BC cleanup created:
+
+```text
+jobs\SCLAS_jobs\curve_v0_20260614_145218
+rows_written=5
+actual_warning_match_count=1
+warning=FINITE ROTATION BOUNDARY CONDITION SPECIFIED IN MULTISTEP THREE-DIMENSIONAL ANALYSIS. TYPE=VELOCITY SHOULD BE USED
+```
+
+The runner was then updated so multistep bending uses Abaqus `VelocityBC`
+deltas when that API is available. This preserves the same target UR2 path but
+removes Abaqus' finite-rotation displacement warning. If `VelocityBC` is not
+available, the runner falls back to the previous displacement-target BC and
+records that in `boundary_condition_scaffold.optional_warnings`.
+
+Final automated continuous verification:
+
+```text
+jobs\SCLAS_jobs\curve_v0_20260614_145420
+source=SCLAS_ABAQUS_ODB_EXTRACTOR
+status=completed
+odb_extraction.status=extracted
+odb_extraction.rows_written=5
+abaqus_result_quality.curve_class=multi_point_curve_v0
+actual_warning_match_count=0
+warning_sets={}
+b31_warning_sets={}
+rotation_bc_type=velocity_delta
+target_curvature_1_per_m=0.008
+```
+
+Result rows:
+
+```text
+curvature_1_per_m,moment_kn_m
+0,-0
+0.0079999997979,2.58674475
+0,-4.57153059542e-08
+-0.0079999997979,-2.586701
+0,-8.23443464469e-10
+```
+
+Interpretation:
+
+- The repository now has three useful Abaqus validation levels:
+  fast `SmallSmoke`, five-child endpoint sweep, and a single-job continuous
+  CurveV0 path.
+- The continuous path is the best current candidate for the first real
+  moment-curvature curve, but it still uses the reduced smoke mesh and simplified
+  current contact scaffold. Treat it as a candidate curve pending contact/slip
+  validation and calibration, not as final paper-grade physics.
+
 ## Important Files
 
 ```text
@@ -1870,6 +1958,8 @@ code/sclas_remote_gui_final_code.txt
 code/abaqus_runner.py
 code/SCLAS_test/abaqus_runner.py
 run_lab_abaqus_smoke.ps1
+run_curve_v0_sweep.ps1
+run_curve_v0_continuous.ps1
 README_SCLAS_WORKFLOW.md
 README_LITERATURE_NOTES.md
 README_WINDOWS_VISUAL_STUDIO.md
@@ -1982,7 +2072,8 @@ Still needed for a paper-level implementation:
 
 1. Preserve the stable Lab-PC validation loop:
    `run_lab_abaqus_smoke.ps1 -SmallSmoke` for bridge health, then
-   `run_curve_v0_sweep.ps1` for the five-factor endpoint sweep.
+   `run_curve_v0_sweep.ps1` for the five-factor endpoint sweep, and
+   `run_curve_v0_continuous.ps1` for the single-job multi-point curve.
 2. If any Abaqus run exceeds 20 minutes without visible progress, stop waiting,
    record it as a long-running case, inspect current logs, and retry with fewer
    factors or a reduced mesh.
@@ -1996,8 +2087,8 @@ Still needed for a paper-level implementation:
    `actual_warning_match_count=0`.
 5. Add true periodic boundary equations or a documented equivalent-cell
    approximation.
-6. Extend ODB extraction beyond the current endpoint rows toward local slip,
-   contact pressure, stress, and fatigue-oriented summary metrics.
+6. Extend ODB extraction beyond right-reference-point `UR2`/`RM2` toward local
+   slip, contact pressure, stress, and fatigue-oriented summary metrics.
 7. After each meaningful task, update this file, commit, and push only code/docs
    changes, never generated Abaqus job artifacts.
 

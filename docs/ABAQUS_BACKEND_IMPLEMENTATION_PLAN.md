@@ -38,8 +38,7 @@ still work.
 
 Do not treat the two-row smoke as a research moment-curvature curve. Do not
 spend interactive Lab-PC time trying to force the small smoke to emit more
-frames. Attempts to force additional increments or multi-step paths made the
-current nonlinear contact scaffold too slow for rapid testing.
+frames. Multi-point curves now use separate explicit v0 helpers.
 
 `result_summary.json` should distinguish result quality:
 
@@ -78,7 +77,7 @@ Recommended v0 approach:
 7. After curve-v0 works, add contact pressure/slip summaries to JSON rather
    than widening `result_data.csv`.
 
-Current command shape:
+Endpoint-sweep command shape:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run_curve_v0_sweep.ps1 `
@@ -103,10 +102,49 @@ Default factors:
 -0.1*kmax, -0.05*kmax, 0, +0.05*kmax, +0.1*kmax
 ```
 
-This is more robust than trying to force intermediate ODB frames from one
-nonlinear contact step. It is not a full hysteresis simulation yet, but it is
-the preferred first multi-point Abaqus curve because each point follows the
-same stable single-step pattern as the smoke baseline.
+This is robust because each point follows the same stable single-step pattern
+as the smoke baseline. It is useful for checking monotonic endpoint shape and
+for comparing child-job health.
+
+Continuous single-job command shape:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_continuous.ps1 `
+  -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e" `
+  -CurveScale 0.1 `
+  -PathFactors 1,0,-1,0
+```
+
+The continuous helper creates a temporary source job with
+`max_curvature_1_per_m = source.max_curvature_1_per_m * CurveScale`, then runs a
+reduced multi-step `-CurveV0 -MultiStepSmoke` child with automatic solver
+increment control. The current default path gives:
+
+```text
+0 -> +k -> 0 -> -k -> 0
+```
+
+As of 2026-06-14, the Lab PC verified
+`jobs\SCLAS_jobs\curve_v0_20260614_145420`:
+
+```text
+odb_extraction.status=extracted
+odb_extraction.rows_written=5
+abaqus_result_quality.curve_class=multi_point_curve_v0
+actual_warning_match_count=0
+rotation_bc_type=velocity_delta
+```
+
+The `velocity_delta` multistep boundary condition is important: it uses Abaqus
+`VelocityBC` deltas for finite rotations and avoids the multistep finite
+rotation warning produced by displacement-target BC updates. If Abaqus exposes
+no `VelocityBC` API, the runner falls back to displacement targets and records
+that in the boundary-condition scaffold.
+
+The continuous path is now the preferred candidate for the first single-job
+moment-curvature curve. It still uses the reduced smoke mesh and simplified
+contact scaffold, so validate contact/slip fields and calibration before
+treating it as paper-grade physics.
 
 ## Phase 1: Mesh scaffold verification
 
