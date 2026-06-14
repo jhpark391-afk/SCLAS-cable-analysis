@@ -935,6 +935,35 @@ def check_handoff_snapshot() -> None:
     print("[OK] Handoff snapshot")
 
 
+def check_next_prompt() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_next_prompt.py"),
+            "--include-self-check",
+            "--save",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("sclas_next_prompt.py failed:\n" + proc.stdout + proc.stderr)
+    prompt_path = PROJECT_DIR / "NEXT_CODEX_PROMPT.md"
+    if not prompt_path.exists():
+        fail("sclas_next_prompt.py did not save NEXT_CODEX_PROMPT.md")
+    prompt = prompt_path.read_text(encoding="utf-8")
+    for expected in [
+        "git pull",
+        "python code/sclas_handoff_snapshot.py --save-report --save-markdown",
+        "python code/sclas_self_check.py",
+        "contact preload",
+    ]:
+        if expected not in prompt:
+            fail("NEXT_CODEX_PROMPT.md missing expected text: " + expected)
+
+    print("[OK] Next Codex prompt")
+
+
 def main() -> int:
     checks = [
         check_pyproj_references,
@@ -947,6 +976,7 @@ def main() -> int:
         check_latest_job_filtering,
         check_project_status,
         check_handoff_snapshot,
+        check_next_prompt,
     ]
     try:
         for check in checks:

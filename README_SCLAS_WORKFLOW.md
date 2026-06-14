@@ -82,6 +82,7 @@ python code/sclas_job_index.py --save-report --save-markdown
 python code/sclas_project_status.py
 python code/sclas_project_status.py --save-report --save-markdown
 python code/sclas_handoff_snapshot.py --save-report --save-markdown
+python code/sclas_next_prompt.py --save
 python code/sclas_curve_compare.py
 python code/sclas_curve_compare.py \
   --endpoint jobs/SCLAS_jobs/<endpoint_sweep_folder> \
@@ -110,6 +111,8 @@ Use `sclas_handoff_snapshot.py --save-report --save-markdown` before switching
 between Mac, home, and remote-lab Codex sessions. It writes
 `handoff_snapshot.json` and `handoff_snapshot.md` at the project root with the
 current git state, project status, job index, best job, and next action.
+Use `sclas_next_prompt.py --save` to write `NEXT_CODEX_PROMPT.md`, a ready-made
+prompt for the next Mac/home/remote Codex session.
 If a CurveV0 comparison report exists in a job folder, `sclas_job_summary.py`
 also prints the comparison status, peak ratio, and branch deltas.
 Use `sclas_curve_compare.py` after both endpoint sweep and continuous CurveV0

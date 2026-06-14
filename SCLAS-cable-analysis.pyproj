@@ -31,6 +31,7 @@
     <Compile Include="code\sclas_job_filters.py" />
     <Compile Include="code\sclas_job_index.py" />
     <Compile Include="code\sclas_handoff_snapshot.py" />
+    <Compile Include="code\sclas_next_prompt.py" />
     <Compile Include="code\sclas_odb_extractor.py" />
     <Compile Include="code\sclas_mac_vscode.py" />
     <Compile Include="code\sclas_remote_gui.py" />
