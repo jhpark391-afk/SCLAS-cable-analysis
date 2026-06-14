@@ -43,6 +43,8 @@ local_notes/
 
 # Local handoff archives
 handoff_packages/
+handoff_snapshot.json
+handoff_snapshot.md
 
 # Presentation/build scratch output
 outputs/

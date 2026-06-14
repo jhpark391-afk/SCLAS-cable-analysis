@@ -900,6 +900,41 @@ def check_project_status() -> None:
     print("[OK] Project status dashboard")
 
 
+def check_handoff_snapshot() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_handoff_snapshot.py"),
+            "--json",
+            "--include-self-check",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("sclas_handoff_snapshot.py failed:\n" + proc.stdout + proc.stderr)
+    snapshot = json.loads(proc.stdout)
+    focus = snapshot.get("handoff_focus", {})
+    if not focus.get("best_job"):
+        fail("Handoff snapshot did not expose a best job")
+    if "contact preload" not in str(focus.get("next_action", "")).lower():
+        fail("Handoff snapshot did not carry the current contact preload next action")
+    if not snapshot.get("project_status", {}).get("completion_flags"):
+        fail("Handoff snapshot did not embed project status")
+    if not snapshot.get("job_index", {}).get("jobs"):
+        fail("Handoff snapshot did not embed the job index")
+    saved_report = Path(snapshot.get("saved_report", ""))
+    saved_markdown = Path(snapshot.get("saved_markdown_report", ""))
+    if not saved_report.exists() or not saved_markdown.exists():
+        fail("Handoff snapshot did not save JSON and Markdown reports")
+    if "HELIX / SCLAS Handoff Snapshot" not in saved_markdown.read_text(encoding="utf-8"):
+        fail("Handoff snapshot Markdown report does not contain the expected heading")
+
+    print("[OK] Handoff snapshot")
+
+
 def main() -> int:
     checks = [
         check_pyproj_references,
@@ -911,6 +946,7 @@ def main() -> int:
         check_curve_v0_comparison,
         check_latest_job_filtering,
         check_project_status,
+        check_handoff_snapshot,
     ]
     try:
         for check in checks:
