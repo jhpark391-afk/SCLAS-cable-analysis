@@ -50,7 +50,7 @@ run_self_check.bat
 After copying or pulling a remote Abaqus result folder, run:
 
 ```bat
-python code\sclas_acceptance_gate.py --save-report --save-markdown
+run_acceptance_gate.bat
 ```
 
 This gives a research-readiness pass/review/blocked decision for the latest job.

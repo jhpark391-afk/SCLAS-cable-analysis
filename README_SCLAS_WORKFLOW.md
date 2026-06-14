@@ -63,6 +63,7 @@ run_self_check.bat
 Save a handoff snapshot from the shell with:
 
 ```bash
+./run_acceptance_gate.sh
 ./run_handoff_snapshot.sh
 ./run_next_prompt.sh
 ```
@@ -70,6 +71,7 @@ Save a handoff snapshot from the shell with:
 On Windows:
 
 ```bat
+run_acceptance_gate.bat
 run_handoff_snapshot.bat
 run_next_prompt.bat
 ```
@@ -127,6 +129,8 @@ warning budget. With `--save-report` and `--save-markdown`, it writes
 job folder. The handoff snapshot and generated next-session prompt also carry
 the latest acceptance status so the next Codex session starts from the same
 pass/review/blocked evidence.
+Use `run_acceptance_gate.sh` or `run_acceptance_gate.bat` for the same saved
+report flow without typing the Python command.
 If a CurveV0 comparison report exists in a job folder, `sclas_job_summary.py`
 also prints the comparison status, peak ratio, and branch deltas.
 Use `sclas_curve_compare.py` after both endpoint sweep and continuous CurveV0

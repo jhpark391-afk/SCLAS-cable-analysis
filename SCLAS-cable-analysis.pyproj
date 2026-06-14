@@ -51,6 +51,8 @@
     <Content Include="requirements.txt" />
     <Content Include="git_sclas.bat" />
     <Content Include="github_connect.bat" />
+    <Content Include="run_acceptance_gate.bat" />
+    <Content Include="run_acceptance_gate.sh" />
     <Content Include="run_handoff_snapshot.bat" />
     <Content Include="run_handoff_snapshot.sh" />
     <Content Include="run_next_prompt.bat" />

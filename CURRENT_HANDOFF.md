@@ -2413,6 +2413,7 @@ python code/sclas_project_status.py --save-report --save-markdown
 python code/sclas_handoff_snapshot.py --save-report --save-markdown
 python code/sclas_next_prompt.py --save
 python code/sclas_acceptance_gate.py --save-report --save-markdown
+./run_acceptance_gate.sh
 ./run_next_prompt.sh
 ```
 
