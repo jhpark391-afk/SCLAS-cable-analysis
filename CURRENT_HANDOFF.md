@@ -1396,6 +1396,97 @@ failure. It is the actual input-warning pair:
 - `BeddingEquivalent` distorted solid elements.
 - Armour B31 beam curvature/twist normal checks.
 
+## Mesh/Beam Warning Probe - 2026-06-14 KST
+
+The next modelling-warning pass tested two low-risk hypotheses before making
+any persistent runner change.
+
+Beam normal probe:
+
+- Temporarily removed the explicit B31 beam section orientation
+  `n1=(0, 0, -1)` from `create_armour_layer()`.
+- Ran:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -SmallSmoke
+```
+
+- Probe job:
+
+```text
+jobs\SCLAS_jobs\small_smoke_20260614_134129
+```
+
+- Abaqus completed and ODB extraction wrote two rows.
+- Actual warning taxonomy was unchanged:
+
+```text
+distorted_elements=1
+beam_curvature=2
+```
+
+- The change was reverted and not committed. The explicit `n1=(0, 0, -1)`
+  orientation remains in the runner.
+
+Mesh density probe:
+
+- Kept code unchanged and increased only reduced-smoke mesh parameters:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -SmallSmoke -SmallCoreCircumferentialDivisions 16 -SmallArmourCircumferentialDivisions 8
+```
+
+- Probe job:
+
+```text
+jobs\SCLAS_jobs\small_smoke_20260614_134244
+```
+
+- Abaqus completed and ODB extraction wrote two rows.
+- Actual warning taxonomy was still unchanged:
+
+```text
+distorted_elements=1
+beam_curvature=2
+```
+
+- Do not treat simple reduced-mesh circumferential refinement as the next fix;
+  it did not reduce the remaining warnings.
+
+Diagnostics improvement:
+
+- `code\sclas_offline_diagnostics.py` now adds
+  `mesh_quality_warning_details` for single jobs and parent endpoint sweeps.
+- The detail records:
+  - `warning_sets`
+  - `distorted_sample_parts`
+  - `distorted_sample_count`
+  - `distorted_sample_min_angle`
+- Rechecking the latest successful sweep
+  `jobs\SCLAS_jobs\curve_v0_sweep_20260614_132815` now reports:
+
+```text
+actual_warning_log_hits=15
+warning_sets:
+  WarnBeamTwist=5
+  WarnBeamCurvature1=5
+  WarnElemDistorted=5
+distorted_sample_parts:
+  BEDDINGEQUIVALENT=2500
+distorted_sample_min_angle=42.087
+```
+
+Interpretation:
+
+- Each CurveV0 child has one `WarnElemDistorted`, one `WarnBeamCurvature1`, and
+  one `WarnBeamTwist` actual warning.
+- The distorted element table samples point consistently to the thin
+  `BeddingEquivalent` annular solid, not a scattered multi-part mesh problem.
+- The next real modelling task should be a bedding-specific representation or
+  partitioning strategy, or a more targeted B31 helical beam orientation method
+  that assigns local radial/tangent-consistent normals rather than simply
+  dropping the orientation line.
+
 ## Important Files
 
 ```text
