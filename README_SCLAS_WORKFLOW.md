@@ -66,6 +66,7 @@ Inspect a generated or copied Abaqus job folder without Abaqus:
 python code/sclas_job_summary.py --latest
 python code/sclas_job_summary.py jobs/SCLAS_jobs/<job_folder>
 python code/sclas_project_status.py
+python code/sclas_project_status.py --save-report --save-markdown
 python code/sclas_curve_compare.py
 python code/sclas_curve_compare.py \
   --endpoint jobs/SCLAS_jobs/<endpoint_sweep_folder> \
@@ -86,6 +87,10 @@ jobs exist. It compares peak moment scale, positive/negative branch moments at
 the common curvature, and odd-symmetry indicators. With `--save-report` and
 `--save-markdown`, it writes `curve_v0_comparison_report.json` and
 `curve_v0_comparison_report.md` into the continuous CurveV0 job folder.
+Use `sclas_project_status.py --save-report --save-markdown` for a handoff-ready
+snapshot of latest job health, CurveV0 comparison, contact preload status, and
+the next recommended action. It writes `project_status_report.json` and
+`project_status_report.md` into the latest job folder when one exists.
 For continuous CurveV0 jobs, both commands report the basic multi-point shape
 check: positive branch, negative branch, return-to-zero rows, odd symmetry, and
 maximum curvature/moment.

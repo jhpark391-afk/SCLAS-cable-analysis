@@ -771,6 +771,8 @@ def check_project_status() -> None:
             sys.executable,
             str(CODE_DIR / "sclas_project_status.py"),
             "--json",
+            "--save-report",
+            "--save-markdown",
         ],
         text=True,
         capture_output=True,
@@ -784,6 +786,14 @@ def check_project_status() -> None:
         fail("Project status did not expose latest CurveV0 comparison status")
     if "contact preload" not in status.get("recommended_next_action", "").lower():
         fail("Project status did not prioritize the contact preload/closure blocker")
+    saved_report = Path(status.get("saved_report", ""))
+    saved_markdown_report = Path(status.get("saved_markdown_report", ""))
+    if not saved_report.exists():
+        fail("Project status did not save project_status_report.json")
+    if not saved_markdown_report.exists():
+        fail("Project status did not save project_status_report.md")
+    if "HELIX / SCLAS Project Status" not in saved_markdown_report.read_text(encoding="utf-8"):
+        fail("Project status Markdown report does not contain the expected heading")
 
     print("[OK] Project status dashboard")
 

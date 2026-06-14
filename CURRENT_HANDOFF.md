@@ -2407,6 +2407,7 @@ New status command:
 ```bash
 python code/sclas_project_status.py
 python code/sclas_project_status.py --json
+python code/sclas_project_status.py --save-report --save-markdown
 ```
 
 It summarizes:
@@ -2424,7 +2425,9 @@ side produces nonzero CPRESS/slip under the declared residual pressure.
 
 The Analysis tab now has a `Project Status` button in the Recent Jobs panel.
 It runs the same project status dashboard and writes the human-readable status
-and next action into the summary panel.
+and next action into the summary panel. It also saves
+`project_status_report.json` and `project_status_report.md` into the latest job
+folder so another Codex session can read the same handoff snapshot.
 
 ## Home Codex Start Prompt
 

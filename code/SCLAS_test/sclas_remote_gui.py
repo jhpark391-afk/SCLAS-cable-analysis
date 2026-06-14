@@ -2059,10 +2059,14 @@ class SCLASRemoteGUI(QMainWindow):
 
     def show_project_status(self) -> None:
         try:
-            from sclas_project_status import build_status, human_report
+            from sclas_project_status import build_status, human_report, save_markdown_report, save_report
 
             job_root = Path(self.job_root_input.text().strip()).expanduser()
             status = build_status(job_root)
+            saved_path = save_report(status)
+            status["saved_report"] = str(saved_path)
+            saved_markdown_path = save_markdown_report(status)
+            status["saved_markdown_report"] = str(saved_markdown_path)
             self.last_summary_data = {}
             self.summary_text.setPlainText(human_report(status))
             has_blocked = any(flag.get("status") == "blocked" for flag in status.get("completion_flags", []))
@@ -2076,6 +2080,8 @@ class SCLASRemoteGUI(QMainWindow):
                     status.get("recommended_next_action", "-"),
                 )
             )
+            self.log(f"[STATUS] Saved report: {saved_path}")
+            self.log(f"[STATUS] Saved Markdown report: {saved_markdown_path}")
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Project status error", str(exc))
