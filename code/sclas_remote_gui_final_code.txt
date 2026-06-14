@@ -32,8 +32,8 @@ os.environ.setdefault("PYQTGRAPH_QT_LIB", "PyQt5")
 
 import numpy as np
 import psutil
-from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QIcon, QPixmap
+from PyQt5.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt5.QtGui import QColor, QDesktopServices, QFont, QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -611,6 +611,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Diagnose selected": "선택 항목 진단",
             "Compare CurveV0": "CurveV0 비교",
             "Project Status": "프로젝트 상태",
+            "Open folder": "폴더 열기",
             "No result jobs found": "결과 작업 없음",
             "Model: pending": "모델: 대기",
             "Model: edited": "모델: 수정됨",
@@ -1405,22 +1406,26 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_diagnose_job = QPushButton("Diagnose selected")
         self.btn_compare_curve_v0 = QPushButton("Compare CurveV0")
         self.btn_project_status = QPushButton("Project Status")
+        self.btn_open_job_folder = QPushButton("Open folder")
         self.btn_refresh_jobs.setToolTip("Scan the job root for recent SCLAS result folders.")
         self.btn_load_job.setToolTip("Load result_data.csv from the selected job folder.")
         self.btn_diagnose_job.setToolTip("Inspect selected job files with the offline Abaqus diagnostics tool.")
         self.btn_compare_curve_v0.setToolTip("Compare the latest endpoint sweep and continuous CurveV0 result folders.")
         self.btn_project_status.setToolTip("Show the overall HELIX/SCLAS project status and next action.")
+        self.btn_open_job_folder.setToolTip("Open the selected job folder in Finder or Explorer.")
         self.btn_refresh_jobs.clicked.connect(self.refresh_job_history)
         self.btn_load_job.clicked.connect(self.load_selected_job)
         self.btn_diagnose_job.clicked.connect(self.diagnose_selected_job)
         self.btn_compare_curve_v0.clicked.connect(self.compare_curve_v0_jobs)
         self.btn_project_status.clicked.connect(self.show_project_status)
-        history_layout.addWidget(self.job_history_combo, 0, 0, 1, 5)
+        self.btn_open_job_folder.clicked.connect(self.open_selected_job_folder)
+        history_layout.addWidget(self.job_history_combo, 0, 0, 1, 3)
         history_layout.addWidget(self.btn_refresh_jobs, 1, 0)
         history_layout.addWidget(self.btn_load_job, 1, 1)
         history_layout.addWidget(self.btn_diagnose_job, 1, 2)
-        history_layout.addWidget(self.btn_compare_curve_v0, 1, 3)
-        history_layout.addWidget(self.btn_project_status, 1, 4)
+        history_layout.addWidget(self.btn_compare_curve_v0, 2, 0)
+        history_layout.addWidget(self.btn_project_status, 2, 1)
+        history_layout.addWidget(self.btn_open_job_folder, 2, 2)
         right.addWidget(self.history_box)
 
         left_scroll = self.scroll_panel(left_panel, min_width=360)
@@ -1982,23 +1987,28 @@ class SCLASRemoteGUI(QMainWindow):
             stamp = datetime.fromtimestamp(job.stat().st_mtime).strftime("%m-%d %H:%M")
             self.job_history_combo.addItem(f"{stamp} | {job.name}")
 
-    def load_selected_job(self) -> None:
+    def selected_history_job(self) -> Optional[Path]:
         index = self.job_history_combo.currentIndex() if hasattr(self, "job_history_combo") else -1
         if index < 0 or index >= len(self.job_history_paths):
+            return None
+        return self.job_history_paths[index]
+
+    def load_selected_job(self) -> None:
+        job_dir = self.selected_history_job()
+        if job_dir is None:
             QMessageBox.information(self, "Recent Jobs", "No result job is selected.")
             return
         try:
-            self.load_result_bundle(self.job_history_paths[index] / "result_data.csv", source="RECENT_JOB_LOAD")
+            self.load_result_bundle(job_dir / "result_data.csv", source="RECENT_JOB_LOAD")
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Recent job load error", str(exc))
 
     def diagnose_selected_job(self) -> None:
-        index = self.job_history_combo.currentIndex() if hasattr(self, "job_history_combo") else -1
-        if index < 0 or index >= len(self.job_history_paths):
+        job_dir = self.selected_history_job()
+        if job_dir is None:
             QMessageBox.information(self, "Recent Jobs", "No result job is selected.")
             return
-        job_dir = self.job_history_paths[index]
         try:
             from sclas_offline_diagnostics import build_report, save_markdown_report, save_report
 
@@ -2021,6 +2031,16 @@ class SCLASRemoteGUI(QMainWindow):
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Offline diagnostics error", str(exc))
+
+    def open_selected_job_folder(self) -> None:
+        job_dir = self.selected_history_job()
+        if job_dir is None:
+            QMessageBox.information(self, "Recent Jobs", "No result job is selected.")
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(job_dir.resolve()))):
+            QMessageBox.warning(self, "Recent Jobs", f"Could not open folder:\n{job_dir}")
+            return
+        self.log(f"[JOBS] Opened folder: {job_dir}")
 
     def compare_curve_v0_jobs(self) -> None:
         try:

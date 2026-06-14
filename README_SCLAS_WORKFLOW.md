@@ -107,7 +107,8 @@ first blocking issue instead of rereading the whole log.
 The same report is also available in the GUI from
 `Analysis -> Recent Jobs -> Diagnose selected`. The GUI saves
 `offline_diagnostics_report.json` and `offline_diagnostics_report.md` in the
-selected job folder.
+selected job folder. Use `Open folder` in the same Recent Jobs panel to open
+the selected job folder in Finder or Windows Explorer.
 
 ## Job package contract
 
