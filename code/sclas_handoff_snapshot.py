@@ -36,9 +36,25 @@ def run_git(args) -> str:
 
 
 def git_state() -> dict:
+    upstream = run_git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+    ahead = None
+    behind = None
+    if upstream and not upstream.startswith("unavailable:"):
+        counts = run_git(["rev-list", "--left-right", "--count", "HEAD...@{u}"])
+        parts = counts.split()
+        if len(parts) == 2:
+            try:
+                ahead = int(parts[0])
+                behind = int(parts[1])
+            except ValueError:
+                ahead = None
+                behind = None
     return {
         "branch": run_git(["branch", "--show-current"]),
         "head": run_git(["rev-parse", "--short", "HEAD"]),
+        "upstream": upstream,
+        "ahead": ahead,
+        "behind": behind,
         "status_short": run_git(["status", "--short", "--branch"]),
     }
 
@@ -109,7 +125,13 @@ def human_report(snapshot: dict) -> str:
         "==============================",
         "Generated: {0}".format(snapshot.get("generated_at", "-")),
         "Project: {0}".format(snapshot.get("project_dir", "-")),
-        "Git: {0} @ {1}".format(git.get("branch", "-"), git.get("head", "-")),
+        "Git: {0} @ {1} -> {2} (ahead={3}, behind={4})".format(
+            git.get("branch", "-"),
+            git.get("head", "-"),
+            git.get("upstream", "-"),
+            git.get("ahead", "-"),
+            git.get("behind", "-"),
+        ),
         "Job root: {0}".format(snapshot.get("job_root", "-")),
         "",
         "Focus:",
@@ -166,7 +188,13 @@ def markdown_report(snapshot: dict) -> str:
         "",
         "- Generated: `{0}`".format(snapshot.get("generated_at", "-")),
         "- Project: `{0}`".format(snapshot.get("project_dir", "-")),
-        "- Git: `{0}` @ `{1}`".format(git.get("branch", "-"), git.get("head", "-")),
+        "- Git: `{0}` @ `{1}` -> `{2}` (ahead `{3}`, behind `{4}`)".format(
+            git.get("branch", "-"),
+            git.get("head", "-"),
+            git.get("upstream", "-"),
+            git.get("ahead", "-"),
+            git.get("behind", "-"),
+        ),
         "- Job root: `{0}`".format(snapshot.get("job_root", "-")),
         "",
         "## Focus",

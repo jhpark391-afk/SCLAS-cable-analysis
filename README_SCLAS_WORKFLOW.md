@@ -139,7 +139,10 @@ handoff or commit when you want self-check, acceptance gate, handoff snapshot,
 and next-session prompt generation in one repeatable pass. The suite writes
 `validation_suite_report.json` and `validation_suite_report.md` at the project
 root, including the current git branch/head for traceability; both are local
-generated artifacts and are ignored by git.
+generated artifacts and are ignored by git. The report also records the local
+branch's upstream and ahead/behind counts based on the currently fetched
+tracking branch, so run `git pull` or `git fetch` first when you need fresh
+GitHub comparison.
 If a CurveV0 comparison report exists in a job folder, `sclas_job_summary.py`
 also prints the comparison status, peak ratio, and branch deltas.
 Use `sclas_curve_compare.py` after both endpoint sweep and continuous CurveV0

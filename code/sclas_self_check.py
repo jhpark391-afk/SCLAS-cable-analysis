@@ -958,6 +958,9 @@ def check_handoff_snapshot() -> None:
         fail("Handoff snapshot did not carry the current contact preload next action")
     if not snapshot.get("project_status", {}).get("completion_flags"):
         fail("Handoff snapshot did not embed project status")
+    git = snapshot.get("git", {})
+    if "ahead" not in git or "behind" not in git:
+        fail("Handoff snapshot did not embed git ahead/behind state")
     acceptance = snapshot.get("acceptance_gate", {})
     if not acceptance.get("overall_status"):
         fail("Handoff snapshot did not embed acceptance gate status")
@@ -1031,6 +1034,8 @@ def check_validation_suite() -> None:
         fail("Validation suite did not honor --skip-self-check")
     if not report.get("git", {}).get("head"):
         fail("Validation suite did not embed git head")
+    if "ahead" not in report.get("git", {}) or "behind" not in report.get("git", {}):
+        fail("Validation suite did not embed git ahead/behind state")
     if not report.get("acceptance_gate", {}).get("overall_status"):
         fail("Validation suite did not embed acceptance gate status")
     if not report.get("handoff_snapshot", {}).get("saved_report"):

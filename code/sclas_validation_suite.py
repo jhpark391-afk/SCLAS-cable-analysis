@@ -126,7 +126,13 @@ def markdown_report(report: dict) -> str:
         "# HELIX / SCLAS Validation Suite",
         "",
         "- Status: `{0}`".format(report.get("status", "-")),
-        "- Git: `{0}` @ `{1}`".format(git.get("branch", "-"), git.get("head", "-")),
+        "- Git: `{0}` @ `{1}` -> `{2}` (ahead `{3}`, behind `{4}`)".format(
+            git.get("branch", "-"),
+            git.get("head", "-"),
+            git.get("upstream", "-"),
+            git.get("ahead", "-"),
+            git.get("behind", "-"),
+        ),
         "- Project: `{0}`".format(report.get("project_dir", "-")),
         "- Job root: `{0}`".format(report.get("job_root", "-")),
         "- Self-check: `{0}` return code `{1}`".format(
@@ -167,7 +173,13 @@ def human_report(report: dict) -> str:
         "HELIX / SCLAS Validation Suite",
         "==============================",
         "Status: {0}".format(report.get("status", "-")),
-        "Git: {0} @ {1}".format(git.get("branch", "-"), git.get("head", "-")),
+        "Git: {0} @ {1} -> {2} (ahead={3}, behind={4})".format(
+            git.get("branch", "-"),
+            git.get("head", "-"),
+            git.get("upstream", "-"),
+            git.get("ahead", "-"),
+            git.get("behind", "-"),
+        ),
         "Project: {0}".format(report.get("project_dir", "-")),
         "Job root: {0}".format(report.get("job_root", "-")),
         "Self-check: {0} (return code {1})".format(
