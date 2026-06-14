@@ -900,6 +900,41 @@ def check_project_status() -> None:
     print("[OK] Project status dashboard")
 
 
+def check_acceptance_gate() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_acceptance_gate.py"),
+            "--json",
+            "--include-self-check",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("sclas_acceptance_gate.py failed:\n" + proc.stdout + proc.stderr)
+    report = json.loads(proc.stdout)
+    if report.get("overall_status") != "blocked":
+        fail("Acceptance gate should block synthetic contact-incomplete jobs")
+    gate_statuses = {item.get("name"): item.get("status") for item in report.get("gates", [])}
+    if gate_statuses.get("contact_preload_closure") != "blocked":
+        fail("Acceptance gate did not block missing/nonzero CPRESS contact closure")
+    if gate_statuses.get("odb_local_fields") != "blocked":
+        fail("Acceptance gate did not block missing required ODB local fields")
+    if "remote Abaqus PC" not in report.get("recommended_next_action", ""):
+        fail("Acceptance gate did not route the next action to the remote Abaqus PC")
+    saved_report = Path(report.get("saved_report", ""))
+    saved_markdown = Path(report.get("saved_markdown_report", ""))
+    if not saved_report.exists() or not saved_markdown.exists():
+        fail("Acceptance gate did not save JSON and Markdown reports")
+    if "HELIX / SCLAS Acceptance Gate" not in saved_markdown.read_text(encoding="utf-8"):
+        fail("Acceptance gate Markdown report does not contain the expected heading")
+
+    print("[OK] Acceptance gate")
+
+
 def check_handoff_snapshot() -> None:
     proc = subprocess.run(
         [
@@ -975,6 +1010,7 @@ def main() -> int:
         check_curve_v0_comparison,
         check_latest_job_filtering,
         check_project_status,
+        check_acceptance_gate,
         check_handoff_snapshot,
         check_next_prompt,
     ]

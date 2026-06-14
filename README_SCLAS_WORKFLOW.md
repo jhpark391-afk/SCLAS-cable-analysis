@@ -85,6 +85,8 @@ python code/sclas_project_status.py
 python code/sclas_project_status.py --save-report --save-markdown
 python code/sclas_handoff_snapshot.py --save-report --save-markdown
 python code/sclas_next_prompt.py --save
+python code/sclas_acceptance_gate.py
+python code/sclas_acceptance_gate.py --save-report --save-markdown
 python code/sclas_curve_compare.py
 python code/sclas_curve_compare.py \
   --endpoint jobs/SCLAS_jobs/<endpoint_sweep_folder> \
@@ -116,6 +118,12 @@ current git state, project status, job index, best job, and next action.
 Use `run_next_prompt.sh` or `run_next_prompt.bat` to write
 `NEXT_CODEX_PROMPT.md`, a ready-made prompt for the next Mac/home/remote Codex
 session.
+Use `sclas_acceptance_gate.py` after remote Abaqus jobs are copied or pulled
+back. It checks whether the latest result is research-ready across result
+contract, continuous CurveV0, contact preload/closure, ODB local fields, and
+warning budget. With `--save-report` and `--save-markdown`, it writes
+`acceptance_gate_report.json` and `acceptance_gate_report.md` into the latest
+job folder.
 If a CurveV0 comparison report exists in a job folder, `sclas_job_summary.py`
 also prints the comparison status, peak ratio, and branch deltas.
 Use `sclas_curve_compare.py` after both endpoint sweep and continuous CurveV0

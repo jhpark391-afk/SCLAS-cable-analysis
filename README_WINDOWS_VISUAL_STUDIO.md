@@ -47,6 +47,14 @@ To verify the local project contract after edits, run:
 run_self_check.bat
 ```
 
+After copying or pulling a remote Abaqus result folder, run:
+
+```bat
+python code\sclas_acceptance_gate.py --save-report --save-markdown
+```
+
+This gives a research-readiness pass/review/blocked decision for the latest job.
+
 Before switching computers or handing work to another Codex session, save a
 compact project snapshot with:
 
