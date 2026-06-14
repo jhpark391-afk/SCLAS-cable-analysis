@@ -38,6 +38,21 @@ def top_counts(counts, limit=4):
     return ", ".join("{0}={1}".format(key, value) for key, value in ordered[:limit])
 
 
+def top_outputs(items, limit=2):
+    if not isinstance(items, list) or not items:
+        return "-"
+    labels = []
+    for item in items[:limit]:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("interface") or item.get("target") or item.get("output")
+        value = item.get("value")
+        job_count = item.get("job_count")
+        suffix = "" if job_count in (None, "") else " jobs={0}".format(job_count)
+        labels.append("{0}={1}{2}".format(name, value, suffix))
+    return ", ".join(labels) if labels else "-"
+
+
 def names_to_counts(names):
     counts = {}
     if isinstance(names, list):
@@ -128,6 +143,10 @@ def quality_details(report: dict):
         "odb_stress_mises_max": local_field.get("stress_mises_max"),
         "odb_contact_pressure_max": local_field.get("contact_pressure_max"),
         "odb_slip_abs_max": local_field.get("slip_abs_max"),
+        "odb_top_contact_pressure_outputs": local_field.get("top_contact_pressure_outputs", []),
+        "odb_top_contact_opening_outputs": local_field.get("top_contact_opening_outputs", []),
+        "odb_top_slip_outputs": local_field.get("top_slip_outputs", []),
+        "odb_top_stress_outputs": local_field.get("top_stress_outputs", []),
     }
 
 
@@ -156,6 +175,9 @@ def collect_summary(report: dict) -> dict:
     diagnostic = report.get("diagnostic_summary", {})
     issue_counts = diagnostic.get("issue_counts", {})
     details = quality_details(report)
+    curve_summary = result_summary.get("curve_summary") if isinstance(result_summary.get("curve_summary"), dict) else None
+    if curve_summary is None:
+        curve_summary = result_csv.get("curve_summary", {})
 
     summary = {
         "job_dir": report.get("job_dir"),
@@ -182,6 +204,10 @@ def collect_summary(report: dict) -> dict:
         "continuous_curve_v0_symmetry_error": continuous_shape.get("odd_symmetry_max_relative_moment_sum"),
         "continuous_curve_v0_max_abs_curvature": continuous_shape.get("max_abs_curvature_1_per_m"),
         "continuous_curve_v0_max_abs_moment": continuous_shape.get("max_abs_moment_kn_m"),
+        "curve_max_abs_curvature": curve_summary.get("max_abs_curvature_1_per_m") if isinstance(curve_summary, dict) else None,
+        "curve_max_abs_moment": curve_summary.get("max_abs_moment_kn_m") if isinstance(curve_summary, dict) else None,
+        "curve_loop_energy_proxy": curve_summary.get("loop_energy_proxy_kn") if isinstance(curve_summary, dict) else None,
+        "curve_moment_span": curve_summary.get("moment_span_kn_m") if isinstance(curve_summary, dict) else None,
         "issue_counts": issue_counts,
         "recommended_next_action": diagnostic.get("recommended_next_action"),
     }
@@ -209,6 +235,18 @@ def print_human(summary: dict) -> None:
         scalar(summary.get("odb_stress_mises_max")),
         scalar(summary.get("odb_contact_pressure_max")),
         scalar(summary.get("odb_slip_abs_max")),
+    ))
+    print("ODB top outputs: pressure={0}; opening={1}; slip={2}; stress={3}".format(
+        top_outputs(summary.get("odb_top_contact_pressure_outputs")),
+        top_outputs(summary.get("odb_top_contact_opening_outputs")),
+        top_outputs(summary.get("odb_top_slip_outputs")),
+        top_outputs(summary.get("odb_top_stress_outputs")),
+    ))
+    print("Curve scalar: max|kappa|={0}, max|M|={1}, loop_energy_proxy={2}, moment_span={3}".format(
+        scalar(summary.get("curve_max_abs_curvature")),
+        scalar(summary.get("curve_max_abs_moment")),
+        scalar(summary.get("curve_loop_energy_proxy")),
+        scalar(summary.get("curve_moment_span")),
     ))
     print("Mesh: summary={0}, manifest={1}".format(scalar(summary.get("mesh_status")), scalar(summary.get("manifest_status"))))
     print("Contact scaffold: {0}".format(scalar(summary.get("contact_pair_scaffold_status"))))

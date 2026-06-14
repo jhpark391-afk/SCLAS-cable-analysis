@@ -225,19 +225,26 @@ Current partial implementation:
 - `code/sclas_odb_extractor.py` records `local_field_summary` in
   `odb_extraction_summary.json` and mirrors it into
   `result_summary.json.odb_local_field_summary`.
+- `code/sclas_odb_extractor.py` also records `curve_summary`, including
+  max/min moment, max/min curvature, moment span, curvature span, and a
+  trapezoidal loop-energy proxy.
 - The extractor preserves the narrow `result_data.csv` contract and now
   summarizes available ODB field outputs plus aggregate stress/contact/slip
   scalars when Abaqus provides them.
 - Interface-qualified Abaqus contact outputs such as `CPRESS   surface/pair`,
   `COPEN`, `CSLIP1`, `CSLIP2`, `CSHEAR1`, and `CSHEAR2` are detected.
+- Per-output local-field stats are retained so diagnostics can identify the
+  top contact pressure, opening, slip, shear, and stress output channels.
 - `code/sclas_offline_diagnostics.py` and `code/sclas_job_summary.py` surface
-  these metrics for single jobs and aggregate them across endpoint-sweep child
-  jobs.
+  these metrics and curve scalars for single jobs and aggregate them across
+  endpoint-sweep child jobs.
 
 Still needed before treating Phase 4 as research-complete:
 
-- per-interface contact/slip/stress ranges rather than aggregate maxima only
-- loop energy and peak/min/max moment scalar summaries
+- full per-interface contact/slip/stress ranges and time/history traces rather
+  than top-output scalar digests only
+- closed-cycle energy interpretation beyond the current trapezoidal scalar
+  proxy
 - contact status / stick-slip transition interpretation where available
 - fatigue-oriented summaries and calibrated pressure/friction validation
 

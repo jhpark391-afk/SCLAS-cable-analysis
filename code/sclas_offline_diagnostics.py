@@ -104,6 +104,46 @@ def read_numeric_csv_rows(path: Path):
     return numeric_rows, invalid_rows
 
 
+def summarize_curve_rows(numeric_rows):
+    summary = {
+        "row_count": len(numeric_rows),
+        "min_curvature_1_per_m": None,
+        "max_curvature_1_per_m": None,
+        "max_abs_curvature_1_per_m": None,
+        "min_moment_kn_m": None,
+        "max_moment_kn_m": None,
+        "max_abs_moment_kn_m": None,
+        "loop_energy_proxy_kn": None,
+        "curvature_span_1_per_m": None,
+        "moment_span_kn_m": None,
+    }
+    if not numeric_rows:
+        return summary
+    curvatures = [row[0] for row in numeric_rows]
+    moments = [row[1] for row in numeric_rows]
+    min_curvature = min(curvatures)
+    max_curvature = max(curvatures)
+    min_moment = min(moments)
+    max_moment = max(moments)
+    energy_proxy = 0.0
+    for idx in range(len(numeric_rows) - 1):
+        dc = curvatures[idx + 1] - curvatures[idx]
+        avg_m = 0.5 * (moments[idx + 1] + moments[idx])
+        energy_proxy += avg_m * dc
+    summary.update({
+        "min_curvature_1_per_m": min_curvature,
+        "max_curvature_1_per_m": max_curvature,
+        "max_abs_curvature_1_per_m": max(abs(value) for value in curvatures),
+        "min_moment_kn_m": min_moment,
+        "max_moment_kn_m": max_moment,
+        "max_abs_moment_kn_m": max(abs(value) for value in moments),
+        "loop_energy_proxy_kn": energy_proxy,
+        "curvature_span_1_per_m": max_curvature - min_curvature,
+        "moment_span_kn_m": max_moment - min_moment,
+    })
+    return summary
+
+
 def scan_solver_log_keywords(job_dir: Path):
     log_files = []
     for pattern in ["*.dat", "*.msg", "*.sta", "solver_stdout.txt", "abaqus_stdout.txt"]:
@@ -278,6 +318,71 @@ def merge_name_counts(target, names):
         target[str(name)] = target.get(str(name), 0) + 1
 
 
+def ranked_local_field_outputs(local_summary, target_names, value_key, limit=4):
+    if not isinstance(local_summary, dict):
+        return []
+    target_outputs = local_summary.get("target_outputs", {})
+    if not isinstance(target_outputs, dict):
+        return []
+    ranked = []
+    for target_name in target_names:
+        target = target_outputs.get(target_name, {})
+        if not isinstance(target, dict):
+            continue
+        per_output = target.get("per_output", {})
+        if isinstance(per_output, dict) and per_output:
+            for output_name, stats in per_output.items():
+                if not isinstance(stats, dict):
+                    continue
+                value = parse_float(stats.get(value_key))
+                if value is None:
+                    continue
+                ranked.append({
+                    "target": target_name,
+                    "output": stats.get("output_name") or output_name,
+                    "interface": stats.get("interface"),
+                    "value": value,
+                })
+        else:
+            value = parse_float(target.get(value_key))
+            if value is not None:
+                ranked.append({
+                    "target": target_name,
+                    "output": ",".join(target.get("output_names", [target_name])) if isinstance(target.get("output_names"), list) else target_name,
+                    "interface": None,
+                    "value": value,
+                })
+    return sorted(ranked, key=lambda item: item.get("value") or 0.0, reverse=True)[:limit]
+
+
+def merge_ranked_outputs(target, key, items, limit=4):
+    if not isinstance(items, list):
+        return
+    store_key = key + "_by_output"
+    store = target.setdefault(store_key, {})
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        value = parse_float(item.get("value"))
+        if value is None:
+            continue
+        name = item.get("output") or item.get("interface") or item.get("target")
+        if not name:
+            continue
+        record = store.get(name)
+        if record is None:
+            record = dict(item)
+            record["value"] = value
+            record["job_count"] = 0
+            store[name] = record
+        record["job_count"] = int(record.get("job_count") or 0) + 1
+        current = parse_float(record.get("value"))
+        if current is None or value > current:
+            record.update(item)
+            record["value"] = value
+    target[key] = sorted(store.values(), key=lambda item: item.get("value") or 0.0, reverse=True)[:limit]
+
+
 def local_field_digest(local_summary):
     digest = {
         "checked": False,
@@ -292,6 +397,11 @@ def local_field_digest(local_summary):
         "slip_abs_max": None,
         "contact_shear_abs_max": None,
         "contact_status_max": None,
+        "top_contact_pressure_outputs": [],
+        "top_contact_opening_outputs": [],
+        "top_slip_outputs": [],
+        "top_contact_shear_outputs": [],
+        "top_stress_outputs": [],
     }
     if not isinstance(local_summary, dict) or not local_summary:
         return digest
@@ -325,6 +435,11 @@ def local_field_digest(local_summary):
             "contact_status_max",
         ]:
             digest[key] = parse_float(metrics.get(key))
+    digest["top_contact_pressure_outputs"] = ranked_local_field_outputs(local_summary, ["CPRESS"], "max")
+    digest["top_contact_opening_outputs"] = ranked_local_field_outputs(local_summary, ["COPEN"], "abs_max")
+    digest["top_slip_outputs"] = ranked_local_field_outputs(local_summary, ["CSLIP1", "CSLIP2"], "abs_max")
+    digest["top_contact_shear_outputs"] = ranked_local_field_outputs(local_summary, ["CSHEAR1", "CSHEAR2"], "abs_max")
+    digest["top_stress_outputs"] = ranked_local_field_outputs(local_summary, ["S"], "mises_max")
     return digest
 
 
@@ -342,6 +457,11 @@ def empty_local_field_aggregate():
         "slip_abs_max": None,
         "contact_shear_abs_max": None,
         "contact_status_max": None,
+        "top_contact_pressure_outputs": [],
+        "top_contact_opening_outputs": [],
+        "top_slip_outputs": [],
+        "top_contact_shear_outputs": [],
+        "top_stress_outputs": [],
     }
 
 
@@ -363,6 +483,14 @@ def merge_local_field_digest(target, digest):
         "contact_status_max",
     ]:
         update_maximum(target, key, digest.get(key))
+    for key in [
+        "top_contact_pressure_outputs",
+        "top_contact_opening_outputs",
+        "top_slip_outputs",
+        "top_contact_shear_outputs",
+        "top_stress_outputs",
+    ]:
+        merge_ranked_outputs(target, key, digest.get(key))
 
 
 def mesh_quality_warning_details(job_dir: Path):
@@ -811,6 +939,12 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
             add_issue(report, "warning", "Endpoint sweep child solver completion was not confirmed in logs", child_detail)
             section["all_children_deep_validated"] = False
 
+    local_aggregate = section.get("local_field_summary", {})
+    if isinstance(local_aggregate, dict):
+        for key in list(local_aggregate.keys()):
+            if "_by_output" in key:
+                local_aggregate.pop(key, None)
+
 
 def inspect_result_csv(job_dir: Path, report: dict) -> None:
     path = job_dir / "result_data.csv"
@@ -829,6 +963,9 @@ def inspect_result_csv(job_dir: Path, report: dict) -> None:
         add_issue(report, "error", "Unexpected result_data.csv header", header)
     if section["data_rows"] < 2:
         add_issue(report, "warning", "result_data.csv has too few data rows", section["data_rows"])
+    numeric_rows, invalid_rows = read_numeric_csv_rows(path)
+    section["invalid_numeric_rows"] = invalid_rows
+    section["curve_summary"] = summarize_curve_rows(numeric_rows)
 
 
 def inspect_summary(job_dir: Path, report: dict) -> None:
@@ -852,10 +989,15 @@ def inspect_summary(job_dir: Path, report: dict) -> None:
     section["rows_written"] = data.get("rows_written")
     section["mesh_status"] = data.get("mesh_status", {}).get("status") if isinstance(data.get("mesh_status"), dict) else data.get("mesh_status")
     section["enabled_assessments"] = data.get("enabled_assessments", [])
+    curve_summary = data.get("curve_summary")
+    if isinstance(curve_summary, dict):
+        section["curve_summary"] = curve_summary
     odb_extraction = data.get("odb_extraction", {})
     if isinstance(odb_extraction, dict) and odb_extraction:
         section["odb_extraction_status"] = odb_extraction.get("status")
         section["odb_rows_written"] = odb_extraction.get("rows_written")
+        if "curve_summary" not in section and isinstance(odb_extraction.get("curve_summary"), dict):
+            section["curve_summary"] = odb_extraction.get("curve_summary")
     local_summary = data.get("odb_local_field_summary")
     if not local_summary and isinstance(odb_extraction, dict):
         local_summary = odb_extraction.get("local_field_summary")
@@ -1216,6 +1358,20 @@ def markdown_report(report: dict) -> str:
             return "-"
         return ", ".join(str(name) for name in names[:limit])
 
+    def top_outputs(items, limit=3):
+        if not isinstance(items, list) or not items:
+            return "-"
+        labels = []
+        for item in items[:limit]:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("interface") or item.get("target") or item.get("output")
+            value = item.get("value")
+            job_count = item.get("job_count")
+            suffix = "" if job_count in (None, "") else " jobs={0}".format(job_count)
+            labels.append("{0}={1}{2}".format(name, value, suffix))
+        return ", ".join(labels) if labels else "-"
+
     lines = [
         "# SCLAS Offline Diagnostics",
         "",
@@ -1229,6 +1385,7 @@ def markdown_report(report: dict) -> str:
 
     csv_section = report.get("result_data_csv", {})
     summary_section = report.get("result_summary_json", {})
+    curve_summary = summary_section.get("curve_summary") if isinstance(summary_section.get("curve_summary"), dict) else csv_section.get("curve_summary", {})
     manifest_section = report.get("abaqus_mesh_manifest_json", {})
     deck_section = report.get("input_deck", {})
     logs_section = report.get("solver_logs", {})
@@ -1250,11 +1407,19 @@ def markdown_report(report: dict) -> str:
         ("Summary status", scalar(summary_section.get("status"))),
         ("Summary source", scalar(summary_section.get("source"))),
         ("Curve class", scalar(summary_section.get("abaqus_curve_class"))),
+        ("Curve max |kappa|", scalar(curve_summary.get("max_abs_curvature_1_per_m") if isinstance(curve_summary, dict) else None)),
+        ("Curve max |M|", scalar(curve_summary.get("max_abs_moment_kn_m") if isinstance(curve_summary, dict) else None)),
+        ("Curve loop energy proxy", scalar(curve_summary.get("loop_energy_proxy_kn") if isinstance(curve_summary, dict) else None)),
+        ("Curve moment span", scalar(curve_summary.get("moment_span_kn_m") if isinstance(curve_summary, dict) else None)),
         ("ODB field outputs", top_names(odb_local_field.get("available_field_outputs"))),
         ("ODB present local fields", top_names(odb_local_field.get("present_target_outputs"))),
         ("ODB stress Mises max", scalar(odb_local_field.get("stress_mises_max"))),
         ("ODB contact pressure max", scalar(odb_local_field.get("contact_pressure_max"))),
         ("ODB slip abs max", scalar(odb_local_field.get("slip_abs_max"))),
+        ("ODB top pressure output", top_outputs(odb_local_field.get("top_contact_pressure_outputs"))),
+        ("ODB top opening output", top_outputs(odb_local_field.get("top_contact_opening_outputs"))),
+        ("ODB top slip output", top_outputs(odb_local_field.get("top_slip_outputs"))),
+        ("ODB top stress output", top_outputs(odb_local_field.get("top_stress_outputs"))),
         ("Mesh status", scalar(summary_section.get("mesh_status"))),
         ("Manifest status", scalar(manifest_section.get("status"))),
         ("Contact pair scaffold", scalar(manifest_section.get("contact_pair_scaffold_status"))),
@@ -1276,6 +1441,10 @@ def markdown_report(report: dict) -> str:
         ("Sweep stress Mises max", scalar(sweep_local_field.get("stress_mises_max"))),
         ("Sweep contact pressure max", scalar(sweep_local_field.get("contact_pressure_max"))),
         ("Sweep slip abs max", scalar(sweep_local_field.get("slip_abs_max"))),
+        ("Sweep top pressure output", top_outputs(sweep_local_field.get("top_contact_pressure_outputs"))),
+        ("Sweep top opening output", top_outputs(sweep_local_field.get("top_contact_opening_outputs"))),
+        ("Sweep top slip output", top_outputs(sweep_local_field.get("top_slip_outputs"))),
+        ("Sweep top stress output", top_outputs(sweep_local_field.get("top_stress_outputs"))),
         ("Sweep distorted reported elements", scalar(sweep_mesh_quality.get("distorted_reported_element_count"))),
         ("Sweep distorted table parts", top_counts(sweep_mesh_quality.get("distorted_table_parts"))),
         ("Sweep distorted table min angle", scalar(sweep_mesh_quality.get("distorted_table_min_angle"))),

@@ -78,6 +78,46 @@ def write_result_csv(path, rows):
             writer.writerow(["{0:.12g}".format(curvature), "{0:.12g}".format(moment)])
 
 
+def summarize_curve_rows(rows):
+    summary = {
+        "row_count": len(rows),
+        "min_curvature_1_per_m": None,
+        "max_curvature_1_per_m": None,
+        "max_abs_curvature_1_per_m": None,
+        "min_moment_kn_m": None,
+        "max_moment_kn_m": None,
+        "max_abs_moment_kn_m": None,
+        "loop_energy_proxy_kn": None,
+        "curvature_span_1_per_m": None,
+        "moment_span_kn_m": None,
+    }
+    if not rows:
+        return summary
+    curvatures = [float(row[0]) for row in rows]
+    moments = [float(row[1]) for row in rows]
+    min_curvature = min(curvatures)
+    max_curvature = max(curvatures)
+    min_moment = min(moments)
+    max_moment = max(moments)
+    energy_proxy = 0.0
+    for idx in range(len(rows) - 1):
+        dc = curvatures[idx + 1] - curvatures[idx]
+        avg_m = 0.5 * (moments[idx + 1] + moments[idx])
+        energy_proxy += avg_m * dc
+    summary.update({
+        "min_curvature_1_per_m": min_curvature,
+        "max_curvature_1_per_m": max_curvature,
+        "max_abs_curvature_1_per_m": max(abs(value) for value in curvatures),
+        "min_moment_kn_m": min_moment,
+        "max_moment_kn_m": max_moment,
+        "max_abs_moment_kn_m": max(abs(value) for value in moments),
+        "loop_energy_proxy_kn": energy_proxy,
+        "curvature_span_1_per_m": max_curvature - min_curvature,
+        "moment_span_kn_m": max_moment - min_moment,
+    })
+    return summary
+
+
 def build_result_quality(extraction_summary):
     rows = int(extraction_summary.get("rows_written") or 0)
     status = extraction_summary.get("status")
@@ -117,6 +157,9 @@ def update_result_summary(job_dir, extraction_summary):
     local_field_summary = extraction_summary.get("local_field_summary")
     if isinstance(local_field_summary, dict):
         summary["odb_local_field_summary"] = local_field_summary
+    curve_summary = extraction_summary.get("curve_summary")
+    if isinstance(curve_summary, dict):
+        summary["curve_summary"] = curve_summary
     quality = build_result_quality(extraction_summary)
     summary["abaqus_result_quality"] = quality
     if extraction_summary.get("status") == "extracted":
@@ -220,6 +263,33 @@ def matching_field_output_names(output_names, target):
     return matches
 
 
+def field_output_interface_name(output_name):
+    text = str(output_name).strip()
+    parts = text.split(None, 1)
+    if len(parts) < 2:
+        return None
+    return parts[1].strip()
+
+
+def new_local_field_stats(category, output_name=None):
+    stats = {
+        "status": "missing",
+        "category": category,
+        "frames_checked": 0,
+        "frames_with_values": 0,
+        "value_count": 0,
+        "component_count": 0,
+        "non_numeric_values": 0,
+        "min": None,
+        "max": None,
+        "abs_max": None,
+    }
+    if output_name:
+        stats["output_name"] = output_name
+        stats["interface"] = field_output_interface_name(output_name)
+    return stats
+
+
 def summarize_local_field_value(variable_summary, value):
     numeric = numeric_components(getattr(value, "data", None))
     if not numeric:
@@ -298,18 +368,8 @@ def summarize_local_fields(steps):
     target_names = [name for name, _category in LOCAL_FIELD_TARGETS]
     target_outputs = {}
     for target, category in LOCAL_FIELD_TARGETS:
-        target_outputs[target] = {
-            "status": "missing",
-            "category": category,
-            "frames_checked": 0,
-            "frames_with_values": 0,
-            "value_count": 0,
-            "component_count": 0,
-            "non_numeric_values": 0,
-            "min": None,
-            "max": None,
-            "abs_max": None,
-        }
+        target_outputs[target] = new_local_field_stats(category)
+        target_outputs[target]["per_output"] = {}
 
     try:
         for step_name, step in steps:
@@ -332,11 +392,18 @@ def summarize_local_fields(steps):
                     if not actual_names:
                         continue
                     for actual_name in actual_names:
+                        per_output = target_summary.setdefault("per_output", {}).get(actual_name)
+                        if per_output is None:
+                            per_output = new_local_field_stats(target_summary.get("category"), actual_name)
+                            target_summary["per_output"][actual_name] = per_output
+                        per_output["frames_checked"] += 1
                         try:
                             values = frame.fieldOutputs[actual_name].values
                         except Exception as exc:
                             target_summary["warnings"] = target_summary.get("warnings", [])
                             target_summary["warnings"].append("Could not read {0}: {1}".format(actual_name, exc))
+                            per_output["warnings"] = per_output.get("warnings", [])
+                            per_output["warnings"].append("Could not read {0}: {1}".format(actual_name, exc))
                             continue
                         try:
                             value_length = len(values)
@@ -344,17 +411,21 @@ def summarize_local_fields(steps):
                             value_length = 0
                         if value_length:
                             target_summary["status"] = "present"
+                            per_output["status"] = "present"
                             output_names_seen = target_summary.get("output_names", [])
                             if actual_name not in output_names_seen:
                                 output_names_seen.append(actual_name)
                                 target_summary["output_names"] = output_names_seen
                             target_summary["frames_with_values"] += 1
+                            per_output["frames_with_values"] += 1
                         count = 0
                         for value in values:
                             summarize_local_field_value(target_summary, value)
+                            summarize_local_field_value(per_output, value)
                             count += 1
                             if count >= MAX_LOCAL_FIELD_VALUES_PER_FRAME:
                                 target_summary["truncated_values"] = True
+                                per_output["truncated_values"] = True
                                 break
             summary["available_field_outputs"][step_name] = sorted(step_outputs.keys())
     except Exception as exc:
@@ -604,6 +675,7 @@ def extract_odb(odb_path, job_dir, input_data_path):
             "field_rows_available": len(field_rows),
             "moment_units_assumed": "N-mm converted to kN-m",
             "curvature_definition": "UR2 / effective_length_m",
+            "curve_summary": summarize_curve_rows(rows),
             "local_field_summary": local_field_summary,
         }
         if method_info:

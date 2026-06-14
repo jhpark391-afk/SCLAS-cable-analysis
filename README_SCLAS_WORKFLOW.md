@@ -74,6 +74,9 @@ curve class, warning totals, and next action. Use
 For continuous CurveV0 jobs, both commands report the basic multi-point shape
 check: positive branch, negative branch, return-to-zero rows, odd symmetry, and
 maximum curvature/moment.
+For ODB-backed jobs, the same commands also report curve scalar summaries and
+top local-field output channels for contact pressure, opening, slip, shear, and
+stress when those fields are present.
 The offline diagnostics tool checks `result_data.csv`,
 `result_summary.json`, `abaqus_mesh_manifest.json`, generated `.inp` keyword
 placement, and `.dat`/`.msg`/`.sta` solver logs when those files exist.

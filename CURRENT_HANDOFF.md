@@ -2187,6 +2187,73 @@ Interpretation:
   per-interface ranges, loop energy, contact status interpretation, and
   fatigue/calibration summaries are still open.
 
+## 2026-06-14 Windows Abaqus Update - Curve Scalars and Per-Output Digests
+
+Windows lab-PC work extended the ODB/result diagnostics without changing the
+CSV contract:
+
+- `code/sclas_odb_extractor.py` now computes `curve_summary` for ODB-extracted
+  rows and mirrors it into `result_summary.json`.
+- `curve_summary` records row count, min/max/max-absolute curvature, min/max/
+  max-absolute moment, curvature span, moment span, and a trapezoidal
+  `loop_energy_proxy_kn`.
+- Local ODB field summaries now keep `per_output` stats for interface-qualified
+  Abaqus outputs such as `CPRESS   surface/pair`, `COPEN`, `CSLIP*`, and
+  `CSHEAR*`.
+- `code/sclas_offline_diagnostics.py` and `code/sclas_job_summary.py` now show
+  top pressure/opening/slip/shear/stress outputs for single jobs and endpoint
+  sweep child-job aggregates.
+
+Fresh Windows validation after this update:
+
+- SmallSmoke: `jobs\SCLAS_jobs\small_smoke_20260614_152436`
+  - Abaqus job completed.
+  - `source=SCLAS_ABAQUS_ODB_EXTRACTOR`.
+  - `odb_extraction.status=extracted`.
+  - `odb_extraction.rows_written=2`.
+  - Actual warning hits `0`, blocking hits `0`.
+- Endpoint sweep: `jobs\SCLAS_jobs\curve_v0_sweep_20260614_152520`
+  - Parent `result_data.csv` has five numeric rows.
+  - Parent `source=SCLAS_CURVE_V0_ENDPOINT_SWEEP`.
+  - `endpoint_sweep_validation.all_child_jobs_validated=true`.
+  - Offline diagnostics deep-validated all five child jobs.
+  - Shape checks passed with monotonic endpoint curvature/moment and odd
+    symmetry relative error about `1.68e-05`.
+  - Curve scalars: max `|kappa|=0.0079999997979`, max `|M|=2.58674475`,
+    moment span `5.173446`, loop-energy proxy about `1.305e-07`.
+  - Aggregate ODB local metrics: `stress_mises_max=6.312607765197754`,
+    `contact_pressure_max=0.0`, `slip_abs_max=0.0`,
+    `contact_opening_abs_max=2.5802268981933594`.
+  - Actual warning hits `0`, blocking hits `0`.
+- Continuous CurveV0: `jobs\SCLAS_jobs\curve_v0_20260614_152837`
+  - `source=SCLAS_ABAQUS_ODB_EXTRACTOR`.
+  - `odb_extraction.status=extracted`.
+  - `odb_extraction.rows_written=5`.
+  - `abaqus_result_quality.curve_class=multi_point_curve_v0`.
+  - Continuous shape checks passed with symmetry error about `1.69e-05`.
+  - Curve scalars: max `|kappa|=0.007999999797903001`,
+    max `|M|=2.58674475`, moment span `5.173445749999999`,
+    loop-energy proxy about `3.62e-10`.
+  - Local fields present: `S`, `CPRESS`, `COPEN`, `CSLIP1`, `CSLIP2`,
+    `CSHEAR1`, `CSHEAR2`; `CSTATUS` missing.
+  - Top opening output was the inner-armour / inner-sheath outer-surface
+    interface, around `2.580226182937622`.
+  - `contact_pressure_max=0.0` and `slip_abs_max=0.0`, so the current reduced
+    scaffold still has detectable contact outputs but no calibrated closed
+    contact pressure or slip response.
+  - Actual warning hits `0`, blocking hits `0`.
+
+Interpretation:
+
+- The Abaqus bridge, endpoint CurveV0 sweep, and continuous CurveV0 path remain
+  stable after the richer diagnostics update.
+- There is no current blocking solver/extraction error.
+- The first physics blocker is now contact calibration/closure: contact output
+  channels exist, but the reduced scaffold reports zero pressure and zero slip.
+  The next backend work should make the contact pairs physically close and
+  produce nonzero `CPRESS`/slip where expected before claiming paper-grade
+  stick-slip behavior.
+
 ## Next Recommended Tasks
 
 1. Preserve the stable Lab-PC validation loop:
@@ -2207,7 +2274,7 @@ Interpretation:
 5. Add true periodic boundary equations or a documented equivalent-cell
    approximation.
 6. Extend the new ODB local-field summaries from aggregate maxima to
-   per-interface contact/slip/stress ranges, loop energy, contact status, and
+   full per-interface contact/slip/stress ranges, contact status, and
    fatigue-oriented metrics.
 7. After each meaningful task, update this file, commit, and push only code/docs
    changes, never generated Abaqus job artifacts.
