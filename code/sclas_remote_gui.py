@@ -617,6 +617,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Load best": "추천 작업 불러오기",
             "Intake": "결과 점검",
             "Acceptance": "통과 판정",
+            "Session Brief": "세션 브리프",
             "Validate All": "전체 검증",
             "Handoff": "인수인계",
             "Open folder": "폴더 열기",
@@ -1418,6 +1419,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_load_best_job = QPushButton("Load best")
         self.btn_result_intake = QPushButton("Intake")
         self.btn_acceptance_gate = QPushButton("Acceptance")
+        self.btn_session_brief = QPushButton("Session Brief")
         self.btn_validate_all = QPushButton("Validate All")
         self.btn_handoff_snapshot = QPushButton("Handoff")
         self.btn_open_job_folder = QPushButton("Open folder")
@@ -1430,6 +1432,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_load_best_job.setToolTip("Load the best current job candidate selected by the Job Index readiness score.")
         self.btn_result_intake.setToolTip("Check the selected or latest copied Abaqus result folder before acceptance.")
         self.btn_acceptance_gate.setToolTip("Evaluate whether the latest Abaqus result is research-ready.")
+        self.btn_session_brief.setToolTip("Show the one-page git, intake, acceptance, and next-action startup brief.")
         self.btn_validate_all.setToolTip("Run self-check, result intake, acceptance gate, handoff snapshot, and next prompt generation.")
         self.btn_handoff_snapshot.setToolTip("Save and show a compact handoff snapshot for the next Codex session.")
         self.btn_open_job_folder.setToolTip("Open the selected job folder in Finder or Explorer.")
@@ -1442,6 +1445,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_load_best_job.clicked.connect(self.load_best_job)
         self.btn_result_intake.clicked.connect(self.show_result_intake)
         self.btn_acceptance_gate.clicked.connect(self.show_acceptance_gate)
+        self.btn_session_brief.clicked.connect(self.show_session_brief)
         self.btn_validate_all.clicked.connect(self.run_validation_suite)
         self.btn_handoff_snapshot.clicked.connect(self.show_handoff_snapshot)
         self.btn_open_job_folder.clicked.connect(self.open_selected_job_folder)
@@ -1457,7 +1461,8 @@ class SCLASRemoteGUI(QMainWindow):
         history_layout.addWidget(self.btn_result_intake, 4, 0)
         history_layout.addWidget(self.btn_acceptance_gate, 4, 1)
         history_layout.addWidget(self.btn_handoff_snapshot, 4, 2)
-        history_layout.addWidget(self.btn_validate_all, 5, 0, 1, 3)
+        history_layout.addWidget(self.btn_session_brief, 5, 0)
+        history_layout.addWidget(self.btn_validate_all, 5, 1, 1, 2)
         right.addWidget(self.history_box)
 
         left_scroll = self.scroll_panel(left_panel, min_width=360)
@@ -2258,6 +2263,38 @@ class SCLASRemoteGUI(QMainWindow):
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Acceptance gate error", str(exc))
+
+    def show_session_brief(self) -> None:
+        try:
+            from sclas_session_brief import build_brief, default_report_path, human_report
+            from sclas_session_brief import save_markdown_report, save_report
+
+            job_root = Path(self.job_root_input.text().strip()).expanduser()
+            brief = build_brief(job_root, limit=15)
+            json_path = default_report_path("json")
+            markdown_path = default_report_path("md")
+            brief["saved_report"] = str(json_path)
+            brief["saved_markdown_report"] = str(markdown_path)
+            save_report(brief, json_path)
+            save_markdown_report(brief, markdown_path)
+            self.last_summary_data = {}
+            self.summary_text.setPlainText(human_report(brief))
+            status = brief.get("status")
+            tone = "good" if status == "research_candidate" else "warn" if status == "review" else "error"
+            label = "Result: ready" if status in ("research_candidate", "review") else "Result: error"
+            self.set_badge(self.lbl_result_status, label, tone)
+            self.log(
+                "[BRIEF] Session brief | status={0} | latest={1} | next={2}".format(
+                    status,
+                    brief.get("latest_job", "-"),
+                    brief.get("mac_next_action", "-"),
+                )
+            )
+            self.log(f"[BRIEF] Saved report: {json_path}")
+            self.log(f"[BRIEF] Saved Markdown report: {markdown_path}")
+        except Exception as exc:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
+            QMessageBox.critical(self, "Session brief error", str(exc))
 
     def show_handoff_snapshot(self) -> None:
         try:
