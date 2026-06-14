@@ -122,7 +122,8 @@ The same report is also available in the GUI from
 `offline_diagnostics_report.json` and `offline_diagnostics_report.md` in the
 selected job folder. Use `Open folder` in the same Recent Jobs panel to open
 the selected job folder in Finder or Windows Explorer. Use `Job Index` in the
-same panel to save and display a recent-job inventory without leaving the GUI.
+same panel to save and display a recent-job inventory without leaving the GUI,
+then `Load best` to load the highest-readiness candidate into the plot.
 
 ## Job package contract
 
