@@ -20,6 +20,7 @@ from sclas_handoff_snapshot import save_report as save_snapshot_report
 from sclas_job_summary import DEFAULT_JOB_ROOT
 from sclas_next_prompt import prompt_text, save_prompt
 from sclas_result_intake import build_intake
+from sclas_result_intake import report_dir as intake_report_dir
 from sclas_result_intake import save_markdown_report as save_intake_markdown
 from sclas_result_intake import save_report as save_intake_report
 from sclas_session_brief import build_brief
@@ -64,10 +65,12 @@ def build_suite(job_root: Path, limit: int = 15, include_self_check: bool = Fals
     acceptance["saved_markdown_report"] = str(acceptance_markdown)
 
     intake = build_intake(job_root, include_self_check=include_self_check)
-    intake_json = save_intake_report(intake)
+    intake_json = intake_report_dir(intake) / "result_intake_report.json"
+    intake_markdown = intake_report_dir(intake) / "result_intake_report.md"
     intake["saved_report"] = str(intake_json)
-    intake_markdown = save_intake_markdown(intake)
     intake["saved_markdown_report"] = str(intake_markdown)
+    save_intake_report(intake, intake_json)
+    save_intake_markdown(intake, intake_markdown)
 
     snapshot = build_snapshot(job_root, limit=limit, include_self_check=include_self_check)
     snapshot_json = save_snapshot_report(snapshot)

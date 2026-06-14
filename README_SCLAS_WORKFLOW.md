@@ -141,7 +141,8 @@ copying a remote Abaqus job folder back to this repository. It writes
 `result_intake_report.json` and `result_intake_report.md` into the inspected job
 folder and checks the file contract, ODB extraction evidence, solver logs,
 local ODB fields, and an acceptance-gate preview before you decide what to run
-next.
+next. It also lists blocked/review items and the remote Abaqus artifacts that
+still need to be copied or generated.
 Use `sclas_acceptance_gate.py` after remote Abaqus jobs are copied or pulled
 back. It checks whether the latest result is research-ready across result
 contract, continuous CurveV0, contact preload/closure, ODB local fields, and

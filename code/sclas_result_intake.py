@@ -111,6 +111,25 @@ def choose_next_action(status: str, items: list) -> str:
     return "Inspect intake details and rerun the local validation suite."
 
 
+def item_names(items: list, status: str, critical_only: bool = False) -> list:
+    return [
+        entry.get("name", "-")
+        for entry in items
+        if entry.get("status") == status and (not critical_only or entry.get("critical"))
+    ]
+
+
+def remote_required_artifacts() -> list:
+    return [
+        "result_data.csv and result_summary.json from an Abaqus ODB-backed run",
+        "continuous multi-point CurveV0 curvature/moment path, not only endpoint samples",
+        "odb_extraction_summary.json with row count and extraction method",
+        "local field summaries for S, CPRESS, COPEN, and CSLIP1/CSLIP2",
+        "nonzero CPRESS/slip evidence after residual preload or contact closure is applied",
+        "Abaqus input deck plus solver logs (.inp, .dat/.msg/.sta or captured stdout)",
+    ]
+
+
 def resolve_job(job_root: Path, job_dir: Optional[Path], include_self_check: bool) -> Path:
     if job_dir:
         return job_dir.expanduser().resolve()
@@ -129,6 +148,8 @@ def build_intake(job_root: Path, job_dir: Optional[Path] = None, include_self_ch
     gate_preview = acceptance_preview(summary, comparison)
     all_items = checklist + gate_preview
     status = choose_status(all_items)
+    blocked_items = item_names(all_items, "blocked", critical_only=True)
+    review_items = item_names(all_items, "review")
 
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -141,6 +162,9 @@ def build_intake(job_root: Path, job_dir: Optional[Path] = None, include_self_ch
         "latest_curve_class": summary.get("curve_class"),
         "checklist": checklist,
         "acceptance_preview": gate_preview,
+        "blocked_items": blocked_items,
+        "review_items": review_items,
+        "remote_required_artifacts": remote_required_artifacts(),
         "recommended_next_action": choose_next_action(status, all_items),
     }
 
@@ -160,6 +184,8 @@ def markdown_report(report: dict) -> str:
             report.get("latest_source", "-"),
             report.get("latest_curve_class", "-"),
         ),
+        "- Blocked items: `{0}`".format(", ".join(report.get("blocked_items", [])) or "-"),
+        "- Review items: `{0}`".format(", ".join(report.get("review_items", [])) or "-"),
         "",
         "## Intake Checklist",
         "",
@@ -181,6 +207,9 @@ def markdown_report(report: dict) -> str:
             entry.get("critical", "-"),
             str(entry.get("detail", "-")).replace("|", "\\|"),
         ))
+    lines.extend(["", "## Remote Required Artifacts", ""])
+    for artifact in report.get("remote_required_artifacts", []):
+        lines.append("- {0}".format(artifact))
     lines.extend(["", "## Next Action", "", report.get("recommended_next_action", "-"), ""])
     if report.get("saved_report") or report.get("saved_markdown_report"):
         lines.extend([
@@ -204,6 +233,8 @@ def human_report(report: dict) -> str:
             report.get("latest_source", "-"),
             report.get("latest_curve_class", "-"),
         ),
+        "Blocked items: {0}".format(", ".join(report.get("blocked_items", [])) or "-"),
+        "Review items: {0}".format(", ".join(report.get("review_items", [])) or "-"),
         "",
         "Intake checklist:",
     ]
@@ -215,6 +246,8 @@ def human_report(report: dict) -> str:
     for entry in report.get("acceptance_preview", []):
         marker = "critical" if entry.get("critical") else "advisory"
         lines.append("- {0}: {1} [{2}] - {3}".format(entry.get("name", "-"), entry.get("status", "-"), marker, entry.get("detail", "-")))
+    lines.extend(["", "Remote required artifacts:"])
+    lines.extend("- {0}".format(artifact) for artifact in report.get("remote_required_artifacts", []))
     lines.extend(["", "Next action:", report.get("recommended_next_action", "-")])
     if report.get("saved_report") or report.get("saved_markdown_report"):
         lines.extend(["", "Saved reports:", "- JSON: {0}".format(report.get("saved_report", "-")), "- Markdown: {0}".format(report.get("saved_markdown_report", "-"))])
@@ -260,12 +293,20 @@ def main(argv=None) -> int:
         job_root = Path(args.job_root).expanduser().resolve()
         job_dir = Path(args.job_dir) if args.job_dir else None
         report = build_intake(job_root, job_dir=job_dir, include_self_check=args.include_self_check)
+        json_path = Path(args.output).expanduser().resolve() if args.output else report_dir(report) / "result_intake_report.json"
+        markdown_path = (
+            Path(args.markdown_output).expanduser().resolve()
+            if args.markdown_output
+            else report_dir(report) / "result_intake_report.md"
+        )
         if args.save_report or args.output:
-            path = save_report(report, Path(args.output).expanduser().resolve() if args.output else None)
-            report["saved_report"] = str(path)
+            report["saved_report"] = str(json_path)
         if args.save_markdown or args.markdown_output:
-            path = save_markdown_report(report, Path(args.markdown_output).expanduser().resolve() if args.markdown_output else None)
-            report["saved_markdown_report"] = str(path)
+            report["saved_markdown_report"] = str(markdown_path)
+        if args.save_report or args.output:
+            save_report(report, json_path)
+        if args.save_markdown or args.markdown_output:
+            save_markdown_report(report, markdown_path)
         if args.json:
             print(json.dumps(report, indent=2, ensure_ascii=False))
         else:

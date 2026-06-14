@@ -1136,14 +1136,24 @@ def check_result_intake() -> None:
         fail("Result intake did not expose an intake checklist")
     if not report.get("acceptance_preview"):
         fail("Result intake did not expose acceptance-preview gates")
+    if not report.get("remote_required_artifacts"):
+        fail("Result intake did not expose remote required artifacts")
+    if report.get("status") == "blocked" and not report.get("blocked_items"):
+        fail("Result intake did not expose blocked gate names")
     if report.get("status") not in ("ready", "review", "blocked"):
         fail("Result intake returned an unexpected status: " + str(report.get("status")))
     saved_report = Path(report.get("saved_report", ""))
     saved_markdown = Path(report.get("saved_markdown_report", ""))
     if not saved_report.exists() or not saved_markdown.exists():
         fail("Result intake did not save JSON and Markdown reports")
-    if "HELIX / SCLAS Result Intake" not in saved_markdown.read_text(encoding="utf-8"):
+    saved_intake = json.loads(saved_report.read_text(encoding="utf-8"))
+    if saved_intake.get("saved_markdown_report") != str(saved_markdown):
+        fail("Result intake JSON did not preserve the Markdown report path")
+    markdown_text = saved_markdown.read_text(encoding="utf-8")
+    if "HELIX / SCLAS Result Intake" not in markdown_text:
         fail("Result intake Markdown report does not contain the expected heading")
+    if "Remote Required Artifacts" not in markdown_text:
+        fail("Result intake Markdown report does not include the remote artifact checklist")
 
     print("[OK] Result intake")
 
