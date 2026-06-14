@@ -2422,6 +2422,10 @@ It summarizes:
 expected top blocker remains contact preload/closure until the remote Abaqus
 side produces nonzero CPRESS/slip under the declared residual pressure.
 
+The Analysis tab now has a `Project Status` button in the Recent Jobs panel.
+It runs the same project status dashboard and writes the human-readable status
+and next action into the summary panel.
+
 ## Home Codex Start Prompt
 
 Use this prompt when starting work on the home or Mac Codex computer:

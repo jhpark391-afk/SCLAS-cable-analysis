@@ -610,6 +610,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Load selected": "선택 항목 불러오기",
             "Diagnose selected": "선택 항목 진단",
             "Compare CurveV0": "CurveV0 비교",
+            "Project Status": "프로젝트 상태",
             "No result jobs found": "결과 작업 없음",
             "Model: pending": "모델: 대기",
             "Model: edited": "모델: 수정됨",
@@ -1403,19 +1404,23 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_load_job = QPushButton("Load selected")
         self.btn_diagnose_job = QPushButton("Diagnose selected")
         self.btn_compare_curve_v0 = QPushButton("Compare CurveV0")
+        self.btn_project_status = QPushButton("Project Status")
         self.btn_refresh_jobs.setToolTip("Scan the job root for recent SCLAS result folders.")
         self.btn_load_job.setToolTip("Load result_data.csv from the selected job folder.")
         self.btn_diagnose_job.setToolTip("Inspect selected job files with the offline Abaqus diagnostics tool.")
         self.btn_compare_curve_v0.setToolTip("Compare the latest endpoint sweep and continuous CurveV0 result folders.")
+        self.btn_project_status.setToolTip("Show the overall HELIX/SCLAS project status and next action.")
         self.btn_refresh_jobs.clicked.connect(self.refresh_job_history)
         self.btn_load_job.clicked.connect(self.load_selected_job)
         self.btn_diagnose_job.clicked.connect(self.diagnose_selected_job)
         self.btn_compare_curve_v0.clicked.connect(self.compare_curve_v0_jobs)
-        history_layout.addWidget(self.job_history_combo, 0, 0, 1, 4)
+        self.btn_project_status.clicked.connect(self.show_project_status)
+        history_layout.addWidget(self.job_history_combo, 0, 0, 1, 5)
         history_layout.addWidget(self.btn_refresh_jobs, 1, 0)
         history_layout.addWidget(self.btn_load_job, 1, 1)
         history_layout.addWidget(self.btn_diagnose_job, 1, 2)
         history_layout.addWidget(self.btn_compare_curve_v0, 1, 3)
+        history_layout.addWidget(self.btn_project_status, 1, 4)
         right.addWidget(self.history_box)
 
         left_scroll = self.scroll_panel(left_panel, min_width=360)
@@ -2051,6 +2056,29 @@ class SCLASRemoteGUI(QMainWindow):
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "CurveV0 comparison error", str(exc))
+
+    def show_project_status(self) -> None:
+        try:
+            from sclas_project_status import build_status, human_report
+
+            job_root = Path(self.job_root_input.text().strip()).expanduser()
+            status = build_status(job_root)
+            self.last_summary_data = {}
+            self.summary_text.setPlainText(human_report(status))
+            has_blocked = any(flag.get("status") == "blocked" for flag in status.get("completion_flags", []))
+            has_review = any(flag.get("status") == "review" for flag in status.get("completion_flags", []))
+            tone = "error" if has_blocked else "warn" if has_review else "good"
+            label = "Result: error" if has_blocked else "Result: ready"
+            self.set_badge(self.lbl_result_status, label, tone)
+            self.log(
+                "[STATUS] Project status | latest={0} | next={1}".format(
+                    status.get("latest_job", "-"),
+                    status.get("recommended_next_action", "-"),
+                )
+            )
+        except Exception as exc:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
+            QMessageBox.critical(self, "Project status error", str(exc))
 
     @staticmethod
     def counts_text(counts, limit: int = 4) -> str:

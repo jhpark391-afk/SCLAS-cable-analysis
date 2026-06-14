@@ -109,29 +109,38 @@ def build_status(job_root: Path) -> dict:
     }
 
 
-def print_human(status: dict) -> None:
-    print("HELIX / SCLAS Project Status")
-    print("============================")
-    print("Job root: {0}".format(status.get("job_root", "-")))
-    print("Latest job: {0}".format(status.get("latest_job", "-")))
-    print("Latest health: {0}".format(status.get("latest_job_health", "-")))
-    print("Latest source/class: {0} / {1}".format(status.get("latest_source", "-"), status.get("latest_curve_class", "-")))
-    print("CurveV0 comparison: status={0}, peak_ratio={1}".format(
-        status.get("curve_v0_comparison_status", "-"),
-        status.get("curve_v0_peak_ratio", "-"),
-    ))
-    print("Contact: preload={0}, CPRESS max={1}, slip max={2}".format(
-        status.get("contact_preload_status", "-"),
-        status.get("contact_pressure_max", "-"),
-        status.get("slip_abs_max", "-"),
-    ))
-    print()
-    print("Completion flags:")
+def human_report(status: dict) -> str:
+    lines = [
+        "HELIX / SCLAS Project Status",
+        "============================",
+        "Job root: {0}".format(status.get("job_root", "-")),
+        "Latest job: {0}".format(status.get("latest_job", "-")),
+        "Latest health: {0}".format(status.get("latest_job_health", "-")),
+        "Latest source/class: {0} / {1}".format(status.get("latest_source", "-"), status.get("latest_curve_class", "-")),
+        "CurveV0 comparison: status={0}, peak_ratio={1}".format(
+            status.get("curve_v0_comparison_status", "-"),
+            status.get("curve_v0_peak_ratio", "-"),
+        ),
+        "Contact: preload={0}, CPRESS max={1}, slip max={2}".format(
+            status.get("contact_preload_status", "-"),
+            status.get("contact_pressure_max", "-"),
+            status.get("slip_abs_max", "-"),
+        ),
+        "",
+        "Completion flags:",
+    ]
     for flag in status.get("completion_flags", []):
-        print("- {0}: {1} ({2})".format(flag.get("area", "-"), flag.get("status", "-"), flag.get("detail", "-")))
-    print()
-    print("Next action:")
-    print(status.get("recommended_next_action", "-"))
+        lines.append("- {0}: {1} ({2})".format(flag.get("area", "-"), flag.get("status", "-"), flag.get("detail", "-")))
+    lines.extend([
+        "",
+        "Next action:",
+        status.get("recommended_next_action", "-"),
+    ])
+    return "\n".join(lines)
+
+
+def print_human(status: dict) -> None:
+    print(human_report(status))
 
 
 def parse_args(argv=None):
