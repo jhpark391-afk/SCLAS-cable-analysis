@@ -707,6 +707,33 @@ def check_continuous_curve_v0_diagnostics() -> None:
     print(f"[OK] Continuous CurveV0 diagnostics: {job_dir}")
 
 
+def check_curve_v0_comparison() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_curve_compare.py"),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("sclas_curve_compare.py failed:\n" + proc.stdout + proc.stderr)
+    report = json.loads(proc.stdout)
+    if report.get("status") != "review":
+        fail("CurveV0 comparison should classify synthetic scale mismatch as review")
+    if "self_check_endpoint_sweep_" not in report.get("endpoint_job", ""):
+        fail("CurveV0 comparison did not select the latest endpoint self-check job")
+    if "self_check_continuous_curve_v0_" not in report.get("continuous_job", ""):
+        fail("CurveV0 comparison did not select the latest continuous self-check job")
+    if report.get("peak_moment_ratio_continuous_over_endpoint", 0.0) < 10.0:
+        fail("CurveV0 comparison did not expose the expected synthetic scale mismatch")
+    if not report.get("warnings"):
+        fail("CurveV0 comparison did not report warnings for the synthetic scale mismatch")
+
+    print("[OK] CurveV0 endpoint/continuous comparison")
+
+
 def main() -> int:
     checks = [
         check_pyproj_references,
@@ -715,6 +742,7 @@ def main() -> int:
         check_backend_contract,
         check_endpoint_sweep_diagnostics,
         check_continuous_curve_v0_diagnostics,
+        check_curve_v0_comparison,
     ]
     try:
         for check in checks:

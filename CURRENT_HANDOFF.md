@@ -2107,6 +2107,37 @@ Mac-side diagnostics now recognize
 same continuous CurveV0 shape fields. `code/sclas_self_check.py` now creates a
 synthetic continuous CurveV0 ODB-style job and verifies this path.
 
+## 2026-06-14 Mac Support Update - CurveV0 Comparison CLI
+
+Mac-side support added `code/sclas_curve_compare.py`.
+
+Default command:
+
+```bash
+python code/sclas_curve_compare.py
+```
+
+The command finds the latest endpoint sweep and latest continuous
+`multi_point_curve_v0` job under `jobs/SCLAS_jobs`, then compares:
+
+- common absolute curvature
+- positive and negative branch moments at that curvature
+- relative branch deltas
+- continuous/endpoint peak moment ratio
+- row counts, max curvature, max moment, and odd-symmetry indicators
+
+Use explicit folders when comparing a specific pair:
+
+```bash
+python code/sclas_curve_compare.py \
+  --endpoint jobs/SCLAS_jobs/<endpoint_sweep_folder> \
+  --continuous jobs/SCLAS_jobs/<continuous_curve_folder>
+```
+
+`code/sclas_self_check.py` verifies this path with synthetic endpoint and
+continuous CurveV0 jobs and expects the intentionally different moment scale to
+be classified as `review`.
+
 Verification on Mac:
 
 ```bash
