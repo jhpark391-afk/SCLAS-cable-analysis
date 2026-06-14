@@ -1001,6 +1001,7 @@ def check_next_prompt() -> None:
     prompt = prompt_path.read_text(encoding="utf-8")
     for expected in [
         "git pull",
+        "python code/sclas_result_intake.py --save-report --save-markdown",
         "python code/sclas_handoff_snapshot.py --save-report --save-markdown",
         "python code/sclas_acceptance_gate.py --save-report --save-markdown",
         "python code/sclas_self_check.py",

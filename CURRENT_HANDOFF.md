@@ -2412,8 +2412,10 @@ python code/sclas_project_status.py --json
 python code/sclas_project_status.py --save-report --save-markdown
 python code/sclas_handoff_snapshot.py --save-report --save-markdown
 python code/sclas_next_prompt.py --save
+python code/sclas_result_intake.py --save-report --save-markdown
 python code/sclas_acceptance_gate.py --save-report --save-markdown
 ./run_validation_suite.sh
+./run_result_intake.sh
 ./run_acceptance_gate.sh
 ./run_next_prompt.sh
 ```
@@ -2429,10 +2431,12 @@ It summarizes:
   gate, and next action
 - `NEXT_CODEX_PROMPT.md`, a ready-made prompt for the next Codex session
   generated directly by `run_next_prompt.sh` or `run_next_prompt.bat`
+- a result-intake checklist that inspects the selected/latest copied Abaqus job
+  folder before acceptance and is available from the GUI Recent Jobs panel
 - an acceptance gate that separates completed Abaqus output from research-ready
   contact/CurveV0 evidence and is now embedded in the handoff snapshot/prompt
-- a validation suite launcher that runs self-check, acceptance, handoff, and
-  next-prompt generation in one repeatable pass and writes
+- a validation suite launcher that runs self-check, result intake, acceptance,
+  handoff, and next-prompt generation in one repeatable pass and writes
   `validation_suite_report.json/md` with git branch/head, dirty state, sync
   label, and upstream ahead/behind traceability
 - latest job health/source/curve class
