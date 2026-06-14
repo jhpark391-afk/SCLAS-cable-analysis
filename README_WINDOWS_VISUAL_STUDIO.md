@@ -47,6 +47,15 @@ To verify the local project contract after edits, run:
 run_self_check.bat
 ```
 
+For the full repeatable handoff/validation pass, run:
+
+```bat
+run_validation_suite.bat
+```
+
+This runs self-check, saves the acceptance gate report, saves the handoff
+snapshot, and regenerates the next Codex prompt.
+
 After copying or pulling a remote Abaqus result folder, run:
 
 ```bat

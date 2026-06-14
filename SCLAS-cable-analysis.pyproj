@@ -60,6 +60,8 @@
     <Content Include="run_sclas.bat" />
     <Content Include="run_self_check.bat" />
     <Content Include="run_sclas.sh" />
+    <Content Include="run_validation_suite.bat" />
+    <Content Include="run_validation_suite.sh" />
     <Content Include="setup_windows.bat" />
     <Content Include="code\SCLAS_test\requirements_sclas_remote_mac.txt" />
     <Content Include="data\input_data.json" />

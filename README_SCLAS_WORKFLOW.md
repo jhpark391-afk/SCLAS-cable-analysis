@@ -58,11 +58,13 @@ Run the local smoke checks with:
 
 ```bat
 run_self_check.bat
+run_validation_suite.bat
 ```
 
 Save a handoff snapshot from the shell with:
 
 ```bash
+./run_validation_suite.sh
 ./run_acceptance_gate.sh
 ./run_handoff_snapshot.sh
 ./run_next_prompt.sh
@@ -71,6 +73,7 @@ Save a handoff snapshot from the shell with:
 On Windows:
 
 ```bat
+run_validation_suite.bat
 run_acceptance_gate.bat
 run_handoff_snapshot.bat
 run_next_prompt.bat
@@ -131,6 +134,9 @@ the latest acceptance status so the next Codex session starts from the same
 pass/review/blocked evidence.
 Use `run_acceptance_gate.sh` or `run_acceptance_gate.bat` for the same saved
 report flow without typing the Python command.
+Use `run_validation_suite.sh` or `run_validation_suite.bat` before a major
+handoff or commit when you want self-check, acceptance gate, handoff snapshot,
+and next-session prompt generation in one repeatable pass.
 If a CurveV0 comparison report exists in a job folder, `sclas_job_summary.py`
 also prints the comparison status, peak ratio, and branch deltas.
 Use `sclas_curve_compare.py` after both endpoint sweep and continuous CurveV0

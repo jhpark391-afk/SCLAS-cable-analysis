@@ -2413,6 +2413,7 @@ python code/sclas_project_status.py --save-report --save-markdown
 python code/sclas_handoff_snapshot.py --save-report --save-markdown
 python code/sclas_next_prompt.py --save
 python code/sclas_acceptance_gate.py --save-report --save-markdown
+./run_validation_suite.sh
 ./run_acceptance_gate.sh
 ./run_next_prompt.sh
 ```
@@ -2430,6 +2431,8 @@ It summarizes:
   generated directly by `run_next_prompt.sh` or `run_next_prompt.bat`
 - an acceptance gate that separates completed Abaqus output from research-ready
   contact/CurveV0 evidence and is now embedded in the handoff snapshot/prompt
+- a validation suite launcher that runs self-check, acceptance, handoff, and
+  next-prompt generation in one repeatable pass
 - latest job health/source/curve class
 - latest endpoint-vs-continuous CurveV0 comparison status
 - contact preload state, CPRESS max, and slip max

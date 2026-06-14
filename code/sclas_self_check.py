@@ -999,6 +999,8 @@ def check_next_prompt() -> None:
         "python code/sclas_handoff_snapshot.py --save-report --save-markdown",
         "python code/sclas_acceptance_gate.py --save-report --save-markdown",
         "python code/sclas_self_check.py",
+        "./run_validation_suite.sh",
+        "run_validation_suite.bat",
         "Acceptance gate:",
         "contact preload",
     ]:
