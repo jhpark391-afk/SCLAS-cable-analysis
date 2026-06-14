@@ -88,6 +88,9 @@ curve class, warning totals, and next action. Use
 `sclas_offline_diagnostics.py` when you need the full JSON/Markdown report.
 Use `sclas_job_index.py` when you need a handoff inventory of recent real
 `job_*` runs, health counts, source counts, contact metrics, and next actions.
+It also assigns a readiness score and best-candidate recommendation so the next
+diagnostic pass can start from the most useful run instead of the newest folder
+alone.
 With `--save-report` and `--save-markdown`, it writes `sclas_job_index.json`
 and `sclas_job_index.md` under `jobs/SCLAS_jobs`.
 If a CurveV0 comparison report exists in a job folder, `sclas_job_summary.py`

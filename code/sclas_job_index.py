@@ -26,6 +26,13 @@ def scalar(value, default="-"):
     return default if value in (None, "") else value
 
 
+def positive_number(value) -> bool:
+    try:
+        return float(value) > 0.0
+    except (TypeError, ValueError):
+        return False
+
+
 def job_mtime(job_dir: Path) -> float:
     mtimes = []
     for name in REPORT_NAMES:
@@ -33,6 +40,77 @@ def job_mtime(job_dir: Path) -> float:
         if path.exists():
             mtimes.append(path.stat().st_mtime)
     return max(mtimes) if mtimes else job_dir.stat().st_mtime
+
+
+def readiness(summary: dict, error: Optional[str] = None) -> dict:
+    score = 0
+    tags = []
+    blockers = []
+
+    health = summary.get("health")
+    if error:
+        blockers.append("summary_error")
+    elif health == "PASS":
+        score += 30
+        tags.append("diagnostics_pass")
+    elif health == "REVIEW":
+        score += 12
+        tags.append("needs_review")
+    elif health == "BLOCKED":
+        score -= 20
+        blockers.append("blocked_diagnostics")
+
+    source = summary.get("source")
+    curve_class = summary.get("curve_class")
+    if source == "SCLAS_ABAQUS_ODB_EXTRACTOR":
+        score += 25
+        tags.append("abaqus_odb")
+    elif source == "SCLAS_CURVE_V0_ENDPOINT_SWEEP":
+        score += 18
+        tags.append("endpoint_sweep")
+    elif source == "FAST_GUI_APPROXIMATION":
+        score += 2
+        tags.append("fast_preview")
+
+    if curve_class == "multi_point_curve_v0":
+        score += 20
+        tags.append("continuous_curve_v0")
+    elif curve_class == "endpoint_sweep_curve_v0":
+        score += 12
+        tags.append("endpoint_curve_v0")
+
+    if summary.get("odb_status") == "extracted":
+        score += 15
+        tags.append("odb_extracted")
+    if positive_number(summary.get("odb_contact_pressure_max")):
+        score += 20
+        tags.append("contact_pressure_nonzero")
+    else:
+        blockers.append("missing_contact_pressure")
+    if positive_number(summary.get("odb_slip_abs_max")):
+        score += 10
+        tags.append("slip_nonzero")
+    if summary.get("curve_v0_comparison_status") == "aligned":
+        score += 12
+        tags.append("curve_v0_aligned")
+    elif summary.get("curve_v0_comparison_status") == "review":
+        score += 4
+        tags.append("curve_v0_review")
+
+    if score >= 75 and not blockers:
+        label = "candidate"
+    elif score >= 45:
+        label = "promising"
+    elif score >= 15:
+        label = "triage"
+    else:
+        label = "low"
+    return {
+        "readiness_score": score,
+        "readiness_label": label,
+        "readiness_tags": tags,
+        "readiness_blockers": blockers,
+    }
 
 
 def summarize_one(job_dir: Path) -> dict:
@@ -43,7 +121,8 @@ def summarize_one(job_dir: Path) -> dict:
         summary = {}
         error = str(exc)
     mtime = job_mtime(job_dir)
-    return {
+    ready = readiness(summary, error=error)
+    item = {
         "name": job_dir.name,
         "path": str(job_dir),
         "modified_at": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
@@ -61,6 +140,8 @@ def summarize_one(job_dir: Path) -> dict:
         "recommended_next_action": summary.get("recommended_next_action"),
         "error": error,
     }
+    item.update(ready)
+    return item
 
 
 def count_by(items, key):
@@ -79,6 +160,7 @@ def build_index(job_root: Path, limit: int = 15, include_self_check: bool = Fals
     candidates = sorted(candidates, key=job_mtime, reverse=True)
     selected = candidates[:max(limit, 0)]
     jobs = [summarize_one(job_dir) for job_dir in selected]
+    best_job = max(jobs, key=lambda item: (item.get("readiness_score", 0), item.get("modified_at", "")), default=None)
     return {
         "job_root": str(job_root),
         "include_self_check": include_self_check,
@@ -89,11 +171,14 @@ def build_index(job_root: Path, limit: int = 15, include_self_check: bool = Fals
         "health_counts": count_by(jobs, "health"),
         "source_counts": count_by(jobs, "source"),
         "curve_class_counts": count_by(jobs, "curve_class"),
+        "readiness_counts": count_by(jobs, "readiness_label"),
+        "best_job": best_job,
         "jobs": jobs,
     }
 
 
 def human_report(index: dict) -> str:
+    best_job = index.get("best_job") or {}
     lines = [
         "SCLAS Job Index",
         "===============",
@@ -103,14 +188,22 @@ def human_report(index: dict) -> str:
         "Reported: {0}".format(index.get("reported_count", 0)),
         "Health counts: {0}".format(index.get("health_counts", {})),
         "Source counts: {0}".format(index.get("source_counts", {})),
+        "Readiness counts: {0}".format(index.get("readiness_counts", {})),
+        "Best candidate: {0} | score={1} | label={2}".format(
+            scalar(best_job.get("name")),
+            scalar(best_job.get("readiness_score")),
+            scalar(best_job.get("readiness_label")),
+        ),
         "",
         "Recent jobs:",
     ]
     for item in index.get("jobs", []):
         lines.append(
-            "- {modified_at} | {name} | health={health} | source={source} | curve={curve} | CPRESS={cpress} | slip={slip}".format(
+            "- {modified_at} | {name} | score={score}({label}) | health={health} | source={source} | curve={curve} | CPRESS={cpress} | slip={slip}".format(
                 modified_at=scalar(item.get("modified_at")),
                 name=scalar(item.get("name")),
+                score=scalar(item.get("readiness_score")),
+                label=scalar(item.get("readiness_label")),
                 health=scalar(item.get("health")),
                 source=scalar(item.get("source")),
                 curve=scalar(item.get("curve_class")),
@@ -126,6 +219,7 @@ def human_report(index: dict) -> str:
 
 
 def markdown_report(index: dict) -> str:
+    best_job = index.get("best_job") or {}
     lines = [
         "# SCLAS Job Index",
         "",
@@ -140,16 +234,27 @@ def markdown_report(index: dict) -> str:
         "- Health: `{0}`".format(index.get("health_counts", {})),
         "- Source: `{0}`".format(index.get("source_counts", {})),
         "- Curve class: `{0}`".format(index.get("curve_class_counts", {})),
+        "- Readiness: `{0}`".format(index.get("readiness_counts", {})),
+        "",
+        "## Best Candidate",
+        "",
+        "- Job: `{0}`".format(best_job.get("name", "-")),
+        "- Score: `{0}`".format(best_job.get("readiness_score", "-")),
+        "- Label: `{0}`".format(best_job.get("readiness_label", "-")),
+        "- Tags: `{0}`".format(best_job.get("readiness_tags", [])),
+        "- Blockers: `{0}`".format(best_job.get("readiness_blockers", [])),
         "",
         "## Recent Jobs",
         "",
-        "| Modified | Job | Health | Source | Curve | CPRESS max | Slip max |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Modified | Job | Score | Label | Health | Source | Curve | CPRESS max | Slip max |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for item in index.get("jobs", []):
-        lines.append("| {0} | `{1}` | {2} | {3} | {4} | {5} | {6} |".format(
+        lines.append("| {0} | `{1}` | {2} | {3} | {4} | {5} | {6} | {7} | {8} |".format(
             scalar(item.get("modified_at")),
             scalar(item.get("name")),
+            scalar(item.get("readiness_score")),
+            scalar(item.get("readiness_label")),
             scalar(item.get("health")),
             scalar(item.get("source")),
             scalar(item.get("curve_class")),

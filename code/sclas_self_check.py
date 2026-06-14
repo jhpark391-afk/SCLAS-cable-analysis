@@ -840,12 +840,21 @@ def check_latest_job_filtering() -> None:
         fail("Job index did not exclude self_check jobs by default")
     if index.get("jobs", [{}])[0].get("name") != user_job.name:
         fail("Job index reported the wrong default job")
+    first_job = index.get("jobs", [{}])[0]
+    if first_job.get("readiness_label") not in ("low", "triage", "promising", "candidate") or first_job.get("readiness_score") is None:
+        fail("Job index did not assign a readiness score/label to the default job")
+    best_job = index.get("best_job", {})
+    if best_job.get("name") != user_job.name:
+        fail("Job index did not expose the best default candidate")
     saved_index = Path(index.get("saved_report", ""))
     saved_markdown = Path(index.get("saved_markdown_report", ""))
     if not saved_index.exists() or not saved_markdown.exists():
         fail("Job index did not save JSON and Markdown reports")
-    if "SCLAS Job Index" not in saved_markdown.read_text(encoding="utf-8"):
+    markdown_text = saved_markdown.read_text(encoding="utf-8")
+    if "SCLAS Job Index" not in markdown_text:
         fail("Job index Markdown report does not contain the expected heading")
+    if "Best Candidate" not in markdown_text:
+        fail("Job index Markdown report does not contain the best candidate section")
 
     include_index_proc = subprocess.run(index_cmd + ["--include-self-check"], text=True, capture_output=True)
     if include_index_proc.returncode != 0:

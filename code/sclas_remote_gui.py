@@ -2130,11 +2130,14 @@ class SCLASRemoteGUI(QMainWindow):
             tone = "error" if has_blocked else "warn" if has_review else "good"
             label = "Result: error" if has_blocked else "Result: ready"
             self.set_badge(self.lbl_result_status, label, tone)
+            best_job = index.get("best_job") or {}
             self.log(
-                "[INDEX] Job index | reported={0}/{1} | health={2}".format(
+                "[INDEX] Job index | reported={0}/{1} | health={2} | best={3} score={4}".format(
                     index.get("reported_count", 0),
                     index.get("total_candidates", 0),
                     index.get("health_counts", {}),
+                    best_job.get("name", "-"),
+                    best_job.get("readiness_score", "-"),
                 )
             )
             self.log(f"[INDEX] Saved report: {saved_path}")
