@@ -57,6 +57,17 @@ This saves `session_brief.json` / `session_brief.md` with git sync, latest job,
 result-intake status, acceptance status, blocked gates, and separate Mac/home vs
 remote Abaqus next actions.
 
+After copying back an Abaqus result and running intake/acceptance, generate a
+compact interpretation report with:
+
+```bat
+run_research_report.bat
+```
+
+This saves `research_report.json` / `research_report.md` in the inspected job
+folder with acceptance gates, CurveV0 comparison, ODB field evidence, and
+contact/slip/stress metrics.
+
 For the full repeatable handoff/validation pass, run:
 
 ```bat

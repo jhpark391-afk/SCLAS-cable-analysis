@@ -67,6 +67,7 @@ Save a handoff snapshot from the shell with:
 ./run_session_brief.sh
 ./run_validation_suite.sh
 ./run_acceptance_gate.sh
+./run_research_report.sh
 ./run_handoff_snapshot.sh
 ./run_next_prompt.sh
 ```
@@ -77,6 +78,7 @@ On Windows:
 run_session_brief.bat
 run_validation_suite.bat
 run_acceptance_gate.bat
+run_research_report.bat
 run_handoff_snapshot.bat
 run_next_prompt.bat
 ```
@@ -98,6 +100,8 @@ python code/sclas_result_intake.py
 python code/sclas_result_intake.py jobs/SCLAS_jobs/<job_folder> --save-report --save-markdown
 python code/sclas_acceptance_gate.py
 python code/sclas_acceptance_gate.py --save-report --save-markdown
+python code/sclas_research_report.py
+python code/sclas_research_report.py jobs/SCLAS_jobs/<job_folder> --save-report --save-markdown
 python code/sclas_curve_compare.py
 python code/sclas_curve_compare.py \
   --endpoint jobs/SCLAS_jobs/<endpoint_sweep_folder> \
@@ -153,6 +157,12 @@ the latest result-intake and acceptance statuses so the next Codex session
 starts from the same pass/review/blocked evidence.
 Use `run_acceptance_gate.sh` or `run_acceptance_gate.bat` for the same saved
 report flow without typing the Python command.
+Use `sclas_research_report.py` or `run_research_report.sh`/`.bat` after intake
+and acceptance when you want a compact interpretation package for a copied
+remote Abaqus result. It writes `research_report.json` and `research_report.md`
+into the inspected job folder with acceptance gates, CurveV0 comparison, ODB
+field evidence, contact/slip/stress metrics, and notes about whether the result
+is research-ready or still blocked/review-only.
 Use `run_validation_suite.sh` or `run_validation_suite.bat` before a major
 handoff or commit when you want self-check, result intake, acceptance gate,
 handoff snapshot, and next-session prompt generation in one repeatable pass. The suite writes

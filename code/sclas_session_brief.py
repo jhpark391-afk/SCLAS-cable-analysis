@@ -64,6 +64,7 @@ def startup_commands() -> list:
         "git status --short --branch",
         "python code/sclas_session_brief.py --save-report --save-markdown",
         "python code/sclas_result_intake.py --save-report --save-markdown",
+        "python code/sclas_research_report.py --save-report --save-markdown",
         "python code/sclas_handoff_snapshot.py --save-report --save-markdown",
         "python code/sclas_acceptance_gate.py --save-report --save-markdown",
         "python code/sclas_self_check.py",

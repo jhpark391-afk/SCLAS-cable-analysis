@@ -1004,6 +1004,28 @@ def check_research_ready_acceptance_fixture() -> None:
     if Path(status.get("latest_job", "")).resolve() != continuous_job.resolve():
         fail("Project status did not select the continuous research-ready fixture")
 
+    research_proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_research_report.py"),
+            "--job-root",
+            str(root),
+            "--json",
+            "--strict",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if research_proc.returncode != 0:
+        fail("Research-ready report fixture failed:\n" + research_proc.stdout + research_proc.stderr)
+    research = json.loads(research_proc.stdout)
+    if research.get("status") != "research_ready":
+        fail("Research report did not classify the fixture as research_ready")
+    if Path(research.get("job_dir", "")).resolve() != continuous_job.resolve():
+        fail("Research report did not select the continuous research-ready fixture")
+
     print(f"[OK] Research-ready acceptance fixture: endpoint={endpoint_job.name}, continuous={continuous_job.name}")
 
 
@@ -1226,6 +1248,7 @@ def check_next_prompt() -> None:
         "git pull",
         "python code/sclas_session_brief.py --save-report --save-markdown",
         "python code/sclas_result_intake.py --save-report --save-markdown",
+        "python code/sclas_research_report.py --save-report --save-markdown",
         "python code/sclas_handoff_snapshot.py --save-report --save-markdown",
         "python code/sclas_acceptance_gate.py --save-report --save-markdown",
         "python code/sclas_self_check.py",
@@ -1308,12 +1331,16 @@ def check_validation_suite() -> None:
         fail("Validation suite did not embed git dirty/sync status")
     if not report.get("result_intake", {}).get("status"):
         fail("Validation suite did not embed result intake status")
+    if not report.get("research_report", {}).get("status"):
+        fail("Validation suite did not embed research report status")
     if not report.get("acceptance_gate", {}).get("overall_status"):
         fail("Validation suite did not embed acceptance gate status")
     if not report.get("handoff_snapshot", {}).get("saved_report"):
         fail("Validation suite did not save a handoff snapshot")
     if not report.get("session_brief", {}).get("saved_report"):
         fail("Validation suite did not save a session brief")
+    if not report.get("research_report", {}).get("saved_report"):
+        fail("Validation suite did not save a research report")
     if not report.get("next_prompt", {}).get("saved_prompt"):
         fail("Validation suite did not save the next prompt")
     saved_report = Path(report.get("saved_report", ""))
@@ -1370,6 +1397,44 @@ def check_result_intake() -> None:
     print("[OK] Result intake")
 
 
+def check_research_report() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_research_report.py"),
+            "--include-self-check",
+            "--json",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("sclas_research_report.py failed:\n" + proc.stdout + proc.stderr)
+    report = json.loads(proc.stdout)
+    if report.get("status") not in ("research_ready", "needs_review", "blocked"):
+        fail("Research report returned an unexpected status: " + str(report.get("status")))
+    if not report.get("metrics"):
+        fail("Research report did not expose engineering metrics")
+    if not report.get("acceptance_gates"):
+        fail("Research report did not expose acceptance gates")
+    saved_report = Path(report.get("saved_report", ""))
+    saved_markdown = Path(report.get("saved_markdown_report", ""))
+    if not saved_report.exists() or not saved_markdown.exists():
+        fail("Research report did not save JSON and Markdown reports")
+    saved = json.loads(saved_report.read_text(encoding="utf-8"))
+    if saved.get("saved_markdown_report") != str(saved_markdown):
+        fail("Research report JSON did not preserve the Markdown report path")
+    markdown_text = saved_markdown.read_text(encoding="utf-8")
+    if "HELIX / SCLAS Research Report" not in markdown_text:
+        fail("Research report Markdown report does not contain the expected heading")
+    if "Engineering Metrics" not in markdown_text:
+        fail("Research report Markdown report does not include engineering metrics")
+
+    print("[OK] Research report")
+
+
 def main() -> int:
     checks = [
         check_pyproj_references,
@@ -1384,6 +1449,7 @@ def main() -> int:
         check_acceptance_gate,
         check_research_ready_acceptance_fixture,
         check_result_intake,
+        check_research_report,
         check_handoff_snapshot,
         check_next_prompt,
         check_session_brief,

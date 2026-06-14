@@ -68,6 +68,8 @@ These areas can be pushed forward without running Abaqus locally:
    - Translate Abaqus output fields into engineering metrics:
      contact pressure, slip, opening, stress, loop energy, symmetry, stiffness,
      and fatigue-oriented summaries.
+   - Maintain `code/sclas_research_report.py` and `run_research_report.sh`/`.bat`
+     as the first-pass interpretation report after intake and acceptance.
    - Keep literature-mapping notes explicit about what is implemented and what
      is still a proxy.
 

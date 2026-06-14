@@ -23,6 +23,10 @@ from sclas_result_intake import build_intake
 from sclas_result_intake import report_dir as intake_report_dir
 from sclas_result_intake import save_markdown_report as save_intake_markdown
 from sclas_result_intake import save_report as save_intake_report
+from sclas_research_report import build_research_report
+from sclas_research_report import report_dir as research_report_dir
+from sclas_research_report import save_markdown_report as save_research_markdown
+from sclas_research_report import save_report as save_research_report
 from sclas_session_brief import build_brief
 from sclas_session_brief import default_report_path as default_brief_report_path
 from sclas_session_brief import save_markdown_report as save_brief_markdown
@@ -72,6 +76,14 @@ def build_suite(job_root: Path, limit: int = 15, include_self_check: bool = Fals
     save_intake_report(intake, intake_json)
     save_intake_markdown(intake, intake_markdown)
 
+    research = build_research_report(job_root, include_self_check=include_self_check)
+    research_json = research_report_dir(research) / "research_report.json"
+    research_markdown = research_report_dir(research) / "research_report.md"
+    research["saved_report"] = str(research_json)
+    research["saved_markdown_report"] = str(research_markdown)
+    save_research_report(research, research_json)
+    save_research_markdown(research, research_markdown)
+
     snapshot = build_snapshot(job_root, limit=limit, include_self_check=include_self_check)
     snapshot_json = save_snapshot_report(snapshot)
     snapshot["saved_report"] = str(snapshot_json)
@@ -105,6 +117,7 @@ def build_suite(job_root: Path, limit: int = 15, include_self_check: bool = Fals
         "status": status,
         "self_check": self_check,
         "result_intake": intake,
+        "research_report": research,
         "acceptance_gate": acceptance,
         "handoff_snapshot": {
             "saved_report": str(snapshot_json),
@@ -146,6 +159,7 @@ def save_markdown_report(report: dict, output_path: Optional[Path] = None) -> Pa
 def markdown_report(report: dict) -> str:
     acceptance = report.get("acceptance_gate", {})
     intake = report.get("result_intake", {})
+    research = report.get("research_report", {})
     handoff = report.get("handoff_snapshot", {})
     brief = report.get("session_brief", {})
     self_check = report.get("self_check", {})
@@ -171,6 +185,7 @@ def markdown_report(report: dict) -> str:
             self_check.get("returncode", "-"),
         ),
         "- Result intake: `{0}`".format(intake.get("status", "-")),
+        "- Research report: `{0}`".format(research.get("status", "-")),
         "- Acceptance: `{0}`".format(acceptance.get("overall_status", "-")),
         "- Session brief: `{0}`".format(brief.get("status", "-")),
         "- Latest job: `{0}`".format(acceptance.get("latest_job", "-")),
@@ -182,6 +197,8 @@ def markdown_report(report: dict) -> str:
         "- Acceptance Markdown: `{0}`".format(acceptance.get("saved_markdown_report", "-")),
         "- Result intake JSON: `{0}`".format(intake.get("saved_report", "-")),
         "- Result intake Markdown: `{0}`".format(intake.get("saved_markdown_report", "-")),
+        "- Research report JSON: `{0}`".format(research.get("saved_report", "-")),
+        "- Research report Markdown: `{0}`".format(research.get("saved_markdown_report", "-")),
         "- Handoff JSON: `{0}`".format(handoff.get("saved_report", "-")),
         "- Handoff Markdown: `{0}`".format(handoff.get("saved_markdown_report", "-")),
         "- Session brief JSON: `{0}`".format(brief.get("saved_report", "-")),
@@ -203,6 +220,7 @@ def markdown_report(report: dict) -> str:
 def human_report(report: dict) -> str:
     acceptance = report.get("acceptance_gate", {})
     intake = report.get("result_intake", {})
+    research = report.get("research_report", {})
     handoff = report.get("handoff_snapshot", {})
     brief = report.get("session_brief", {})
     prompt = report.get("next_prompt", {})
@@ -229,6 +247,7 @@ def human_report(report: dict) -> str:
         ),
         "Acceptance: {0}".format(acceptance.get("overall_status", "-")),
         "Result intake: {0}".format(intake.get("status", "-")),
+        "Research report: {0}".format(research.get("status", "-")),
         "Session brief: {0}".format(brief.get("status", "-")),
         "Latest job: {0}".format(acceptance.get("latest_job", "-")),
         "",
@@ -243,6 +262,8 @@ def human_report(report: dict) -> str:
         "- Acceptance Markdown: {0}".format(acceptance.get("saved_markdown_report", "-")),
         "- Result intake JSON: {0}".format(intake.get("saved_report", "-")),
         "- Result intake Markdown: {0}".format(intake.get("saved_markdown_report", "-")),
+        "- Research report JSON: {0}".format(research.get("saved_report", "-")),
+        "- Research report Markdown: {0}".format(research.get("saved_markdown_report", "-")),
         "- Handoff JSON: {0}".format(handoff.get("saved_report", "-")),
         "- Handoff Markdown: {0}".format(handoff.get("saved_markdown_report", "-")),
         "- Session brief JSON: {0}".format(brief.get("saved_report", "-")),

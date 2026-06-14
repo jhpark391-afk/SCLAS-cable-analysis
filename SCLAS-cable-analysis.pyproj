@@ -35,6 +35,7 @@
     <Compile Include="code\sclas_acceptance_gate.py" />
     <Compile Include="code\sclas_result_intake.py" />
     <Compile Include="code\sclas_session_brief.py" />
+    <Compile Include="code\sclas_research_report.py" />
     <Compile Include="code\sclas_validation_suite.py" />
     <Compile Include="code\sclas_odb_extractor.py" />
     <Compile Include="code\sclas_mac_vscode.py" />
@@ -62,6 +63,8 @@
     <Content Include="run_next_prompt.sh" />
     <Content Include="run_result_intake.bat" />
     <Content Include="run_result_intake.sh" />
+    <Content Include="run_research_report.bat" />
+    <Content Include="run_research_report.sh" />
     <Content Include="run_session_brief.bat" />
     <Content Include="run_session_brief.sh" />
     <Content Include="run_sclas.bat" />
