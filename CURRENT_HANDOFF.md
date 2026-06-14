@@ -2412,6 +2412,7 @@ python code/sclas_project_status.py --json
 python code/sclas_project_status.py --save-report --save-markdown
 python code/sclas_handoff_snapshot.py --save-report --save-markdown
 python code/sclas_next_prompt.py --save
+./run_next_prompt.sh
 ```
 
 Latest-job commands now exclude synthetic `self_check*` folders by default.
@@ -2423,6 +2424,7 @@ It summarizes:
 - recent real `job_*` runs through `sclas_job_index.py`
 - a one-file handoff snapshot with git state, best job, status, and next action
 - `NEXT_CODEX_PROMPT.md`, a ready-made prompt for the next Codex session
+  generated directly by `run_next_prompt.sh` or `run_next_prompt.bat`
 - latest job health/source/curve class
 - latest endpoint-vs-continuous CurveV0 comparison status
 - contact preload state, CPRESS max, and slip max

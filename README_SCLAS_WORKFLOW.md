@@ -64,12 +64,14 @@ Save a handoff snapshot from the shell with:
 
 ```bash
 ./run_handoff_snapshot.sh
+./run_next_prompt.sh
 ```
 
 On Windows:
 
 ```bat
 run_handoff_snapshot.bat
+run_next_prompt.bat
 ```
 
 Inspect a generated or copied Abaqus job folder without Abaqus:
@@ -111,8 +113,9 @@ Use `sclas_handoff_snapshot.py --save-report --save-markdown` before switching
 between Mac, home, and remote-lab Codex sessions. It writes
 `handoff_snapshot.json` and `handoff_snapshot.md` at the project root with the
 current git state, project status, job index, best job, and next action.
-Use `sclas_next_prompt.py --save` to write `NEXT_CODEX_PROMPT.md`, a ready-made
-prompt for the next Mac/home/remote Codex session.
+Use `run_next_prompt.sh` or `run_next_prompt.bat` to write
+`NEXT_CODEX_PROMPT.md`, a ready-made prompt for the next Mac/home/remote Codex
+session.
 If a CurveV0 comparison report exists in a job folder, `sclas_job_summary.py`
 also prints the comparison status, peak ratio, and branch deltas.
 Use `sclas_curve_compare.py` after both endpoint sweep and continuous CurveV0

@@ -57,6 +57,14 @@ run_handoff_snapshot.bat
 This writes `handoff_snapshot.json` and `handoff_snapshot.md` at the project
 root.
 
+To generate the ready-to-paste prompt for the next Codex session, run:
+
+```bat
+run_next_prompt.bat
+```
+
+This writes `NEXT_CODEX_PROMPT.md` at the project root.
+
 ## Backend command on Windows
 
 For placeholder backend testing, use:
