@@ -1208,6 +1208,11 @@ def check_handoff_snapshot() -> None:
         fail("Handoff snapshot did not embed result intake status")
     if focus.get("intake_status") != intake.get("status"):
         fail("Handoff focus did not mirror the result intake status")
+    research = snapshot.get("research_report", {})
+    if not research.get("status"):
+        fail("Handoff snapshot did not embed research report status")
+    if focus.get("research_report_status") != research.get("status"):
+        fail("Handoff focus did not mirror the research report status")
     acceptance = snapshot.get("acceptance_gate", {})
     if not acceptance.get("overall_status"):
         fail("Handoff snapshot did not embed acceptance gate status")
@@ -1256,6 +1261,7 @@ def check_next_prompt() -> None:
         "run_validation_suite.bat",
         "Git sync:",
         "Result intake:",
+        "Research report:",
         "Acceptance gate:",
         "contact preload",
     ]:
@@ -1287,6 +1293,8 @@ def check_session_brief() -> None:
         fail("Session brief did not embed git head")
     if not brief.get("result_intake_status"):
         fail("Session brief did not embed result intake status")
+    if not brief.get("research_report_status"):
+        fail("Session brief did not embed research report status")
     if not brief.get("acceptance_status"):
         fail("Session brief did not embed acceptance status")
     if not brief.get("startup_commands"):

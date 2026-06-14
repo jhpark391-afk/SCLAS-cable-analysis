@@ -18,6 +18,7 @@ def prompt_text(snapshot: dict) -> str:
     focus = snapshot.get("handoff_focus", {})
     status = snapshot.get("project_status", {})
     intake = snapshot.get("result_intake", {})
+    research = snapshot.get("research_report", {})
     acceptance = snapshot.get("acceptance_gate", {})
     index = snapshot.get("job_index", {})
     git = snapshot.get("git", {})
@@ -76,6 +77,14 @@ def prompt_text(snapshot: dict) -> str:
         "- Result intake: `{0}` for `{1}`".format(
             intake.get("status", "-"),
             intake.get("job_dir", "-"),
+        ),
+        "- Research report: `{0}` for `{1}`".format(
+            research.get("status", "-"),
+            research.get("job_dir", "-"),
+        ),
+        "- Research CurveV0: `{0}`, peak ratio `{1}`".format(
+            research.get("curve_v0_comparison_status", "-"),
+            research.get("curve_v0_peak_ratio", "-"),
         ),
         "- Contact state: preload `{0}`, CPRESS `{1}`, slip `{2}`".format(
             status.get("contact_preload_status", "-"),

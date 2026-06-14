@@ -32,13 +32,22 @@ def choose_brief_status(snapshot: dict) -> str:
     git = snapshot.get("git", {})
     acceptance = snapshot.get("acceptance_gate", {})
     intake = snapshot.get("result_intake", {})
+    research = snapshot.get("research_report", {})
     if git.get("sync_status") == "diverged":
         return "git_diverged"
-    if intake.get("status") == "blocked" or acceptance.get("overall_status") == "blocked":
+    if (
+        intake.get("status") == "blocked"
+        or acceptance.get("overall_status") == "blocked"
+        or research.get("status") == "blocked"
+    ):
         return "remote_blocked"
-    if intake.get("status") == "review" or acceptance.get("overall_status") == "review":
+    if (
+        intake.get("status") == "review"
+        or acceptance.get("overall_status") == "review"
+        or research.get("status") == "needs_review"
+    ):
         return "review"
-    if acceptance.get("overall_status") == "accepted":
+    if acceptance.get("overall_status") == "accepted" and research.get("status") == "research_ready":
         return "research_candidate"
     return "triage"
 
@@ -76,6 +85,7 @@ def build_brief(job_root: Path, limit: int = 15, include_self_check: bool = Fals
     status = choose_brief_status(snapshot)
     acceptance = snapshot.get("acceptance_gate", {})
     intake = snapshot.get("result_intake", {})
+    research = snapshot.get("research_report", {})
     focus = snapshot.get("handoff_focus", {})
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -89,6 +99,9 @@ def build_brief(job_root: Path, limit: int = 15, include_self_check: bool = Fals
         "best_job_readiness_label": focus.get("best_job_readiness_label"),
         "best_job_readiness_score": focus.get("best_job_readiness_score"),
         "result_intake_status": intake.get("status"),
+        "research_report_status": research.get("status"),
+        "research_report_job": research.get("job_dir"),
+        "research_report_curve_v0_status": research.get("curve_v0_comparison_status"),
         "acceptance_status": acceptance.get("overall_status"),
         "blocked_gates": blocked_gate_names(acceptance),
         "review_gates": review_gate_names(acceptance),
@@ -143,6 +156,10 @@ def markdown_report(brief: dict) -> str:
             brief.get("best_job_readiness_score", "-"),
         ),
         "- Result intake: `{0}`".format(brief.get("result_intake_status", "-")),
+        "- Research report: `{0}` for `{1}`".format(
+            brief.get("research_report_status", "-"),
+            brief.get("research_report_job", "-"),
+        ),
         "- Acceptance: `{0}`".format(brief.get("acceptance_status", "-")),
         "- Blocked gates: `{0}`".format(", ".join(brief.get("blocked_gates", [])) or "-"),
         "- Contact: CPRESS `{0}`, slip `{1}`".format(
@@ -193,6 +210,10 @@ def human_report(brief: dict) -> str:
             brief.get("best_job_readiness_score", "-"),
         ),
         "Result intake: {0}".format(brief.get("result_intake_status", "-")),
+        "Research report: {0} for {1}".format(
+            brief.get("research_report_status", "-"),
+            brief.get("research_report_job", "-"),
+        ),
         "Acceptance: {0}".format(brief.get("acceptance_status", "-")),
         "Blocked gates: {0}".format(", ".join(brief.get("blocked_gates", [])) or "-"),
         "Contact: CPRESS={0}, slip={1}".format(brief.get("contact_pressure_max", "-"), brief.get("slip_abs_max", "-")),
