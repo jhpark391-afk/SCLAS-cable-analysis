@@ -963,6 +963,11 @@ def check_handoff_snapshot() -> None:
         fail("Handoff snapshot did not embed git ahead/behind state")
     if "dirty" not in git or "sync_status" not in git:
         fail("Handoff snapshot did not embed git dirty/sync status")
+    intake = snapshot.get("result_intake", {})
+    if not intake.get("status"):
+        fail("Handoff snapshot did not embed result intake status")
+    if focus.get("intake_status") != intake.get("status"):
+        fail("Handoff focus did not mirror the result intake status")
     acceptance = snapshot.get("acceptance_gate", {})
     if not acceptance.get("overall_status"):
         fail("Handoff snapshot did not embed acceptance gate status")
@@ -1008,6 +1013,7 @@ def check_next_prompt() -> None:
         "./run_validation_suite.sh",
         "run_validation_suite.bat",
         "Git sync:",
+        "Result intake:",
         "Acceptance gate:",
         "contact preload",
     ]:

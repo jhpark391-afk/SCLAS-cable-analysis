@@ -121,8 +121,8 @@ and `sclas_job_index.md` under `jobs/SCLAS_jobs`.
 Use `sclas_handoff_snapshot.py --save-report --save-markdown` before switching
 between Mac, home, and remote-lab Codex sessions. It writes
 `handoff_snapshot.json` and `handoff_snapshot.md` at the project root with the
-current git state, project status, acceptance-gate status, job index, best job,
-and next action.
+current git state, project status, result-intake status, acceptance-gate status,
+job index, best job, and next action.
 Use `run_next_prompt.sh` or `run_next_prompt.bat` to write
 `NEXT_CODEX_PROMPT.md`, a ready-made prompt for the next Mac/home/remote Codex
 session.
@@ -138,8 +138,8 @@ contract, continuous CurveV0, contact preload/closure, ODB local fields, and
 warning budget. With `--save-report` and `--save-markdown`, it writes
 `acceptance_gate_report.json` and `acceptance_gate_report.md` into the latest
 job folder. The handoff snapshot and generated next-session prompt also carry
-the latest acceptance status so the next Codex session starts from the same
-pass/review/blocked evidence.
+the latest result-intake and acceptance statuses so the next Codex session
+starts from the same pass/review/blocked evidence.
 Use `run_acceptance_gate.sh` or `run_acceptance_gate.bat` for the same saved
 report flow without typing the Python command.
 Use `run_validation_suite.sh` or `run_validation_suite.bat` before a major

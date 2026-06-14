@@ -2427,8 +2427,8 @@ themselves.
 It summarizes:
 
 - recent real `job_*` runs through `sclas_job_index.py`
-- a one-file handoff snapshot with git state, best job, status, acceptance
-  gate, and next action
+- a one-file handoff snapshot with git state, best job, project status,
+  result-intake status, acceptance gate, and next action
 - `NEXT_CODEX_PROMPT.md`, a ready-made prompt for the next Codex session
   generated directly by `run_next_prompt.sh` or `run_next_prompt.bat`
 - a result-intake checklist that inspects the selected/latest copied Abaqus job

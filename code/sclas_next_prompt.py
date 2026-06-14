@@ -17,6 +17,7 @@ def default_prompt_path() -> Path:
 def prompt_text(snapshot: dict) -> str:
     focus = snapshot.get("handoff_focus", {})
     status = snapshot.get("project_status", {})
+    intake = snapshot.get("result_intake", {})
     acceptance = snapshot.get("acceptance_gate", {})
     index = snapshot.get("job_index", {})
     git = snapshot.get("git", {})
@@ -70,6 +71,10 @@ def prompt_text(snapshot: dict) -> str:
             focus.get("best_job_readiness_score", "-"),
         ),
         "- Job index reported: `{0}` / `{1}`".format(index.get("reported_count", 0), index.get("total_candidates", 0)),
+        "- Result intake: `{0}` for `{1}`".format(
+            intake.get("status", "-"),
+            intake.get("job_dir", "-"),
+        ),
         "- Contact state: preload `{0}`, CPRESS `{1}`, slip `{2}`".format(
             status.get("contact_preload_status", "-"),
             status.get("contact_pressure_max", "-"),
