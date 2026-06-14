@@ -618,6 +618,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Intake": "결과 점검",
             "Acceptance": "통과 판정",
             "Session Brief": "세션 브리프",
+            "Research Report": "연구 보고서",
             "Validate All": "전체 검증",
             "Handoff": "인수인계",
             "Open folder": "폴더 열기",
@@ -1420,6 +1421,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_result_intake = QPushButton("Intake")
         self.btn_acceptance_gate = QPushButton("Acceptance")
         self.btn_session_brief = QPushButton("Session Brief")
+        self.btn_research_report = QPushButton("Research Report")
         self.btn_validate_all = QPushButton("Validate All")
         self.btn_handoff_snapshot = QPushButton("Handoff")
         self.btn_open_job_folder = QPushButton("Open folder")
@@ -1433,6 +1435,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_result_intake.setToolTip("Check the selected or latest copied Abaqus result folder before acceptance.")
         self.btn_acceptance_gate.setToolTip("Evaluate whether the latest Abaqus result is research-ready.")
         self.btn_session_brief.setToolTip("Show the one-page git, intake, acceptance, and next-action startup brief.")
+        self.btn_research_report.setToolTip("Generate a compact engineering interpretation report for the selected or latest job.")
         self.btn_validate_all.setToolTip("Run self-check, result intake, acceptance gate, handoff snapshot, and next prompt generation.")
         self.btn_handoff_snapshot.setToolTip("Save and show a compact handoff snapshot for the next Codex session.")
         self.btn_open_job_folder.setToolTip("Open the selected job folder in Finder or Explorer.")
@@ -1446,6 +1449,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_result_intake.clicked.connect(self.show_result_intake)
         self.btn_acceptance_gate.clicked.connect(self.show_acceptance_gate)
         self.btn_session_brief.clicked.connect(self.show_session_brief)
+        self.btn_research_report.clicked.connect(self.show_research_report)
         self.btn_validate_all.clicked.connect(self.run_validation_suite)
         self.btn_handoff_snapshot.clicked.connect(self.show_handoff_snapshot)
         self.btn_open_job_folder.clicked.connect(self.open_selected_job_folder)
@@ -1462,7 +1466,8 @@ class SCLASRemoteGUI(QMainWindow):
         history_layout.addWidget(self.btn_acceptance_gate, 4, 1)
         history_layout.addWidget(self.btn_handoff_snapshot, 4, 2)
         history_layout.addWidget(self.btn_session_brief, 5, 0)
-        history_layout.addWidget(self.btn_validate_all, 5, 1, 1, 2)
+        history_layout.addWidget(self.btn_research_report, 5, 1)
+        history_layout.addWidget(self.btn_validate_all, 5, 2)
         right.addWidget(self.history_box)
 
         left_scroll = self.scroll_panel(left_panel, min_width=360)
@@ -2263,6 +2268,36 @@ class SCLASRemoteGUI(QMainWindow):
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Acceptance gate error", str(exc))
+
+    def show_research_report(self) -> None:
+        try:
+            from sclas_research_report import build_research_report, human_report, save_markdown_report, save_report
+
+            job_root = Path(self.job_root_input.text().strip()).expanduser()
+            selected_job = self.selected_history_job()
+            report = build_research_report(job_root, job_dir=selected_job)
+            saved_path = save_report(report)
+            report["saved_report"] = str(saved_path)
+            saved_markdown_path = save_markdown_report(report)
+            report["saved_markdown_report"] = str(saved_markdown_path)
+            self.last_summary_data = {}
+            self.summary_text.setPlainText(human_report(report))
+            status = report.get("status")
+            tone = "good" if status == "research_ready" else "warn" if status == "needs_review" else "error"
+            label = "Result: ready" if status in ("research_ready", "needs_review") else "Result: error"
+            self.set_badge(self.lbl_result_status, label, tone)
+            self.log(
+                "[REPORT] Research report | status={0} | job={1} | curve={2}".format(
+                    status,
+                    report.get("job_dir", "-"),
+                    report.get("curve_v0_comparison_status", "-"),
+                )
+            )
+            self.log(f"[REPORT] Saved report: {saved_path}")
+            self.log(f"[REPORT] Saved Markdown report: {saved_markdown_path}")
+        except Exception as exc:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
+            QMessageBox.critical(self, "Research report error", str(exc))
 
     def show_session_brief(self) -> None:
         try:
