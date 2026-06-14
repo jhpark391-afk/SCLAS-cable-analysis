@@ -1600,6 +1600,150 @@ distorted_sample_parts:
 distorted_sample_min_angle=42.087
 ```
 
+## Annular Quadrant Mesh Stabilization - 2026-06-14 KST
+
+The next warning-reduction pass first improved offline diagnostics so the
+distorted-element warning is no longer summarized only from the first 500 table
+rows.
+
+New diagnostics fields:
+
+- `distorted_reported_element_count`
+- `distorted_table_parts`
+- `distorted_table_row_count`
+- `distorted_table_min_angle`
+
+Re-reading the previous stable sweep
+`jobs\SCLAS_jobs\curve_v0_sweep_20260614_135200` showed the real pre-fix
+distortion profile:
+
+```text
+per child distorted_reported_element_count=2025
+per child distorted_table_parts:
+  BEDDINGEQUIVALENT=1992
+  INNERSHEATHEQUIVALENT=33
+parent distorted_reported_element_count=10125
+```
+
+So the warning was mainly `BeddingEquivalent`, but it was an annular-solid mesh
+quality issue rather than a pure bedding-only material/element-formulation
+issue.
+
+Implemented stabilization:
+
+- `code\abaqus_runner.py` now enables `mesh.annular_partition_quadrants` by
+  default.
+- Annular equivalent solids are partitioned by the XZ/YZ datum planes into
+  quadrants before meshing.
+- Partitioned annular cells request `HEX`/`SWEEP` mesh controls.
+- Layer inner/outer contact surfaces now support multiple probe points and a
+  radius-based fallback so partitioned cylindrical faces are still collected
+  into named surfaces.
+- `abaqus_mesh_manifest.json` records `mesh_control_adjustments` and per-surface
+  face counts for these named contact surfaces.
+- `code\SCLAS_test\abaqus_runner.py` is synchronized with
+  `code\abaqus_runner.py`.
+
+The first successful full probe was:
+
+```text
+jobs\SCLAS_jobs\annpart4_141324
+```
+
+It used `-GenerateOnly` first to confirm:
+
+```text
+contact_region_scaffold_status=created
+contact_interaction_scaffold_status=skipped
+contact_pair_scaffold_status=partial
+```
+
+The remaining contact-pair `partial` status is the known skipped B31 beam-beam
+cross-layer pair, not a missing annular contact surface. The four beam-to-solid
+explicit pairs are created and general contact remains skipped.
+
+Solver/ODB verification for `annpart4_141324`:
+
+```text
+Abaqus JOB annpart4_141324_mesh COMPLETED
+ODB extraction status=extracted
+odb_extraction.rows_written=2
+WarnElemDistorted=0
+distorted_reported_element_count=0
+WarnBeamCurvature1=1
+WarnBeamTwist=1
+```
+
+Default SmallSmoke after enabling annular quadrant partition:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -SmallSmoke
+```
+
+```text
+jobs\SCLAS_jobs\small_smoke_20260614_141503
+```
+
+Result:
+
+```text
+Abaqus completed
+ODB extraction status=extracted
+odb_extraction.rows_written=2
+contact_region_scaffold_status=created
+contact_interaction_scaffold_status=skipped
+WarnElemDistorted=0
+actual_warning_match_count=2
+warning_sets:
+  WarnBeamCurvature1=1
+  WarnBeamTwist=1
+```
+
+Default CurveV0 endpoint sweep after enabling annular quadrant partition:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_sweep.ps1
+```
+
+```text
+jobs\SCLAS_jobs\curve_v0_sweep_20260614_141537
+```
+
+Parent result rows:
+
+```text
+curvature_1_per_m,moment_kn_m
+-0.0079999997979,-2.58634625
+-0.00399999989895,-1.293202625
+0,0
+0.00399999989895,1.2932135
+0.0079999997979,2.58638975
+```
+
+Parent diagnostics:
+
+```text
+source=SCLAS_CURVE_V0_ENDPOINT_SWEEP
+rows_written=5
+endpoint_sweep_validation.all_child_jobs_validated=true
+endpoint_sweep_shape.shape_checks_passed=true
+endpoint_sweep_children.all_children_deep_validated=true
+blocking_log_hits=0
+actual_warning_log_hits=10
+warning_sets:
+  WarnBeamCurvature1=5
+  WarnBeamTwist=5
+distorted_reported_element_count=0
+```
+
+Interpretation:
+
+- The annular quadrant partition is now the stable default for Abaqus mesh
+  generation.
+- The previous `WarnElemDistorted` class is removed from SmallSmoke and CurveV0.
+- The next warning-reduction target is B31 helical beam normal/curvature/twist
+  handling, not annular solid distortion.
+
 ## Important Files
 
 ```text

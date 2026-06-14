@@ -205,14 +205,27 @@ def merge_counts(target, source):
         target[key] = target.get(key, 0) + value
 
 
+def update_minimum(target, key, value):
+    if value is None:
+        return
+    current = target.get(key)
+    if current is None or value < current:
+        target[key] = value
+
+
 def mesh_quality_warning_details(job_dir: Path):
     details = {
         "checked": False,
         "files": [],
         "warning_sets": {},
+        "distorted_reported_element_count": 0,
+        "distorted_table_parts": {},
+        "distorted_table_row_count": 0,
+        "distorted_table_min_angle": None,
         "distorted_sample_parts": {},
         "distorted_sample_min_angle": None,
         "distorted_sample_count": 0,
+        "distorted_sample_limit": 500,
     }
     dat_files = sorted(job_dir.glob("*.dat"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not dat_files:
@@ -220,10 +233,14 @@ def mesh_quality_warning_details(job_dir: Path):
 
     details["checked"] = True
     details["files"] = [path.name for path in dat_files]
+    distorted_count_pattern = re.compile(r"^\s*\*\*\*WARNING:\s+(\d+)\s+elements are distorted", re.IGNORECASE)
     distorted_pattern = re.compile(r"^\s+([A-Z][A-Z0-9_]+)_\d+\.\d+\s+([-+0-9.Ee]+)")
     for path in dat_files:
         lines = read_text(path).splitlines()
         for line in lines:
+            count_match = distorted_count_pattern.search(line)
+            if count_match:
+                details["distorted_reported_element_count"] += int(count_match.group(1))
             for warning_set in ["WarnElemDistorted", "WarnBeamCurvature1", "WarnBeamTwist"]:
                 if warning_set.upper() in line.upper():
                     details["warning_sets"][warning_set] = details["warning_sets"].get(warning_set, 0) + 1
@@ -243,16 +260,15 @@ def mesh_quality_warning_details(job_dir: Path):
                     in_distorted_table = False
                 continue
             part_name = match.group(1)
-            details["distorted_sample_parts"][part_name] = details["distorted_sample_parts"].get(part_name, 0) + 1
+            details["distorted_table_parts"][part_name] = details["distorted_table_parts"].get(part_name, 0) + 1
             angle = parse_float(match.group(2))
-            if angle is not None:
-                current_min = details["distorted_sample_min_angle"]
-                if current_min is None or angle < current_min:
-                    details["distorted_sample_min_angle"] = angle
-            details["distorted_sample_count"] += 1
+            update_minimum(details, "distorted_table_min_angle", angle)
+            details["distorted_table_row_count"] += 1
+            if details["distorted_sample_count"] < details["distorted_sample_limit"]:
+                details["distorted_sample_parts"][part_name] = details["distorted_sample_parts"].get(part_name, 0) + 1
+                update_minimum(details, "distorted_sample_min_angle", angle)
+                details["distorted_sample_count"] += 1
             rows_seen += 1
-            if rows_seen >= 500:
-                in_distorted_table = False
     return details
 
 
@@ -382,6 +398,10 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
         "note_categories": {},
         "mesh_quality_warning_details": {
             "warning_sets": {},
+            "distorted_reported_element_count": 0,
+            "distorted_table_parts": {},
+            "distorted_table_row_count": 0,
+            "distorted_table_min_angle": None,
             "distorted_sample_parts": {},
             "distorted_sample_count": 0,
             "distorted_sample_min_angle": None,
@@ -502,13 +522,21 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
         child_mesh_quality = child_detail["mesh_quality_warning_details"]
         aggregate_mesh_quality = section["mesh_quality_warning_details"]
         merge_counts(aggregate_mesh_quality["warning_sets"], child_mesh_quality.get("warning_sets", {}))
+        aggregate_mesh_quality["distorted_reported_element_count"] += child_mesh_quality.get("distorted_reported_element_count", 0)
+        merge_counts(aggregate_mesh_quality["distorted_table_parts"], child_mesh_quality.get("distorted_table_parts", {}))
+        aggregate_mesh_quality["distorted_table_row_count"] += child_mesh_quality.get("distorted_table_row_count", 0)
+        update_minimum(
+            aggregate_mesh_quality,
+            "distorted_table_min_angle",
+            child_mesh_quality.get("distorted_table_min_angle"),
+        )
         merge_counts(aggregate_mesh_quality["distorted_sample_parts"], child_mesh_quality.get("distorted_sample_parts", {}))
         aggregate_mesh_quality["distorted_sample_count"] += child_mesh_quality.get("distorted_sample_count", 0)
-        child_min_angle = child_mesh_quality.get("distorted_sample_min_angle")
-        if child_min_angle is not None:
-            current_min = aggregate_mesh_quality.get("distorted_sample_min_angle")
-            if current_min is None or child_min_angle < current_min:
-                aggregate_mesh_quality["distorted_sample_min_angle"] = child_min_angle
+        update_minimum(
+            aggregate_mesh_quality,
+            "distorted_sample_min_angle",
+            child_mesh_quality.get("distorted_sample_min_angle"),
+        )
 
         if log_scan["failed"] or log_scan["blocking_matches"]:
             add_issue(report, "error", "Endpoint sweep child solver logs contain a blocking failure", child_detail)
@@ -924,6 +952,9 @@ def markdown_report(report: dict) -> str:
         ("Sweep warning categories", top_counts(sweep_children_section.get("warning_categories"))),
         ("Sweep note categories", top_counts(sweep_children_section.get("note_categories"))),
         ("Sweep mesh warning sets", top_counts(sweep_mesh_quality.get("warning_sets"))),
+        ("Sweep distorted reported elements", scalar(sweep_mesh_quality.get("distorted_reported_element_count"))),
+        ("Sweep distorted table parts", top_counts(sweep_mesh_quality.get("distorted_table_parts"))),
+        ("Sweep distorted table min angle", scalar(sweep_mesh_quality.get("distorted_table_min_angle"))),
         ("Sweep distorted sample parts", top_counts(sweep_mesh_quality.get("distorted_sample_parts"))),
         ("Sweep distorted sample min angle", scalar(sweep_mesh_quality.get("distorted_sample_min_angle"))),
         ("Sweep odd symmetry max rel", scalar(sweep_shape_section.get("odd_symmetry_max_relative_moment_sum"))),
@@ -936,6 +967,9 @@ def markdown_report(report: dict) -> str:
         ("Solver warning categories", top_counts(logs_section.get("warning_categories"))),
         ("Solver note categories", top_counts(logs_section.get("note_categories"))),
         ("Solver mesh warning sets", top_counts(solver_mesh_quality.get("warning_sets"))),
+        ("Solver distorted reported elements", scalar(solver_mesh_quality.get("distorted_reported_element_count"))),
+        ("Solver distorted table parts", top_counts(solver_mesh_quality.get("distorted_table_parts"))),
+        ("Solver distorted table min angle", scalar(solver_mesh_quality.get("distorted_table_min_angle"))),
         ("Solver distorted sample parts", top_counts(solver_mesh_quality.get("distorted_sample_parts"))),
         ("Solver distorted sample min angle", scalar(solver_mesh_quality.get("distorted_sample_min_angle"))),
         ("Errors", scalar(issue_counts.get("error"))),

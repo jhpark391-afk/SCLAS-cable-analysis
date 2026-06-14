@@ -119,6 +119,18 @@ def safe_name(text, limit=38):
     return (cleaned or "SCLAS")[:limit]
 
 
+def bool_from_payload(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return default
+
+
 def abaqus_available():
     try:
         import abaqus  # noqa: F401
@@ -238,6 +250,7 @@ def write_mesh_manifest(
     contact_pairs=None,
     contact_pair_keyword_adjustment=None,
     boundary_conditions=None,
+    mesh_control_adjustments=None,
 ):
     geometry = payload.get("derived_geometry_mm", {})
     armour = payload.get("armour", {})
@@ -264,6 +277,7 @@ def write_mesh_manifest(
         else:
             contact_interaction_status = "partial"
     contact_pairs = contact_pairs or []
+    mesh_control_adjustments = mesh_control_adjustments or []
     contact_pair_status = "not_created"
     if contact_pairs:
         contact_pair_status = "created"
@@ -285,6 +299,7 @@ def write_mesh_manifest(
             "axial_divisions": int(mesh_cfg.get("axial_divisions", 40)),
             "core_circumferential_divisions": int(mesh_cfg.get("core_circumferential_divisions", 24)),
             "armour_circumferential_divisions": int(mesh_cfg.get("armour_circumferential_divisions", 8)),
+            "annular_partition_quadrants": bool_from_payload(mesh_cfg.get("annular_partition_quadrants"), True),
             "contact_regularization_beta": float(analysis.get("contact_regularization_beta", 0.001)),
         },
         "contact_interfaces": numerical_model.get("contact_interfaces", []),
@@ -305,6 +320,7 @@ def write_mesh_manifest(
             "status": "not_attempted",
             "reason": "Abaqus input deck was not generated or no contact pair keyword adjustment was requested.",
         },
+        "mesh_control_adjustments": mesh_control_adjustments,
         "boundary_condition_scaffold_status": boundary_condition_status,
         "boundary_condition_scaffold": boundary_conditions,
         "components": [
@@ -473,12 +489,16 @@ def build_abaqus_mesh_model(payload, job_dir):
         CARTESIAN,
         DEFORMABLE_BODY,
         DURING_ANALYSIS,
+        HEX,
         IMPRINT,
         N1_COSINES,
         OFF,
         ON,
         STANDARD,
+        SWEEP,
         THREE_D,
+        XZPLANE,
+        YZPLANE,
     )
     from mesh import ElemType
 
@@ -492,6 +512,7 @@ def build_abaqus_mesh_model(payload, job_dir):
     core_circ = max(4, int(mesh_cfg.get("core_circumferential_divisions", 24)))
     armour_circ = max(4, int(mesh_cfg.get("armour_circumferential_divisions", 8)))
     requested_elem = str(mesh_cfg.get("requested_element_type", "C3D8R")).upper()
+    annular_partition_quadrants = bool_from_payload(mesh_cfg.get("annular_partition_quadrants"), True)
     model_name = safe_name(payload.get("metadata", {}).get("job_id", "SCLAS_CableMesh"), 32)
     job_name = safe_name(model_name + "_mesh", 32)
 
@@ -580,6 +601,65 @@ def build_abaqus_mesh_model(payload, job_dir):
         except Exception:
             return (found,)
 
+    def find_regions_at(container, probes):
+        clean_probes = [probe for probe in probes if probe]
+        if not clean_probes:
+            return ()
+        try:
+            if len(clean_probes) == 1:
+                return region_sequence(container.findAt((clean_probes[0],)))
+            return container.findAt(*tuple((probe,) for probe in clean_probes))
+        except Exception:
+            found_regions = []
+            seen = set()
+            for probe in clean_probes:
+                for region in region_sequence(container.findAt((probe,))):
+                    try:
+                        key = region.index
+                    except Exception:
+                        key = str(region)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    found_regions.append(region)
+            return tuple(found_regions)
+
+    def find_faces_by_radius(container, radius):
+        found_regions = []
+        seen = set()
+        tolerance = max(5.0e-2, abs(float(radius)) * 1.0e-4)
+        for face in container:
+            try:
+                points = face.pointOn
+            except Exception:
+                points = []
+            for point in points:
+                if len(point) < 2:
+                    continue
+                point_radius = math.hypot(float(point[0]), float(point[1]))
+                if abs(point_radius - float(radius)) > tolerance:
+                    continue
+                try:
+                    key = face.index
+                except Exception:
+                    key = str(face)
+                if key not in seen:
+                    seen.add(key)
+                    found_regions.append(face)
+                break
+        return tuple(found_regions)
+
+    def find_layer_faces(container, spec, probes_key, probe_key):
+        faces = find_regions_at(container, spec.get(probes_key) or [spec.get(probe_key)])
+        if faces:
+            return faces
+        radius = spec.get("radius_mm")
+        if radius is not None:
+            faces = find_faces_by_radius(container, radius)
+            if faces:
+                return faces
+        return ()
+
     def create_solid_contact_regions(part, inst, component_name, surface_specs=None):
         surface_specs = surface_specs or []
         record = {
@@ -637,28 +717,40 @@ def build_abaqus_mesh_model(payload, job_dir):
                 "warnings": [],
             }
             try:
-                part_faces = region_sequence(part.faces.findAt((spec.get("part_probe"),)))
+                part_faces = find_layer_faces(part.faces, spec, "part_probes", "part_probe")
+                spec_status["part_face_count"] = len(part_faces)
+                if not part_faces:
+                    raise RuntimeError("no part faces found at radius {0}".format(spec.get("radius_mm")))
                 part.Set(faces=part_faces, name=spec.get("part_face_set"))
                 spec_status["created_regions"].append("part_face_set")
                 created += 1
             except Exception as exc:
                 spec_status["warnings"].append("part named face set failed: {0}".format(exc))
             try:
-                part_faces = region_sequence(part.faces.findAt((spec.get("part_probe"),)))
+                part_faces = find_layer_faces(part.faces, spec, "part_probes", "part_probe")
+                spec_status["part_surface_face_count"] = len(part_faces)
+                if not part_faces:
+                    raise RuntimeError("no part surface faces found at radius {0}".format(spec.get("radius_mm")))
                 part.Surface(side1Faces=part_faces, name=spec.get("part_surface"))
                 spec_status["created_regions"].append("part_surface")
                 created += 1
             except Exception as exc:
                 spec_status["warnings"].append("part named surface failed: {0}".format(exc))
             try:
-                assembly_faces = region_sequence(inst.faces.findAt((spec.get("assembly_probe"),)))
+                assembly_faces = find_layer_faces(inst.faces, spec, "assembly_probes", "assembly_probe")
+                spec_status["assembly_face_count"] = len(assembly_faces)
+                if not assembly_faces:
+                    raise RuntimeError("no assembly faces found at radius {0}".format(spec.get("radius_mm")))
                 assembly.Set(faces=assembly_faces, name=spec.get("assembly_face_set"))
                 spec_status["created_regions"].append("assembly_face_set")
                 created += 1
             except Exception as exc:
                 spec_status["warnings"].append("assembly named face set failed: {0}".format(exc))
             try:
-                assembly_faces = region_sequence(inst.faces.findAt((spec.get("assembly_probe"),)))
+                assembly_faces = find_layer_faces(inst.faces, spec, "assembly_probes", "assembly_probe")
+                spec_status["assembly_surface_face_count"] = len(assembly_faces)
+                if not assembly_faces:
+                    raise RuntimeError("no assembly surface faces found at radius {0}".format(spec.get("radius_mm")))
                 assembly.Surface(side1Faces=assembly_faces, name=spec.get("assembly_surface"))
                 spec_status["created_regions"].append("assembly_surface")
                 created += 1
@@ -1532,6 +1624,40 @@ def build_abaqus_mesh_model(payload, job_dir):
 
         return getattr(ac, requested_elem, ac.C3D8R)
 
+    mesh_control_adjustments = []
+
+    def apply_annular_quadrant_partition(part, component_name):
+        record = {
+            "component": component_name,
+            "annular_partition_quadrants": bool(annular_partition_quadrants),
+            "partition_planes": [],
+            "mesh_controls": [],
+            "warnings": [],
+        }
+        if not annular_partition_quadrants:
+            record["status"] = "skipped"
+            record["reason"] = "mesh.annular_partition_quadrants is false"
+            return record
+        try:
+            for plane_name, plane_value in [("XZPLANE", XZPLANE), ("YZPLANE", YZPLANE)]:
+                datum = part.DatumPlaneByPrincipalPlane(principalPlane=plane_value, offset=0.0)
+                part.PartitionCellByDatumPlane(datumPlane=part.datums[datum.id], cells=part.cells[:])
+                record["partition_planes"].append(plane_name)
+        except Exception as exc:
+            record["warnings"].append("quadrant partition failed: {0}".format(exc))
+        try:
+            part.setMeshControls(regions=part.cells[:], elemShape=HEX, technique=SWEEP)
+            record["mesh_controls"].append("HEX_SWEEP")
+        except Exception as exc:
+            record["warnings"].append("HEX/SWEEP mesh control failed: {0}".format(exc))
+        if record["partition_planes"] and record["mesh_controls"]:
+            record["status"] = "created"
+        elif record["partition_planes"] or record["mesh_controls"]:
+            record["status"] = "partial"
+        else:
+            record["status"] = "failed"
+        return record
+
     def create_solid_cylinder(name, radius, section_name, seed_circ, offset=(0.0, 0.0, 0.0)):
         sketch = model.ConstrainedSketch(name=name + "_sketch", sheetSize=max(10.0, radius * 4.0))
         sketch.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(radius, 0.0))
@@ -1559,11 +1685,19 @@ def build_abaqus_mesh_model(payload, job_dir):
         return part
 
     def layer_surface_specs(component_name, inner_radius, outer_radius, inner_surface, outer_surface):
-        probe_angle = math.radians(37.0)
-        inner_probe = (inner_radius * math.cos(probe_angle), inner_radius * math.sin(probe_angle), 0.5 * length)
-        outer_probe = (outer_radius * math.cos(probe_angle), outer_radius * math.sin(probe_angle), 0.5 * length)
-        inner_assembly_probe = (inner_probe[0], inner_probe[1], 0.0)
-        outer_assembly_probe = (outer_probe[0], outer_probe[1], 0.0)
+        probe_degrees = [45.0, 135.0, 225.0, 315.0] if annular_partition_quadrants else [37.0]
+
+        def layer_probes(radius, z_value):
+            probes = []
+            for angle_deg in probe_degrees:
+                angle = math.radians(angle_deg)
+                probes.append((radius * math.cos(angle), radius * math.sin(angle), z_value))
+            return probes
+
+        inner_probes = layer_probes(inner_radius, 0.5 * length)
+        outer_probes = layer_probes(outer_radius, 0.5 * length)
+        inner_assembly_probes = [(probe[0], probe[1], 0.0) for probe in inner_probes]
+        outer_assembly_probes = [(probe[0], probe[1], 0.0) for probe in outer_probes]
         return [
             {
                 "label": "inner",
@@ -1572,8 +1706,10 @@ def build_abaqus_mesh_model(payload, job_dir):
                 "part_surface": "InnerContactSurface",
                 "assembly_face_set": inner_surface + "_faces",
                 "assembly_surface": inner_surface,
-                "part_probe": inner_probe,
-                "assembly_probe": inner_assembly_probe,
+                "part_probe": inner_probes[0],
+                "part_probes": inner_probes,
+                "assembly_probe": inner_assembly_probes[0],
+                "assembly_probes": inner_assembly_probes,
             },
             {
                 "label": "outer",
@@ -1582,8 +1718,10 @@ def build_abaqus_mesh_model(payload, job_dir):
                 "part_surface": "OuterContactSurface",
                 "assembly_face_set": outer_surface + "_faces",
                 "assembly_surface": outer_surface,
-                "part_probe": outer_probe,
-                "assembly_probe": outer_assembly_probe,
+                "part_probe": outer_probes[0],
+                "part_probes": outer_probes,
+                "assembly_probe": outer_assembly_probes[0],
+                "assembly_probes": outer_assembly_probes,
             },
         ]
 
@@ -1597,6 +1735,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         part = model.Part(name=name, dimensionality=THREE_D, type=DEFORMABLE_BODY)
         part.BaseSolidExtrude(sketch=sketch, depth=length)
         del model.sketches[sketch.name]
+        mesh_control_adjustments.append(apply_annular_quadrant_partition(part, name))
         region = part.Set(cells=part.cells[:], name="AllCells")
         part.SectionAssignment(region=region, sectionName=section_name)
         size_axial = length / float(z_elem)
@@ -1776,6 +1915,7 @@ def build_abaqus_mesh_model(payload, job_dir):
         "contact_pair_scaffold": contact_pairs,
         "contact_pair_keyword_adjustment": contact_keyword_adjustment,
         "boundary_condition_scaffold": boundary_conditions,
+        "mesh_control_adjustments": mesh_control_adjustments,
         "node_element_note": "See generated .inp/.cae for Abaqus node and element counts.",
     }
 
@@ -1923,6 +2063,7 @@ def main(argv):
                 contact_pairs=mesh_status.get("contact_pair_scaffold"),
                 contact_pair_keyword_adjustment=mesh_status.get("contact_pair_keyword_adjustment"),
                 boundary_conditions=mesh_status.get("boundary_condition_scaffold"),
+                mesh_control_adjustments=mesh_status.get("mesh_control_adjustments"),
             )
             print("Wrote Abaqus mesh scaffold: {0}".format(", ".join(mesh_status.get("files", []))))
         except Exception as exc:

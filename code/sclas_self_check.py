@@ -435,6 +435,22 @@ def check_endpoint_sweep_diagnostics() -> None:
             ]),
             encoding="utf-8",
         )
+        (child_dir / f"curve_v0_child_{idx}.dat").write_text(
+            "\n".join([
+                "***WARNING: 2 elements are distorted. Either the isoparametric angles are",
+                "            out of the suggested limits. The elements have been identified in",
+                "            element set WarnElemDistorted.",
+                "",
+                "Distorted isoparametric elements",
+                "",
+                "             Element               Min/max angle   Adjusted nodes",
+                "--------------------------------- ---------------- --------------",
+                "           BEDDINGEQUIVALENT_1.1          42.0000       NO",
+                "      INNERSHEATHEQUIVALENT_1.2          44.0000       NO",
+                "",
+            ]),
+            encoding="utf-8",
+        )
         summary["child_jobs"].append({
             "factor": factor,
             "job": f"curve_v0_child_{idx}",
@@ -487,6 +503,14 @@ def check_endpoint_sweep_diagnostics() -> None:
     note_categories = child_section.get("note_categories", {})
     if note_categories.get("overconstraint_check") != 5:
         fail("Endpoint sweep note taxonomy did not retain overconstraint progress notes")
+    mesh_quality = child_section.get("mesh_quality_warning_details", {})
+    if mesh_quality.get("distorted_reported_element_count") != 10:
+        fail("Endpoint sweep diagnostics did not aggregate distorted element warning counts")
+    distorted_parts = mesh_quality.get("distorted_table_parts", {})
+    if distorted_parts.get("BEDDINGEQUIVALENT") != 5 or distorted_parts.get("INNERSHEATHEQUIVALENT") != 5:
+        fail("Endpoint sweep diagnostics did not aggregate distorted table part counts")
+    if mesh_quality.get("distorted_table_min_angle") != 42.0:
+        fail("Endpoint sweep diagnostics did not aggregate distorted table min angle")
 
     print(f"[OK] Endpoint sweep diagnostics: {job_dir}")
 
