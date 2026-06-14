@@ -67,7 +67,7 @@ from PyQt5.QtWidgets import (
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
 
-APP_VERSION = "11.9-diagnostic-action-summary"
+APP_VERSION = "12.0-abaqus-quality-summary"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -2011,10 +2011,21 @@ class SCLASRemoteGUI(QMainWindow):
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Offline diagnostics error", str(exc))
 
+    @staticmethod
+    def counts_text(counts, limit: int = 4) -> str:
+        if not isinstance(counts, dict) or not counts:
+            return "-"
+        ordered = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+        return ", ".join(f"{key}={value}" for key, value in ordered[:limit])
+
     def format_diagnostic_report(self, report: dict) -> str:
         diagnostic_summary = report.get("diagnostic_summary", {})
         issue_counts = diagnostic_summary.get("issue_counts", {})
         first_issue = diagnostic_summary.get("first_blocking_issue") or {}
+        sweep_shape = report.get("endpoint_sweep_shape", {})
+        sweep_children = report.get("endpoint_sweep_children", {})
+        sweep_mesh = sweep_children.get("mesh_quality_warning_details", {}) if isinstance(sweep_children, dict) else {}
+        sweep_b31 = sweep_children.get("b31_beam_warning_details", {}) if isinstance(sweep_children, dict) else {}
         lines = [
             "Offline Abaqus Diagnostics",
             f"Job: {Path(report.get('job_dir', '-')).name}",
@@ -2031,6 +2042,17 @@ class SCLASRemoteGUI(QMainWindow):
             f"first: [{first_issue.get('severity', '-')}] {first_issue.get('message', '-')}",
             "",
         ]
+        if sweep_shape or sweep_children:
+            lines.extend([
+                "[CurveV0 Sweep]",
+                f"shape_checks_passed: {sweep_shape.get('shape_checks_passed', '-')}",
+                f"child_deep_validated: {sweep_children.get('all_children_deep_validated', '-')}",
+                f"blocking_log_hits: {sweep_children.get('blocking_log_hits', '-')}",
+                f"actual_warning_hits: {sweep_children.get('actual_warning_log_hits', '-')}",
+                f"B31 warnings: {self.counts_text(sweep_b31.get('warning_sets'))}",
+                f"distorted elements: {sweep_mesh.get('distorted_reported_element_count', '-')}",
+                "",
+            ])
         for key, title in [
             ("result_data_csv", "Result CSV"),
             ("result_summary_json", "Summary JSON"),
@@ -2044,6 +2066,15 @@ class SCLASRemoteGUI(QMainWindow):
                 lines.append(f"files: {', '.join(section.get('files', [])) or '-'}")
                 matches = section.get("matches", [])
                 lines.append(f"matches: {len(matches)}")
+                lines.append(f"actual_warning_match_count: {section.get('actual_warning_match_count', '-')}")
+                lines.append(f"warning_categories: {self.counts_text(section.get('warning_categories'))}")
+                solver_mesh = section.get("mesh_quality_warning_details", {})
+                solver_b31 = section.get("b31_beam_warning_details", {})
+                if isinstance(solver_mesh, dict):
+                    lines.append(f"warning_sets: {self.counts_text(solver_mesh.get('warning_sets'))}")
+                    lines.append(f"distorted_reported_element_count: {solver_mesh.get('distorted_reported_element_count', '-')}")
+                if isinstance(solver_b31, dict):
+                    lines.append(f"B31_warning_sets: {self.counts_text(solver_b31.get('warning_sets'))}")
                 for match in matches[:5]:
                     lines.append(f"- {match.get('file')}:{match.get('line')} {match.get('text')}")
             elif key == "input_deck":
@@ -2058,11 +2089,14 @@ class SCLASRemoteGUI(QMainWindow):
                 lines.append(f"contact_pair_scaffold_status: {section.get('contact_pair_scaffold_status', '-')}")
                 lines.append(f"boundary_condition_scaffold_status: {section.get('boundary_condition_scaffold_status', '-')}")
                 lines.append(f"contact_bindings: {section.get('contact_bindings', 0)}")
+                lines.append(f"beam_orientation: {section.get('beam_orientation_status', '-')}")
             elif key == "result_summary_json":
                 lines.append(f"exists: {section.get('exists')}")
                 lines.append(f"source: {section.get('source', '-')}")
                 lines.append(f"status: {section.get('status', '-')}")
                 lines.append(f"mesh_status: {section.get('mesh_status', '-')}")
+                lines.append(f"curve_class: {section.get('abaqus_curve_class', '-')}")
+                lines.append(f"research_curve: {section.get('abaqus_is_research_curve', '-')}")
                 lines.append(f"enabled: {', '.join(section.get('enabled_assessments', [])) or '-'}")
             else:
                 lines.append(f"exists: {section.get('exists')}")
@@ -2263,6 +2297,9 @@ class SCLASRemoteGUI(QMainWindow):
             enabled_text = "-"
 
         mesh_status = value(["mesh_status", "status"], value(["mesh_status"], "-"))
+        quality = data.get("abaqus_result_quality", {})
+        odb = data.get("odb_extraction", {})
+        endpoint_validation = data.get("endpoint_sweep_validation", {})
         derived = data.get("derived_placeholder_metrics", {})
         if self.ui_language == "KO":
             lines = [
@@ -2286,6 +2323,39 @@ class SCLASRemoteGUI(QMainWindow):
                 f"Mesh status: {mesh_status}",
                 f"Enabled scope: {enabled_text}",
             ]
+
+        if isinstance(quality, dict) and quality:
+            if self.ui_language == "KO":
+                lines.extend([
+                    "",
+                    "Abaqus 결과 품질:",
+                    f"- 곡선 등급: {quality.get('curve_class', '-')}",
+                    f"- 연구용 곡선: {quality.get('is_research_curve', '-')}",
+                    f"- 다음 단계: {quality.get('next_step', '-')}",
+                ])
+            else:
+                lines.extend([
+                    "",
+                    "Abaqus result quality:",
+                    f"- curve class: {quality.get('curve_class', '-')}",
+                    f"- research curve: {quality.get('is_research_curve', '-')}",
+                    f"- next step: {quality.get('next_step', '-')}",
+                ])
+        if isinstance(odb, dict) and odb:
+            lines.extend([
+                "",
+                "ODB extraction:" if self.ui_language == "EN" else "ODB 추출:",
+                f"- status: {odb.get('status', '-')}",
+                f"- rows: {odb.get('rows_written', '-')}",
+                f"- method: {odb.get('method', '-')}",
+            ])
+        if isinstance(endpoint_validation, dict) and endpoint_validation:
+            lines.extend([
+                "",
+                "CurveV0 endpoint sweep:" if self.ui_language == "EN" else "CurveV0 엔드포인트 스윕:",
+                f"- validated: {endpoint_validation.get('all_child_jobs_validated', '-')}",
+                f"- rule: {endpoint_validation.get('aggregation_rule', '-')}",
+            ])
 
         readiness = data.get("backend_readiness", {})
         if isinstance(readiness, dict):

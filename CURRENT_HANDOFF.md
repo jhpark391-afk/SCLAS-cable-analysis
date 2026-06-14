@@ -1855,6 +1855,11 @@ Interpretation:
 - The next backend step should move from bridge/mesh warning stabilization to
   richer Abaqus physics: continuous bending path validation, contact/friction
   refinement, and local ODB field extraction.
+- Mac-side GUI result summaries now surface the newer Abaqus quality fields:
+  `abaqus_result_quality`, ODB extraction status/rows, CurveV0 endpoint
+  validation, warning category counts, mesh warning sets, distorted element
+  counts, and beam-orientation manifest summaries. This is display-only and
+  does not change the Abaqus runner.
 
 ## Important Files
 

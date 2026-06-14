@@ -722,6 +722,24 @@ def inspect_manifest(job_dir: Path, report: dict) -> None:
     section["abaqus_files"] = data.get("abaqus_files", [])
     section["contact_bindings"] = len(data.get("contact_binding_scaffold", []))
     section["components"] = [item.get("name") for item in data.get("components", []) if isinstance(item, dict)]
+    beam_orientation = data.get("beam_orientation_adjustments", [])
+    if isinstance(beam_orientation, list):
+        section["beam_orientation_adjustment_count"] = len(beam_orientation)
+        section["beam_orientation_status"] = ", ".join(
+            "{0}:{1}:{2}/{3}".format(
+                item.get("component", "-"),
+                item.get("status", "-"),
+                item.get("assigned_count", "-"),
+                item.get("expected_segments", "-"),
+            )
+            for item in beam_orientation
+            if isinstance(item, dict)
+        ) or "-"
+        section["beam_orientation_modes"] = sorted({
+            item.get("mode")
+            for item in beam_orientation
+            if isinstance(item, dict) and item.get("mode")
+        })
 
     for key in status_keys:
         if key not in data:
