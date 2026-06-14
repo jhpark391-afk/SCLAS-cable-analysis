@@ -1161,6 +1161,133 @@ Important interpretation:
   and distorted element warnings. Do not change those until the first concrete
   blocking or clearly reducible warning mechanism is isolated.
 
+## Lab Explicit Contact Pair Cleanup - 2026-06-14 KST
+
+The next reducible warning mechanism was the Abaqus input-processing warning
+caused by defining both explicit `*Contact Pair` records and an `ALL EXTERIOR`
+general contact interaction. In the generated deck, Abaqus excluded the contact
+pair surfaces from the general-contact domain and also warned that the same
+surface interaction property was being used by general contact and contact
+pairs.
+
+Implementation:
+
+- `code/abaqus_runner.py` now creates explicit contact pair records before the
+  optional general-contact scaffold.
+- If at least one explicit pair is created, `SCLAS_GeneralContact` is not
+  created in the Abaqus model. The manifest records this as
+  `contact_interaction_scaffold.status=skipped_explicit_pairs_active` and the
+  top-level `contact_interaction_scaffold_status=skipped`.
+- The manifest records the created explicit pair names and any skipped pair
+  names. The current skipped pair remains `Pair_armour_cross_layer_interaction`
+  because both regions are B31 beam-line surfaces.
+- This intentionally preserves the four active armour-to-solid contact pairs
+  and removes only the overlapping all-exterior general-contact block.
+- `code/SCLAS_test/abaqus_runner.py` was synchronized.
+
+Static verification:
+
+```powershell
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m py_compile code\abaqus_runner.py code\SCLAS_test\abaqus_runner.py code\sclas_odb_extractor.py code\sclas_offline_diagnostics.py code\sclas_self_check.py
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe code\sclas_self_check.py
+```
+
+Both passed. The self-check created:
+
+```text
+jobs\SCLAS_jobs\self_check_20260614_132714
+jobs\SCLAS_jobs\self_check_endpoint_sweep_20260614_132714
+```
+
+Lab-PC SmallSmoke verification:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -SmallSmoke
+```
+
+SmallSmoke created:
+
+```text
+jobs\SCLAS_jobs\small_smoke_20260614_132725
+```
+
+Result:
+
+- Abaqus job completed.
+- ODB extraction status was `extracted`.
+- `result_summary.json.source` was `SCLAS_ABAQUS_ODB_EXTRACTOR`.
+- `odb_extraction.rows_written` was `2`.
+- `contact_interaction_scaffold_status` was `skipped`.
+- The generated `.inp` contained four `*Contact Pair` records and zero
+  `*Contact`, `*Contact Inclusions`, or `*Contact Property Assignment` general
+  contact records.
+- Searching `.dat` for
+  `BOTH CONTACT PAIRS AND GENERAL CONTACT|STRICTLY-ENFORCED HARD CONTACT|SURFACE TO SURFACE CONTACT APPROACH|NODE TO SURFACE APPROACH|NUMERICAL SINGULARITY|UNCONNECTED REGIONS`
+  returned zero hits.
+
+Lab-PC full Curve V0 endpoint sweep:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_sweep.ps1
+```
+
+Runtime was about 2 minutes 42 seconds, below the 20-minute intervention
+threshold. The sweep created:
+
+```text
+jobs\SCLAS_jobs\curve_v0_sweep_20260614_132815
+```
+
+Parent result stayed unchanged from the endpoint-coupled baseline:
+
+```csv
+curvature_1_per_m,moment_kn_m
+-0.0079999997979,-2.588653
+-0.00399999989895,-1.294349625
+0,0
+0.00399999989895,1.294349
+0.0079999997979,2.58865
+```
+
+Parent diagnostics:
+
+```text
+source=SCLAS_CURVE_V0_ENDPOINT_SWEEP
+rows=5
+endpoint_sweep_shape.shape_checks_passed=true
+endpoint_sweep_children.all_children_deep_validated=true
+endpoint_sweep_children.blocking_log_hits=0
+diagnostic_summary.issue_counts={'error': 0, 'warning': 0, 'info': 0}
+```
+
+Child contact checks:
+
+```text
+curve_v0_20260614_132815  factor=-0.1   interaction=skipped  contactBlocks=0  pairBlocks=4  badHits=0  rows=2
+curve_v0_20260614_132848  factor=-0.05  interaction=skipped  contactBlocks=0  pairBlocks=4  badHits=0  rows=2
+curve_v0_20260614_132921  factor=0      interaction=skipped  contactBlocks=0  pairBlocks=4  badHits=0  rows=2
+curve_v0_20260614_132951  factor=0.05   interaction=skipped  contactBlocks=0  pairBlocks=4  badHits=0  rows=2
+curve_v0_20260614_133024  factor=0.1    interaction=skipped  contactBlocks=0  pairBlocks=4  badHits=0  rows=2
+```
+
+Remaining completed-child warning taxonomy for the parent sweep:
+
+```text
+coupling_or_reference_node_note=60
+other_warning=25
+increment_cutback_or_excessive_reporting=15
+overconstraint_check=10
+distorted_elements=10
+beam_curvature=10
+```
+
+The contact-pair/general-contact overlap warning class and the contact-property
+penalty-switch warning class are now removed. The next concrete modelling
+target is mesh/beam quality: `WarnElemDistorted`, `WarnBeamCurvature1`, and
+the beam-tangent curvature warning. The `.msg` files still report zero analysis
+warnings and zero numerical-problem warnings, so these are completed-job input
+quality warnings rather than current blocking errors.
+
 ## Important Files
 
 ```text
@@ -1292,8 +1419,8 @@ Still needed for a paper-level implementation:
    - `result_summary.json` for optional metrics
 4. Reduce the remaining completed-solver warning classes only after isolating a
    concrete mechanism in `.dat`/`.msg`/manifest data:
-   overconstraint checks, contact-pair/general-contact overlap, beam curvature,
-   and distorted element warnings.
+   distorted elements, beam curvature, and any real overconstraint warning
+   beyond the current overconstraint-check progress notes.
 5. Add true periodic boundary equations or a documented equivalent-cell
    approximation.
 6. Extend ODB extraction beyond the current endpoint rows toward local slip,

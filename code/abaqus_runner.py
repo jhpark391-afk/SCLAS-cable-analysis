@@ -256,11 +256,13 @@ def write_mesh_manifest(
     contact_interactions = contact_interactions or []
     contact_interaction_status = "not_created"
     if contact_interactions:
-        contact_interaction_status = "created"
-        for interaction in contact_interactions:
-            if interaction.get("status") != "created":
-                contact_interaction_status = "partial"
-                break
+        interaction_statuses = [str(interaction.get("status", "")) for interaction in contact_interactions]
+        if all(status == "created" for status in interaction_statuses):
+            contact_interaction_status = "created"
+        elif all(status.startswith("skipped") for status in interaction_statuses):
+            contact_interaction_status = "skipped"
+        else:
+            contact_interaction_status = "partial"
     contact_pairs = contact_pairs or []
     contact_pair_status = "not_created"
     if contact_pairs:
@@ -716,7 +718,8 @@ def build_abaqus_mesh_model(payload, job_dir):
             record["warnings"].append("assembly beam surface failed: {0}".format(exc))
         append_contact_region(record, created, expected)
 
-    def create_contact_interaction_scaffold(contact_property_record):
+    def create_contact_interaction_scaffold(contact_property_record, explicit_pair_records=None):
+        explicit_pair_records = explicit_pair_records or []
         record = {
             "name": "SCLAS_GeneralContact",
             "type": "ContactStd",
@@ -734,6 +737,23 @@ def build_abaqus_mesh_model(payload, job_dir):
         if not contact_property_record or contact_property_record.get("status") not in ("created", "partial"):
             record["status"] = "skipped"
             record["warnings"].append("contact property was not available")
+            return record
+
+        created_pair_names = [item.get("name") for item in explicit_pair_records if item.get("status") == "created"]
+        if created_pair_names:
+            skipped_pair_names = [item.get("name") for item in explicit_pair_records if item.get("status") != "created"]
+            record["status"] = "skipped_explicit_pairs_active"
+            record["assignment_scope"] = "explicit_pairs_only"
+            record["created_explicit_pair_count"] = len(created_pair_names)
+            record["skipped_explicit_pair_count"] = len(skipped_pair_names)
+            record["created_explicit_pairs"] = created_pair_names
+            record["skipped_explicit_pairs"] = skipped_pair_names
+            record["notes"].append(
+                "Skipped general contact because explicit contact pairs are active; this avoids Abaqus general-contact/contact-pair domain overlap warnings."
+            )
+            record["notes"].append(
+                "Beam-to-beam armour cross-layer contact remains scaffold-only until a solid or supported surface representation is added."
+            )
             return record
 
         try:
@@ -1709,8 +1729,8 @@ def build_abaqus_mesh_model(payload, job_dir):
     )
 
     boundary_conditions = create_boundary_condition_scaffold()
-    contact_interactions = [create_contact_interaction_scaffold(contact_property)]
     contact_pairs = create_explicit_contact_pair_scaffold(contact_property)
+    contact_interactions = [create_contact_interaction_scaffold(contact_property, contact_pairs)]
     old_cwd = os.getcwd()
     os.chdir(str(job_dir))
     inp_path = os.path.join(path_text(job_dir), job_name + ".inp")
