@@ -67,6 +67,7 @@ python code/sclas_curve_compare.py
 python code/sclas_curve_compare.py \
   --endpoint jobs/SCLAS_jobs/<endpoint_sweep_folder> \
   --continuous jobs/SCLAS_jobs/<continuous_curve_folder>
+python code/sclas_curve_compare.py --save-report --save-markdown
 python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder>
 python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder> --save-report
 python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder> --save-markdown
@@ -77,7 +78,9 @@ curve class, warning totals, and next action. Use
 `sclas_offline_diagnostics.py` when you need the full JSON/Markdown report.
 Use `sclas_curve_compare.py` after both endpoint sweep and continuous CurveV0
 jobs exist. It compares peak moment scale, positive/negative branch moments at
-the common curvature, and odd-symmetry indicators.
+the common curvature, and odd-symmetry indicators. With `--save-report` and
+`--save-markdown`, it writes `curve_v0_comparison_report.json` and
+`curve_v0_comparison_report.md` into the continuous CurveV0 job folder.
 For continuous CurveV0 jobs, both commands report the basic multi-point shape
 check: positive branch, negative branch, return-to-zero rows, odd symmetry, and
 maximum curvature/moment.

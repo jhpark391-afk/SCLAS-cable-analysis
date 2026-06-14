@@ -713,6 +713,8 @@ def check_curve_v0_comparison() -> None:
             sys.executable,
             str(CODE_DIR / "sclas_curve_compare.py"),
             "--json",
+            "--save-report",
+            "--save-markdown",
         ],
         text=True,
         capture_output=True,
@@ -730,6 +732,14 @@ def check_curve_v0_comparison() -> None:
         fail("CurveV0 comparison did not expose the expected synthetic scale mismatch")
     if not report.get("warnings"):
         fail("CurveV0 comparison did not report warnings for the synthetic scale mismatch")
+    saved_report = Path(report.get("saved_report", ""))
+    if not saved_report.exists():
+        fail("CurveV0 comparison did not save JSON report")
+    saved_markdown = Path(report.get("saved_markdown_report", ""))
+    if not saved_markdown.exists():
+        fail("CurveV0 comparison did not save Markdown report")
+    if "SCLAS CurveV0 Comparison" not in saved_markdown.read_text(encoding="utf-8"):
+        fail("CurveV0 comparison Markdown report does not contain the expected heading")
 
     print("[OK] CurveV0 endpoint/continuous comparison")
 

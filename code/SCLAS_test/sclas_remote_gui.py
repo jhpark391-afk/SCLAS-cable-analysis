@@ -2019,12 +2019,16 @@ class SCLASRemoteGUI(QMainWindow):
 
     def compare_curve_v0_jobs(self) -> None:
         try:
-            from sclas_curve_compare import compare, human_report, latest_job
+            from sclas_curve_compare import compare, human_report, latest_job, save_markdown_report, save_report
 
             job_root = Path(self.job_root_input.text().strip()).expanduser()
             endpoint = latest_job(job_root, "endpoint")
             continuous = latest_job(job_root, "continuous")
             report = compare(endpoint, continuous)
+            saved_path = save_report(report)
+            saved_markdown_path = save_markdown_report(report)
+            report["saved_report"] = str(saved_path)
+            report["saved_markdown_report"] = str(saved_markdown_path)
             endpoint_path = Path(endpoint["path"]) / "result_data.csv"
             continuous_path = Path(continuous["path"]) / "result_data.csv"
             self.clear_compare_curves()
@@ -2042,6 +2046,8 @@ class SCLASRemoteGUI(QMainWindow):
                     report.get("peak_moment_ratio_continuous_over_endpoint", "-"),
                 )
             )
+            self.log(f"[COMPARE] Saved report: {saved_path}")
+            self.log(f"[COMPARE] Saved Markdown report: {saved_markdown_path}")
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "CurveV0 comparison error", str(exc))

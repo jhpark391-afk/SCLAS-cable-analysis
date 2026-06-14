@@ -2158,6 +2158,11 @@ The plot now includes a legend. The primary result appears as `Primary`, and
 the automatic continuous overlay appears as `Continuous CurveV0`, so the
 comparison plot is readable without relying only on color.
 
+`code/sclas_curve_compare.py` also supports `--save-report` and
+`--save-markdown`. The GUI `Compare CurveV0` action now saves
+`curve_v0_comparison_report.json` and `curve_v0_comparison_report.md` into the
+continuous CurveV0 job folder before showing the report in the summary panel.
+
 Verification on Mac:
 
 ```bash

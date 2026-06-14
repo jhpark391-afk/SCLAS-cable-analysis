@@ -278,12 +278,37 @@ def print_human(report: dict) -> None:
     print(human_report(report))
 
 
+def default_report_path(report: dict, suffix: str) -> Path:
+    continuous_job = report.get("continuous_job")
+    if continuous_job:
+        return Path(continuous_job) / ("curve_v0_comparison_report." + suffix)
+    return DEFAULT_JOB_ROOT / ("curve_v0_comparison_report." + suffix)
+
+
+def save_report(report: dict, output_path: Path = None) -> Path:
+    path = output_path or default_report_path(report, "json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def save_markdown_report(report: dict, output_path: Path = None) -> Path:
+    path = output_path or default_report_path(report, "md")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(human_report(report), encoding="utf-8")
+    return path
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Compare endpoint sweep and continuous CurveV0 result folders.")
     parser.add_argument("--endpoint", help="Endpoint sweep job folder. Defaults to latest endpoint sweep.")
     parser.add_argument("--continuous", help="Continuous CurveV0 job folder. Defaults to latest continuous CurveV0.")
     parser.add_argument("--job-root", default=str(DEFAULT_JOB_ROOT), help="Folder that contains SCLAS job folders.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    parser.add_argument("--save-report", action="store_true", help="Save curve_v0_comparison_report.json.")
+    parser.add_argument("--save-markdown", action="store_true", help="Save curve_v0_comparison_report.md.")
+    parser.add_argument("--output", help="Optional JSON output path for --save-report.")
+    parser.add_argument("--markdown-output", help="Optional Markdown output path for --save-markdown.")
     return parser.parse_args(argv)
 
 
@@ -294,6 +319,12 @@ def main(argv=None) -> int:
         endpoint = load_job(Path(args.endpoint).expanduser().resolve()) if args.endpoint else latest_job(job_root, "endpoint")
         continuous = load_job(Path(args.continuous).expanduser().resolve()) if args.continuous else latest_job(job_root, "continuous")
         report = compare(endpoint, continuous)
+        if args.save_report:
+            output_path = Path(args.output).expanduser().resolve() if args.output else None
+            report["saved_report"] = str(save_report(report, output_path))
+        if args.save_markdown:
+            markdown_output = Path(args.markdown_output).expanduser().resolve() if args.markdown_output else None
+            report["saved_markdown_report"] = str(save_markdown_report(report, markdown_output))
         if args.json:
             print(json.dumps(report, indent=2, ensure_ascii=False))
         else:
