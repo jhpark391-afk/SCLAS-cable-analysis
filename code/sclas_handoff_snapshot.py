@@ -49,12 +49,26 @@ def git_state() -> dict:
             except ValueError:
                 ahead = None
                 behind = None
+    porcelain = run_git(["status", "--porcelain"])
+    dirty = bool(porcelain and not porcelain.startswith("unavailable:"))
+    if ahead is None or behind is None:
+        sync_status = "unknown"
+    elif ahead and behind:
+        sync_status = "diverged"
+    elif ahead:
+        sync_status = "ahead"
+    elif behind:
+        sync_status = "behind"
+    else:
+        sync_status = "in_sync"
     return {
         "branch": run_git(["branch", "--show-current"]),
         "head": run_git(["rev-parse", "--short", "HEAD"]),
         "upstream": upstream,
         "ahead": ahead,
         "behind": behind,
+        "dirty": dirty,
+        "sync_status": sync_status,
         "status_short": run_git(["status", "--short", "--branch"]),
     }
 
@@ -125,10 +139,12 @@ def human_report(snapshot: dict) -> str:
         "==============================",
         "Generated: {0}".format(snapshot.get("generated_at", "-")),
         "Project: {0}".format(snapshot.get("project_dir", "-")),
-        "Git: {0} @ {1} -> {2} (ahead={3}, behind={4})".format(
+        "Git: {0} @ {1} -> {2} ({3}, dirty={4}, ahead={5}, behind={6})".format(
             git.get("branch", "-"),
             git.get("head", "-"),
             git.get("upstream", "-"),
+            git.get("sync_status", "-"),
+            git.get("dirty", "-"),
             git.get("ahead", "-"),
             git.get("behind", "-"),
         ),
@@ -188,10 +204,12 @@ def markdown_report(snapshot: dict) -> str:
         "",
         "- Generated: `{0}`".format(snapshot.get("generated_at", "-")),
         "- Project: `{0}`".format(snapshot.get("project_dir", "-")),
-        "- Git: `{0}` @ `{1}` -> `{2}` (ahead `{3}`, behind `{4}`)".format(
+        "- Git: `{0}` @ `{1}` -> `{2}` (`{3}`, dirty `{4}`, ahead `{5}`, behind `{6}`)".format(
             git.get("branch", "-"),
             git.get("head", "-"),
             git.get("upstream", "-"),
+            git.get("sync_status", "-"),
+            git.get("dirty", "-"),
             git.get("ahead", "-"),
             git.get("behind", "-"),
         ),

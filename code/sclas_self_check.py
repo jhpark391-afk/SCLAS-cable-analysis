@@ -961,6 +961,8 @@ def check_handoff_snapshot() -> None:
     git = snapshot.get("git", {})
     if "ahead" not in git or "behind" not in git:
         fail("Handoff snapshot did not embed git ahead/behind state")
+    if "dirty" not in git or "sync_status" not in git:
+        fail("Handoff snapshot did not embed git dirty/sync status")
     acceptance = snapshot.get("acceptance_gate", {})
     if not acceptance.get("overall_status"):
         fail("Handoff snapshot did not embed acceptance gate status")
@@ -1004,6 +1006,7 @@ def check_next_prompt() -> None:
         "python code/sclas_self_check.py",
         "./run_validation_suite.sh",
         "run_validation_suite.bat",
+        "Git sync:",
         "Acceptance gate:",
         "contact preload",
     ]:
@@ -1036,6 +1039,8 @@ def check_validation_suite() -> None:
         fail("Validation suite did not embed git head")
     if "ahead" not in report.get("git", {}) or "behind" not in report.get("git", {}):
         fail("Validation suite did not embed git ahead/behind state")
+    if "dirty" not in report.get("git", {}) or "sync_status" not in report.get("git", {}):
+        fail("Validation suite did not embed git dirty/sync status")
     if not report.get("acceptance_gate", {}).get("overall_status"):
         fail("Validation suite did not embed acceptance gate status")
     if not report.get("handoff_snapshot", {}).get("saved_report"):

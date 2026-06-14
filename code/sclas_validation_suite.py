@@ -126,10 +126,12 @@ def markdown_report(report: dict) -> str:
         "# HELIX / SCLAS Validation Suite",
         "",
         "- Status: `{0}`".format(report.get("status", "-")),
-        "- Git: `{0}` @ `{1}` -> `{2}` (ahead `{3}`, behind `{4}`)".format(
+        "- Git: `{0}` @ `{1}` -> `{2}` (`{3}`, dirty `{4}`, ahead `{5}`, behind `{6}`)".format(
             git.get("branch", "-"),
             git.get("head", "-"),
             git.get("upstream", "-"),
+            git.get("sync_status", "-"),
+            git.get("dirty", "-"),
             git.get("ahead", "-"),
             git.get("behind", "-"),
         ),
@@ -173,10 +175,12 @@ def human_report(report: dict) -> str:
         "HELIX / SCLAS Validation Suite",
         "==============================",
         "Status: {0}".format(report.get("status", "-")),
-        "Git: {0} @ {1} -> {2} (ahead={3}, behind={4})".format(
+        "Git: {0} @ {1} -> {2} ({3}, dirty={4}, ahead={5}, behind={6})".format(
             git.get("branch", "-"),
             git.get("head", "-"),
             git.get("upstream", "-"),
+            git.get("sync_status", "-"),
+            git.get("dirty", "-"),
             git.get("ahead", "-"),
             git.get("behind", "-"),
         ),

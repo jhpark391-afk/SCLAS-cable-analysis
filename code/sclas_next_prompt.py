@@ -49,6 +49,13 @@ def prompt_text(snapshot: dict) -> str:
         "Current snapshot summary:",
         "",
         "- Git branch/head: `{0}` @ `{1}`".format(git.get("branch", "-"), git.get("head", "-")),
+        "- Git sync: `{0}`, dirty `{1}`, upstream `{2}`, ahead `{3}`, behind `{4}`".format(
+            git.get("sync_status", "-"),
+            git.get("dirty", "-"),
+            git.get("upstream", "-"),
+            git.get("ahead", "-"),
+            git.get("behind", "-"),
+        ),
         "- Latest job: `{0}`".format(status.get("latest_job", "-")),
         "- Latest health/source/class: `{0}` / `{1}` / `{2}`".format(
             status.get("latest_job_health", "-"),
