@@ -615,6 +615,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Project Status": "프로젝트 상태",
             "Job Index": "작업 목록",
             "Load best": "추천 작업 불러오기",
+            "Handoff": "인수인계",
             "Open folder": "폴더 열기",
             "No result jobs found": "결과 작업 없음",
             "Model: pending": "모델: 대기",
@@ -1412,6 +1413,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_project_status = QPushButton("Project Status")
         self.btn_job_index = QPushButton("Job Index")
         self.btn_load_best_job = QPushButton("Load best")
+        self.btn_handoff_snapshot = QPushButton("Handoff")
         self.btn_open_job_folder = QPushButton("Open folder")
         self.btn_refresh_jobs.setToolTip("Scan the job root for recent SCLAS result folders.")
         self.btn_load_job.setToolTip("Load result_data.csv from the selected job folder.")
@@ -1420,6 +1422,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_project_status.setToolTip("Show the overall HELIX/SCLAS project status and next action.")
         self.btn_job_index.setToolTip("Show a handoff inventory of recent real SCLAS job folders.")
         self.btn_load_best_job.setToolTip("Load the best current job candidate selected by the Job Index readiness score.")
+        self.btn_handoff_snapshot.setToolTip("Save and show a compact handoff snapshot for the next Codex session.")
         self.btn_open_job_folder.setToolTip("Open the selected job folder in Finder or Explorer.")
         self.btn_refresh_jobs.clicked.connect(self.refresh_job_history)
         self.btn_load_job.clicked.connect(self.load_selected_job)
@@ -1428,6 +1431,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_project_status.clicked.connect(self.show_project_status)
         self.btn_job_index.clicked.connect(self.show_job_index)
         self.btn_load_best_job.clicked.connect(self.load_best_job)
+        self.btn_handoff_snapshot.clicked.connect(self.show_handoff_snapshot)
         self.btn_open_job_folder.clicked.connect(self.open_selected_job_folder)
         history_layout.addWidget(self.job_history_combo, 0, 0, 1, 3)
         history_layout.addWidget(self.btn_refresh_jobs, 1, 0)
@@ -1438,6 +1442,7 @@ class SCLASRemoteGUI(QMainWindow):
         history_layout.addWidget(self.btn_open_job_folder, 2, 2)
         history_layout.addWidget(self.btn_job_index, 3, 0, 1, 2)
         history_layout.addWidget(self.btn_load_best_job, 3, 2)
+        history_layout.addWidget(self.btn_handoff_snapshot, 4, 0, 1, 3)
         right.addWidget(self.history_box)
 
         left_scroll = self.scroll_panel(left_panel, min_width=360)
@@ -2179,6 +2184,40 @@ class SCLASRemoteGUI(QMainWindow):
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Load best job error", str(exc))
+
+    def show_handoff_snapshot(self) -> None:
+        try:
+            from sclas_handoff_snapshot import build_snapshot, human_report, save_markdown_report, save_report
+
+            job_root = Path(self.job_root_input.text().strip()).expanduser()
+            snapshot = build_snapshot(job_root, limit=15)
+            saved_path = save_report(snapshot)
+            snapshot["saved_report"] = str(saved_path)
+            saved_markdown_path = save_markdown_report(snapshot)
+            snapshot["saved_markdown_report"] = str(saved_markdown_path)
+            self.last_summary_data = {}
+            self.summary_text.setPlainText(human_report(snapshot))
+            focus = snapshot.get("handoff_focus", {})
+            status = snapshot.get("project_status", {})
+            has_blocked = any(
+                flag.get("status") == "blocked"
+                for flag in status.get("completion_flags", [])
+            )
+            tone = "error" if has_blocked else "good"
+            label = "Result: error" if has_blocked else "Result: ready"
+            self.set_badge(self.lbl_result_status, label, tone)
+            self.log(
+                "[HANDOFF] Snapshot | best={0} score={1} | next={2}".format(
+                    focus.get("best_job", "-"),
+                    focus.get("best_job_readiness_score", "-"),
+                    focus.get("next_action", "-"),
+                )
+            )
+            self.log(f"[HANDOFF] Saved report: {saved_path}")
+            self.log(f"[HANDOFF] Saved Markdown report: {saved_markdown_path}")
+        except Exception as exc:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
+            QMessageBox.critical(self, "Handoff snapshot error", str(exc))
 
     @staticmethod
     def counts_text(counts, limit: int = 4) -> str:

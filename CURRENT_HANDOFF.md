@@ -2440,7 +2440,9 @@ folder so another Codex session can read the same handoff snapshot. The same
 Recent Jobs panel now also has an `Open folder` button for opening the selected
 job folder in Finder or Windows Explorer, plus a `Job Index` button for saving
 and displaying a recent-job inventory directly in the GUI. Use `Load best` to
-load the highest-readiness candidate selected by that index.
+load the highest-readiness candidate selected by that index. Use `Handoff` to
+save and display `handoff_snapshot.json` and `handoff_snapshot.md` before
+switching computers or Codex sessions.
 
 ## Home Codex Start Prompt
 
