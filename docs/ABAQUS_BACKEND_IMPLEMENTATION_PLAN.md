@@ -220,6 +220,27 @@ Extract and report:
 Keep the CSV narrow. Put extra arrays or scalar metrics in JSON unless the GUI
 explicitly needs a new plot.
 
+Current partial implementation:
+
+- `code/sclas_odb_extractor.py` records `local_field_summary` in
+  `odb_extraction_summary.json` and mirrors it into
+  `result_summary.json.odb_local_field_summary`.
+- The extractor preserves the narrow `result_data.csv` contract and now
+  summarizes available ODB field outputs plus aggregate stress/contact/slip
+  scalars when Abaqus provides them.
+- Interface-qualified Abaqus contact outputs such as `CPRESS   surface/pair`,
+  `COPEN`, `CSLIP1`, `CSLIP2`, `CSHEAR1`, and `CSHEAR2` are detected.
+- `code/sclas_offline_diagnostics.py` and `code/sclas_job_summary.py` surface
+  these metrics for single jobs and aggregate them across endpoint-sweep child
+  jobs.
+
+Still needed before treating Phase 4 as research-complete:
+
+- per-interface contact/slip/stress ranges rather than aggregate maxima only
+- loop energy and peak/min/max moment scalar summaries
+- contact status / stick-slip transition interpretation where available
+- fatigue-oriented summaries and calibrated pressure/friction validation
+
 ## Phase 5: Coupled studies
 
 Add separate routines after bending is stable:

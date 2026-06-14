@@ -262,6 +262,109 @@ def update_minimum(target, key, value):
         target[key] = value
 
 
+def update_maximum(target, key, value):
+    parsed = parse_float(value)
+    if parsed is None:
+        return
+    current = target.get(key)
+    if current is None or parsed > current:
+        target[key] = parsed
+
+
+def merge_name_counts(target, names):
+    if not isinstance(names, list):
+        return
+    for name in names:
+        target[str(name)] = target.get(str(name), 0) + 1
+
+
+def local_field_digest(local_summary):
+    digest = {
+        "checked": False,
+        "status": None,
+        "present_target_outputs": [],
+        "missing_target_outputs": [],
+        "available_field_outputs": [],
+        "stress_mises_max": None,
+        "stress_component_abs_max": None,
+        "contact_pressure_max": None,
+        "contact_opening_abs_max": None,
+        "slip_abs_max": None,
+        "contact_shear_abs_max": None,
+        "contact_status_max": None,
+    }
+    if not isinstance(local_summary, dict) or not local_summary:
+        return digest
+
+    digest["checked"] = bool(local_summary.get("checked"))
+    digest["status"] = local_summary.get("status")
+    present = local_summary.get("present_target_outputs", [])
+    missing = local_summary.get("missing_target_outputs", [])
+    digest["present_target_outputs"] = sorted(str(item) for item in present) if isinstance(present, list) else []
+    digest["missing_target_outputs"] = sorted(str(item) for item in missing) if isinstance(missing, list) else []
+
+    available = set()
+    available_by_step = local_summary.get("available_field_outputs", {})
+    if isinstance(available_by_step, dict):
+        for values in available_by_step.values():
+            if isinstance(values, list):
+                for value in values:
+                    text = str(value).strip()
+                    available.add(text.split()[0] if text else text)
+    digest["available_field_outputs"] = sorted(available)
+
+    metrics = local_summary.get("metrics", {})
+    if isinstance(metrics, dict):
+        for key in [
+            "stress_mises_max",
+            "stress_component_abs_max",
+            "contact_pressure_max",
+            "contact_opening_abs_max",
+            "slip_abs_max",
+            "contact_shear_abs_max",
+            "contact_status_max",
+        ]:
+            digest[key] = parse_float(metrics.get(key))
+    return digest
+
+
+def empty_local_field_aggregate():
+    return {
+        "checked_child_jobs": 0,
+        "children_with_summary": 0,
+        "present_target_outputs": {},
+        "missing_target_outputs": {},
+        "available_field_outputs": {},
+        "stress_mises_max": None,
+        "stress_component_abs_max": None,
+        "contact_pressure_max": None,
+        "contact_opening_abs_max": None,
+        "slip_abs_max": None,
+        "contact_shear_abs_max": None,
+        "contact_status_max": None,
+    }
+
+
+def merge_local_field_digest(target, digest):
+    if not isinstance(digest, dict) or not digest.get("checked"):
+        return
+    target["checked_child_jobs"] += 1
+    target["children_with_summary"] += 1
+    merge_name_counts(target["present_target_outputs"], digest.get("present_target_outputs"))
+    merge_name_counts(target["missing_target_outputs"], digest.get("missing_target_outputs"))
+    merge_name_counts(target["available_field_outputs"], digest.get("available_field_outputs"))
+    for key in [
+        "stress_mises_max",
+        "stress_component_abs_max",
+        "contact_pressure_max",
+        "contact_opening_abs_max",
+        "slip_abs_max",
+        "contact_shear_abs_max",
+        "contact_status_max",
+    ]:
+        update_maximum(target, key, digest.get(key))
+
+
 def mesh_quality_warning_details(job_dir: Path):
     details = {
         "checked": False,
@@ -551,6 +654,7 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
             "first_warning_context": None,
             "recommended_probe": "If these remain after annular mesh cleanup, isolate a minimal B31 helix and sweep segment count, beam orientation, lay angle, and helix radius.",
         },
+        "local_field_summary": empty_local_field_aggregate(),
     }
     report["endpoint_sweep_children"] = section
     if not isinstance(child_jobs, list):
@@ -609,6 +713,15 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
         child_detail["status"] = child_summary.get("status") if isinstance(child_summary, dict) else None
         child_detail["odb_status"] = child_odb.get("status") or odb_summary.get("status")
         child_detail["odb_rows_written"] = child_odb.get("rows_written") or odb_summary.get("rows_written")
+        child_local_summary = None
+        if isinstance(child_summary, dict):
+            child_local_summary = child_summary.get("odb_local_field_summary")
+        if not child_local_summary and isinstance(child_odb, dict):
+            child_local_summary = child_odb.get("local_field_summary")
+        if not child_local_summary and isinstance(odb_summary, dict):
+            child_local_summary = odb_summary.get("local_field_summary")
+        child_detail["local_field_summary"] = local_field_digest(child_local_summary)
+        merge_local_field_digest(section["local_field_summary"], child_detail["local_field_summary"])
 
         if child_detail["source"] != "SCLAS_ABAQUS_ODB_EXTRACTOR":
             add_issue(report, "error", "Endpoint sweep child source is not ODB extractor", child_detail)
@@ -743,6 +856,10 @@ def inspect_summary(job_dir: Path, report: dict) -> None:
     if isinstance(odb_extraction, dict) and odb_extraction:
         section["odb_extraction_status"] = odb_extraction.get("status")
         section["odb_rows_written"] = odb_extraction.get("rows_written")
+    local_summary = data.get("odb_local_field_summary")
+    if not local_summary and isinstance(odb_extraction, dict):
+        local_summary = odb_extraction.get("local_field_summary")
+    section["odb_local_field_summary"] = local_field_digest(local_summary)
     quality = data.get("abaqus_result_quality", {})
     if isinstance(quality, dict) and quality:
         section["abaqus_curve_class"] = quality.get("curve_class")
@@ -1094,6 +1211,11 @@ def markdown_report(report: dict) -> str:
         ordered = sorted(counts.items(), key=lambda item: item[1], reverse=True)
         return ", ".join("{0}={1}".format(key, value) for key, value in ordered[:limit])
 
+    def top_names(names, limit=8):
+        if not isinstance(names, list) or not names:
+            return "-"
+        return ", ".join(str(name) for name in names[:limit])
+
     lines = [
         "# SCLAS Offline Diagnostics",
         "",
@@ -1115,6 +1237,8 @@ def markdown_report(report: dict) -> str:
     sweep_children_section = report.get("endpoint_sweep_children", {})
     sweep_mesh_quality = sweep_children_section.get("mesh_quality_warning_details", {}) if isinstance(sweep_children_section, dict) else {}
     sweep_b31_quality = sweep_children_section.get("b31_beam_warning_details", {}) if isinstance(sweep_children_section, dict) else {}
+    sweep_local_field = sweep_children_section.get("local_field_summary", {}) if isinstance(sweep_children_section, dict) else {}
+    odb_local_field = summary_section.get("odb_local_field_summary", {}) if isinstance(summary_section, dict) else {}
     solver_mesh_quality = logs_section.get("mesh_quality_warning_details", {}) if isinstance(logs_section, dict) else {}
     solver_b31_quality = logs_section.get("b31_beam_warning_details", {}) if isinstance(logs_section, dict) else {}
     diagnostic_summary = report.get("diagnostic_summary", {})
@@ -1126,6 +1250,11 @@ def markdown_report(report: dict) -> str:
         ("Summary status", scalar(summary_section.get("status"))),
         ("Summary source", scalar(summary_section.get("source"))),
         ("Curve class", scalar(summary_section.get("abaqus_curve_class"))),
+        ("ODB field outputs", top_names(odb_local_field.get("available_field_outputs"))),
+        ("ODB present local fields", top_names(odb_local_field.get("present_target_outputs"))),
+        ("ODB stress Mises max", scalar(odb_local_field.get("stress_mises_max"))),
+        ("ODB contact pressure max", scalar(odb_local_field.get("contact_pressure_max"))),
+        ("ODB slip abs max", scalar(odb_local_field.get("slip_abs_max"))),
         ("Mesh status", scalar(summary_section.get("mesh_status"))),
         ("Manifest status", scalar(manifest_section.get("status"))),
         ("Contact pair scaffold", scalar(manifest_section.get("contact_pair_scaffold_status"))),
@@ -1142,6 +1271,11 @@ def markdown_report(report: dict) -> str:
         ("Sweep mesh warning sets", top_counts(sweep_mesh_quality.get("warning_sets"))),
         ("Sweep B31 warning sets", top_counts(sweep_b31_quality.get("warning_sets"))),
         ("Sweep B31 warning total", scalar(sweep_b31_quality.get("total_warning_sets"))),
+        ("Sweep child field outputs", top_counts(sweep_local_field.get("available_field_outputs"))),
+        ("Sweep child present local fields", top_counts(sweep_local_field.get("present_target_outputs"))),
+        ("Sweep stress Mises max", scalar(sweep_local_field.get("stress_mises_max"))),
+        ("Sweep contact pressure max", scalar(sweep_local_field.get("contact_pressure_max"))),
+        ("Sweep slip abs max", scalar(sweep_local_field.get("slip_abs_max"))),
         ("Sweep distorted reported elements", scalar(sweep_mesh_quality.get("distorted_reported_element_count"))),
         ("Sweep distorted table parts", top_counts(sweep_mesh_quality.get("distorted_table_parts"))),
         ("Sweep distorted table min angle", scalar(sweep_mesh_quality.get("distorted_table_min_angle"))),

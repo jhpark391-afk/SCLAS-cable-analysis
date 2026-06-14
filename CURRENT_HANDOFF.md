@@ -2115,6 +2115,78 @@ Verification on Mac:
 ../90_env/venv/bin/python code/sclas_job_summary.py --latest
 ```
 
+## 2026-06-14 Windows Abaqus Update - ODB Local Field Summary
+
+Windows lab-PC work added a conservative local-field ODB post-processing layer
+without changing the narrow `result_data.csv` contract.
+
+Changed code:
+
+- `code/sclas_odb_extractor.py` now writes
+  `local_field_summary` inside `odb_extraction_summary.json` and mirrors it to
+  `result_summary.json.odb_local_field_summary`.
+- The extractor inventories available ODB field outputs and summarizes
+  aggregate scalar metrics for `S`, `CPRESS`, `COPEN`, `CSLIP1`, `CSLIP2`,
+  `CSHEAR1`, and `CSHEAR2` when present.
+- Abaqus interface-qualified contact output keys such as
+  `CPRESS   ASSEMBLY_.../ASSEMBLY_...` are matched by prefix, not exact name.
+- `code/sclas_offline_diagnostics.py` now reports local field digests for
+  single jobs and aggregates them across endpoint-sweep child jobs.
+- `code/sclas_job_summary.py` prints the same local field inventory and key
+  metrics in the concise one-page summary.
+
+Validation on Windows:
+
+```powershell
+python -m py_compile code\abaqus_runner.py code\SCLAS_test\abaqus_runner.py code\sclas_odb_extractor.py code\sclas_offline_diagnostics.py code\sclas_job_summary.py
+python code\sclas_self_check.py
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -SmallSmoke
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_sweep.ps1
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_continuous.ps1
+```
+
+Fresh Windows job folders:
+
+- SmallSmoke: `jobs\SCLAS_jobs\small_smoke_20260614_150938`
+  - Abaqus job completed.
+  - `odb_extraction.status=extracted`.
+  - `odb_extraction.rows_written=2`.
+  - `source=SCLAS_ABAQUS_ODB_EXTRACTOR`.
+  - `actual_warning_match_count=0`, blocking log hits `0`.
+  - Local fields present: `S`, `CPRESS`, `COPEN`, `CSLIP1`, `CSLIP2`,
+    `CSHEAR1`, `CSHEAR2`; `CSTATUS` missing.
+- Endpoint sweep: `jobs\SCLAS_jobs\curve_v0_sweep_20260614_151023`
+  - Parent `result_data.csv` has five numeric rows.
+  - Parent `source=SCLAS_CURVE_V0_ENDPOINT_SWEEP`.
+  - `endpoint_sweep_validation.all_child_jobs_validated=true`.
+  - Offline diagnostics deep-validated all five children.
+  - Child aggregate local fields present in 5/5 children for `S`, `CPRESS`,
+    `COPEN`, `CSLIP1`, `CSLIP2`, `CSHEAR1`, and `CSHEAR2`.
+  - Aggregate metrics: `stress_mises_max=6.312607765197754`,
+    `contact_pressure_max=0.0`, `slip_abs_max=0.0`,
+    `contact_opening_abs_max=2.5802268981933594`.
+  - Actual warning hits `0`, blocking hits `0`.
+- Continuous CurveV0: `jobs\SCLAS_jobs\curve_v0_20260614_151349`
+  - `odb_extraction.status=extracted`.
+  - `odb_extraction.rows_written=5`.
+  - `abaqus_result_quality.curve_class=multi_point_curve_v0`.
+  - Local fields present: `S`, `CPRESS`, `COPEN`, `CSLIP1`, `CSLIP2`,
+    `CSHEAR1`, `CSHEAR2`; `CSTATUS` missing.
+  - Metrics: `stress_mises_max=6.312607765197754`,
+    `contact_pressure_max=0.0`, `slip_abs_max=0.0`,
+    `contact_opening_abs_max=2.580226182937622`.
+  - Actual warning hits `0`, blocking hits `0`.
+
+Interpretation:
+
+- The Abaqus bridge and CurveV0 endpoint/continuous validation remain stable.
+- ODB contact/stress fields are available and now summarized, but the current
+  reduced contact scaffold reports zero contact pressure and zero slip in these
+  runs. Treat this as a diagnostic signal, not calibrated contact physics.
+- Phase 4 is only partially implemented: aggregate local field metrics exist;
+  per-interface ranges, loop energy, contact status interpretation, and
+  fatigue/calibration summaries are still open.
+
 ## Next Recommended Tasks
 
 1. Preserve the stable Lab-PC validation loop:
@@ -2134,8 +2206,9 @@ Verification on Mac:
    `actual_warning_match_count=0`.
 5. Add true periodic boundary equations or a documented equivalent-cell
    approximation.
-6. Extend ODB extraction beyond right-reference-point `UR2`/`RM2` toward local
-   slip, contact pressure, stress, and fatigue-oriented summary metrics.
+6. Extend the new ODB local-field summaries from aggregate maxima to
+   per-interface contact/slip/stress ranges, loop energy, contact status, and
+   fatigue-oriented metrics.
 7. After each meaningful task, update this file, commit, and push only code/docs
    changes, never generated Abaqus job artifacts.
 

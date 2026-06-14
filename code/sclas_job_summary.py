@@ -38,6 +38,14 @@ def top_counts(counts, limit=4):
     return ", ".join("{0}={1}".format(key, value) for key, value in ordered[:limit])
 
 
+def names_to_counts(names):
+    counts = {}
+    if isinstance(names, list):
+        for name in names:
+            counts[str(name)] = counts.get(str(name), 0) + 1
+    return counts
+
+
 def latest_job_dir(job_root: Path) -> Path:
     if not job_root.exists():
         raise FileNotFoundError("Job root does not exist: {0}".format(job_root))
@@ -64,17 +72,32 @@ def latest_job_dir(job_root: Path) -> Path:
 def quality_details(report: dict):
     logs = report.get("solver_logs", {})
     children = report.get("endpoint_sweep_children", {})
+    result_summary = report.get("result_summary_json", {})
     manifest = report.get("abaqus_mesh_manifest_json", {})
     mesh_quality = {}
     b31_quality = {}
+    local_field = {}
 
     if isinstance(children, dict) and children:
         mesh_quality = children.get("mesh_quality_warning_details", {}) or {}
         b31_quality = children.get("b31_beam_warning_details", {}) or {}
+        local_field = children.get("local_field_summary", {}) or {}
     if not mesh_quality and isinstance(logs, dict):
         mesh_quality = logs.get("mesh_quality_warning_details", {}) or {}
     if not b31_quality and isinstance(logs, dict):
         b31_quality = logs.get("b31_beam_warning_details", {}) or {}
+    if not local_field and isinstance(result_summary, dict):
+        local_field = result_summary.get("odb_local_field_summary", {}) or {}
+
+    available_outputs = local_field.get("available_field_outputs", {})
+    present_outputs = local_field.get("present_target_outputs", {})
+    missing_outputs = local_field.get("missing_target_outputs", {})
+    if isinstance(available_outputs, list):
+        available_outputs = names_to_counts(available_outputs)
+    if isinstance(present_outputs, list):
+        present_outputs = names_to_counts(present_outputs)
+    if isinstance(missing_outputs, list):
+        missing_outputs = names_to_counts(missing_outputs)
 
     return {
         "actual_warning_hits": int_scalar(
@@ -99,6 +122,12 @@ def quality_details(report: dict):
         "b31_total_warning_sets": int_scalar(b31_quality.get("total_warning_sets")),
         "beam_orientation_status": manifest.get("beam_orientation_status"),
         "beam_orientation_modes": manifest.get("beam_orientation_modes"),
+        "odb_available_field_outputs": available_outputs,
+        "odb_present_local_fields": present_outputs,
+        "odb_missing_local_fields": missing_outputs,
+        "odb_stress_mises_max": local_field.get("stress_mises_max"),
+        "odb_contact_pressure_max": local_field.get("contact_pressure_max"),
+        "odb_slip_abs_max": local_field.get("slip_abs_max"),
     }
 
 
@@ -171,6 +200,16 @@ def print_human(summary: dict) -> None:
     print("Research curve: {0}".format(scalar(summary.get("is_research_curve"))))
     print("Rows: csv={0}, summary={1}".format(scalar(summary.get("csv_rows")), scalar(summary.get("rows_written"))))
     print("ODB: status={0}, rows={1}".format(scalar(summary.get("odb_status")), scalar(summary.get("odb_rows_written"))))
+    print("ODB fields: available={0}, present={1}, missing={2}".format(
+        top_counts(summary.get("odb_available_field_outputs"), 8),
+        top_counts(summary.get("odb_present_local_fields"), 8),
+        top_counts(summary.get("odb_missing_local_fields"), 8),
+    ))
+    print("ODB local metrics: stress_mises_max={0}, contact_pressure_max={1}, slip_abs_max={2}".format(
+        scalar(summary.get("odb_stress_mises_max")),
+        scalar(summary.get("odb_contact_pressure_max")),
+        scalar(summary.get("odb_slip_abs_max")),
+    ))
     print("Mesh: summary={0}, manifest={1}".format(scalar(summary.get("mesh_status")), scalar(summary.get("manifest_status"))))
     print("Contact scaffold: {0}".format(scalar(summary.get("contact_pair_scaffold_status"))))
     print("Endpoint sweep: validated={0}, shape={1}, children={2}, child_jobs={3}".format(

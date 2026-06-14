@@ -27,6 +27,25 @@ RIGHT_RP_TOKENS = [
     "RIGHTEND",
 ]
 
+LOCAL_FIELD_TARGETS = [
+    ("S", "stress"),
+    ("CPRESS", "contact_pressure"),
+    ("COPEN", "contact_opening"),
+    ("CSLIP1", "contact_slip"),
+    ("CSLIP2", "contact_slip"),
+    ("CSHEAR1", "contact_shear"),
+    ("CSHEAR2", "contact_shear"),
+    ("CSTATUS", "contact_status"),
+]
+
+MAX_LOCAL_FIELD_FRAMES_PER_STEP = 25
+MAX_LOCAL_FIELD_VALUES_PER_FRAME = 20000
+
+try:
+    STRING_TYPES = (basestring,)
+except NameError:
+    STRING_TYPES = (str,)
+
 
 def path_text(path):
     return os.fspath(path) if hasattr(os, "fspath") else str(path)
@@ -95,12 +114,17 @@ def update_result_summary(job_dir, extraction_summary):
     summary_path = os.path.join(job_dir, "result_summary.json")
     summary = load_json(summary_path, default={}) or {}
     summary["odb_extraction"] = extraction_summary
+    local_field_summary = extraction_summary.get("local_field_summary")
+    if isinstance(local_field_summary, dict):
+        summary["odb_local_field_summary"] = local_field_summary
     quality = build_result_quality(extraction_summary)
     summary["abaqus_result_quality"] = quality
     if extraction_summary.get("status") == "extracted":
         summary["source"] = "SCLAS_ABAQUS_ODB_EXTRACTOR"
         summary["status"] = "completed"
-        summary["num_points"] = extraction_summary.get("rows_written", summary.get("num_points"))
+        rows_written = extraction_summary.get("rows_written", summary.get("rows_written", summary.get("num_points")))
+        summary["num_points"] = rows_written
+        summary["rows_written"] = rows_written
         summary["note"] = "result_data.csv was updated from Abaqus ODB reference-point outputs."
         readiness = summary.get("backend_readiness")
         if isinstance(readiness, dict):
@@ -118,6 +142,238 @@ def scalar_component(data, index):
         return float(data)
     except IndexError:
         return None
+
+
+def numeric_components(data):
+    if isinstance(data, STRING_TYPES):
+        return []
+    try:
+        return [float(data)]
+    except (TypeError, ValueError):
+        pass
+    try:
+        iterator = iter(data)
+    except TypeError:
+        return []
+    values = []
+    for item in iterator:
+        try:
+            values.append(float(item))
+        except (TypeError, ValueError):
+            continue
+    return values
+
+
+def update_range(summary, value):
+    if value is None:
+        return
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return
+    current_min = summary.get("min")
+    current_max = summary.get("max")
+    current_abs = summary.get("abs_max")
+    if current_min is None or value < current_min:
+        summary["min"] = value
+    if current_max is None or value > current_max:
+        summary["max"] = value
+    abs_value = abs(value)
+    if current_abs is None or abs_value > current_abs:
+        summary["abs_max"] = abs_value
+
+
+def update_named_max(summary, key, value):
+    if value is None:
+        return
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return
+    current = summary.get(key)
+    if current is None or value > current:
+        summary[key] = value
+
+
+def field_target_category(output_name):
+    upper = output_name.upper()
+    for target, category in LOCAL_FIELD_TARGETS:
+        if upper == target:
+            return category
+    return "other"
+
+
+def selected_frames(step):
+    frames = list(step.frames)
+    if len(frames) <= MAX_LOCAL_FIELD_FRAMES_PER_STEP:
+        return frames, False
+    return frames[-MAX_LOCAL_FIELD_FRAMES_PER_STEP:], True
+
+
+def matching_field_output_names(output_names, target):
+    target_upper = target.upper()
+    matches = []
+    for name in output_names:
+        upper = name.upper()
+        if upper == target_upper or upper.startswith(target_upper + " ") or upper.startswith(target_upper + "\t"):
+            matches.append(name)
+    return matches
+
+
+def summarize_local_field_value(variable_summary, value):
+    numeric = numeric_components(getattr(value, "data", None))
+    if not numeric:
+        variable_summary["non_numeric_values"] = variable_summary.get("non_numeric_values", 0) + 1
+        return
+    variable_summary["value_count"] = variable_summary.get("value_count", 0) + 1
+    variable_summary["component_count"] = variable_summary.get("component_count", 0) + len(numeric)
+    for component in numeric:
+        update_range(variable_summary, component)
+    for invariant_name in ["mises", "maxPrincipal", "minPrincipal", "press"]:
+        try:
+            invariant_value = getattr(value, invariant_name)
+        except Exception:
+            continue
+        try:
+            invariant_value = float(invariant_value)
+        except (TypeError, ValueError):
+            continue
+        key = invariant_name + "_max"
+        update_named_max(variable_summary, key, invariant_value)
+
+
+def local_field_metrics(target_outputs):
+    metrics = {
+        "stress_mises_max": None,
+        "stress_component_abs_max": None,
+        "contact_pressure_max": None,
+        "contact_opening_abs_max": None,
+        "slip_abs_max": None,
+        "contact_shear_abs_max": None,
+        "contact_status_max": None,
+    }
+    stress = target_outputs.get("S", {})
+    if stress.get("status") == "present":
+        metrics["stress_mises_max"] = stress.get("mises_max")
+        metrics["stress_component_abs_max"] = stress.get("abs_max")
+    cpress = target_outputs.get("CPRESS", {})
+    if cpress.get("status") == "present":
+        metrics["contact_pressure_max"] = cpress.get("max")
+    copen = target_outputs.get("COPEN", {})
+    if copen.get("status") == "present":
+        metrics["contact_opening_abs_max"] = copen.get("abs_max")
+    for key in ["CSLIP1", "CSLIP2"]:
+        value = target_outputs.get(key, {})
+        if value.get("status") == "present":
+            current = metrics.get("slip_abs_max")
+            candidate = value.get("abs_max")
+            if candidate is not None and (current is None or candidate > current):
+                metrics["slip_abs_max"] = candidate
+    for key in ["CSHEAR1", "CSHEAR2"]:
+        value = target_outputs.get(key, {})
+        if value.get("status") == "present":
+            current = metrics.get("contact_shear_abs_max")
+            candidate = value.get("abs_max")
+            if candidate is not None and (current is None or candidate > current):
+                metrics["contact_shear_abs_max"] = candidate
+    cstatus = target_outputs.get("CSTATUS", {})
+    if cstatus.get("status") == "present":
+        metrics["contact_status_max"] = cstatus.get("max")
+    return metrics
+
+
+def summarize_local_fields(steps):
+    summary = {
+        "checked": True,
+        "status": "checked",
+        "frame_scan_policy": "selected SCLAS steps; all frames unless more than {0}, then last {0} frames per step".format(MAX_LOCAL_FIELD_FRAMES_PER_STEP),
+        "value_scan_limit_per_frame": MAX_LOCAL_FIELD_VALUES_PER_FRAME,
+        "steps_checked": [],
+        "available_field_outputs": {},
+        "target_outputs": {},
+        "present_target_outputs": [],
+        "missing_target_outputs": [],
+        "warnings": [],
+    }
+    target_names = [name for name, _category in LOCAL_FIELD_TARGETS]
+    target_outputs = {}
+    for target, category in LOCAL_FIELD_TARGETS:
+        target_outputs[target] = {
+            "status": "missing",
+            "category": category,
+            "frames_checked": 0,
+            "frames_with_values": 0,
+            "value_count": 0,
+            "component_count": 0,
+            "non_numeric_values": 0,
+            "min": None,
+            "max": None,
+            "abs_max": None,
+        }
+
+    try:
+        for step_name, step in steps:
+            frames, truncated = selected_frames(step)
+            summary["steps_checked"].append({
+                "step": step_name,
+                "frames_total": len(step.frames),
+                "frames_checked": len(frames),
+                "truncated_to_last_frames": truncated,
+            })
+            step_outputs = {}
+            for frame in frames:
+                output_names = list(frame.fieldOutputs.keys())
+                for output_name in output_names:
+                    step_outputs[output_name] = True
+                for target in target_names:
+                    target_summary = target_outputs[target]
+                    target_summary["frames_checked"] += 1
+                    actual_names = matching_field_output_names(output_names, target)
+                    if not actual_names:
+                        continue
+                    for actual_name in actual_names:
+                        try:
+                            values = frame.fieldOutputs[actual_name].values
+                        except Exception as exc:
+                            target_summary["warnings"] = target_summary.get("warnings", [])
+                            target_summary["warnings"].append("Could not read {0}: {1}".format(actual_name, exc))
+                            continue
+                        try:
+                            value_length = len(values)
+                        except Exception:
+                            value_length = 0
+                        if value_length:
+                            target_summary["status"] = "present"
+                            output_names_seen = target_summary.get("output_names", [])
+                            if actual_name not in output_names_seen:
+                                output_names_seen.append(actual_name)
+                                target_summary["output_names"] = output_names_seen
+                            target_summary["frames_with_values"] += 1
+                        count = 0
+                        for value in values:
+                            summarize_local_field_value(target_summary, value)
+                            count += 1
+                            if count >= MAX_LOCAL_FIELD_VALUES_PER_FRAME:
+                                target_summary["truncated_values"] = True
+                                break
+            summary["available_field_outputs"][step_name] = sorted(step_outputs.keys())
+    except Exception as exc:
+        summary["status"] = "partial"
+        summary["warnings"].append("Local field summary failed partially: {0}".format(exc))
+
+    present = []
+    missing = []
+    for target, _category in LOCAL_FIELD_TARGETS:
+        target_summary = target_outputs[target]
+        if target_summary.get("status") == "present":
+            present.append(target)
+        else:
+            missing.append(target)
+    summary["target_outputs"] = target_outputs
+    summary["present_target_outputs"] = present
+    summary["missing_target_outputs"] = missing
+    summary["metrics"] = local_field_metrics(target_outputs)
+    return summary
 
 
 def find_step(odb, preferred_name):
@@ -293,6 +549,7 @@ def extract_odb(odb_path, job_dir, input_data_path):
                 "odb_file": os.path.basename(odb_path),
             }, []
 
+        local_field_summary = summarize_local_fields(steps)
         history_rows = []
         field_rows = []
         history_info = None
@@ -329,6 +586,7 @@ def extract_odb(odb_path, job_dir, input_data_path):
                 "steps": step_names,
                 "node_set": node_set_name,
                 "available_field_outputs": available_field_outputs,
+                "local_field_summary": local_field_summary,
                 "history_rows_available": len(history_rows),
                 "field_rows_available": len(field_rows),
                 "history_region_count": len(steps[-1][1].historyRegions.keys()),
@@ -346,6 +604,7 @@ def extract_odb(odb_path, job_dir, input_data_path):
             "field_rows_available": len(field_rows),
             "moment_units_assumed": "N-mm converted to kN-m",
             "curvature_definition": "UR2 / effective_length_m",
+            "local_field_summary": local_field_summary,
         }
         if method_info:
             summary.update(method_info)
