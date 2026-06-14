@@ -1288,6 +1288,42 @@ the beam-tangent curvature warning. The `.msg` files still report zero analysis
 warnings and zero numerical-problem warnings, so these are completed-job input
 quality warnings rather than current blocking errors.
 
+## Lab Mesh Quality Probe - 2026-06-14 KST
+
+After the contact cleanup, the remaining actual Abaqus input warnings were
+investigated:
+
+- `WarnElemDistorted` samples are consistently concentrated in
+  `BeddingEquivalent` elements.
+- `WarnBeamCurvature1` and `WarnBeamTwist` are tied to the helical B31 armour
+  beam elements and Abaqus' beam-normal/default-curvature checks.
+- The `.msg` files still report `0 WARNING MESSAGES DURING ANALYSIS` and
+  `0 ANALYSIS WARNINGS ARE NUMERICAL PROBLEM MESSAGES`.
+
+A low-risk mesh-control probe was tried locally but not committed:
+
+- The runner temporarily requested `HEX` / `SWEEP` mesh controls for extruded
+  circular and annular solids.
+- Abaqus accepted the request; the manifest in
+  `jobs\SCLAS_jobs\small_smoke_20260614_133415` showed
+  `solid_mesh_control_scaffold_status=applied` for all solid components.
+- The SmallSmoke still completed and ODB extraction still wrote two rows.
+- The warning taxonomy did not improve:
+
+```text
+distorted_elements=2
+beam_curvature=2
+other_warning=5
+overconstraint_check=2
+```
+
+Because the probe had no stabilizing effect, the code change was reverted and
+not committed. Do not retry plain `HEX` / `SWEEP` mesh controls as the next
+fix. The next useful mesh-quality task should inspect a real remeshing strategy
+for the thin bedding annulus, such as partitioning the annular cross-section,
+using a more appropriate thin-layer representation, or changing the scaffold
+geometry for bedding after confirming the impact on the endpoint moment curve.
+
 ## Important Files
 
 ```text
