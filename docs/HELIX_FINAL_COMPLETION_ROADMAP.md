@@ -57,6 +57,9 @@ These areas can be pushed forward without running Abaqus locally:
    - Add synthetic jobs for every important result class:
      FAST preview, SmallSmoke, endpoint sweep, continuous CurveV0, contact
      preload/closure, and local ODB field outputs.
+   - Keep a positive research-ready fixture that proves nonzero CPRESS/slip,
+     required ODB local fields, aligned CurveV0 comparison, result intake, and
+     the acceptance gate can all reach the ready/accepted path.
    - Ensure py_compile, self-check, curve comparison, and GUI smoke stay green.
 
 6. Research interpretation support

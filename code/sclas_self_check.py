@@ -795,6 +795,192 @@ def write_minimal_job(job_dir: Path, source: str) -> None:
     (job_dir / "result_summary.json").write_text(json.dumps(summary, indent=4), encoding="utf-8")
 
 
+def write_curve_job(job_dir: Path, source: str, curve_class: str, rows: list, local_fields: bool = False) -> None:
+    job_dir.mkdir(parents=True, exist_ok=True)
+    with (job_dir / "result_data.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(["curvature_1_per_m", "moment_kn_m"])
+        writer.writerows(rows)
+
+    odb_summary = {
+        "status": "extracted",
+        "method": "history",
+        "rows_written": len(rows),
+    }
+    summary = {
+        "source": source,
+        "status": "completed",
+        "rows_written": len(rows),
+        "num_points": len(rows),
+        "max_abs_moment_kn_m": max(abs(float(row[1])) for row in rows),
+        "result_contract": {
+            "csv_file": "result_data.csv",
+            "required_columns": ["curvature_1_per_m", "moment_kn_m"],
+            "summary_file": "result_summary.json",
+            "primary_result": "bending moment-curvature loop",
+        },
+        "mesh_status": {
+            "status": "abaqus_mesh_created",
+        },
+        "backend_readiness": {
+            "bending_stick_slip": {
+                "requested": True,
+                "status": "research_ready_fixture",
+            },
+            "source": source,
+        },
+        "odb_extraction": odb_summary,
+        "abaqus_result_quality": {
+            "curve_class": curve_class,
+            "is_research_curve": True,
+            "backend_readiness_status": "research_ready_fixture",
+        },
+    }
+    if local_fields:
+        summary["odb_local_field_summary"] = {
+            "checked": True,
+            "status": "extracted",
+            "present_target_outputs": ["S", "CPRESS", "COPEN", "CSLIP1", "CSLIP2"],
+            "missing_target_outputs": [],
+            "available_field_outputs": {
+                "SCLAS_CyclicBendingStep": ["S", "CPRESS", "COPEN", "CSLIP1", "CSLIP2"],
+            },
+            "metrics": {
+                "stress_mises_max": 215.0,
+                "contact_pressure_max": 1.7,
+                "contact_opening_abs_max": 0.002,
+                "slip_abs_max": 0.0045,
+            },
+    }
+    manifest = {
+        "status": "abaqus_mesh_created",
+        "abaqus_files": ["research_ready_fixture.inp"],
+        "contact_region_scaffold_status": "created",
+        "contact_interaction_scaffold_status": "created",
+        "contact_pair_scaffold_status": "created",
+        "boundary_condition_scaffold_status": "created",
+        "contact_initial_clearance_summary": {
+            "status": "checked",
+            "checked_pair_count": 2,
+            "gapped_pair_count": 0,
+            "touching_pair_count": 2,
+            "overclosed_pair_count": 0,
+            "min_initial_clearance_mm": 0.0,
+            "max_initial_clearance_mm": 0.0,
+            "residual_pressure_preload_status": "applied",
+            "residual_contact_pressure_mpa": 0.3,
+        },
+    }
+    (job_dir / "result_summary.json").write_text(json.dumps(summary, indent=4), encoding="utf-8")
+    (job_dir / "odb_extraction_summary.json").write_text(json.dumps(odb_summary, indent=4), encoding="utf-8")
+    (job_dir / "abaqus_mesh_manifest.json").write_text(json.dumps(manifest, indent=4), encoding="utf-8")
+    (job_dir / "research_ready_fixture.inp").write_text("*Heading\n** synthetic accepted fixture\n", encoding="utf-8")
+    (job_dir / "solver_stdout.txt").write_text("Abaqus JOB research_ready_fixture COMPLETED\n", encoding="utf-8")
+
+
+def write_research_ready_fixture(root: Path) -> tuple:
+    endpoint_rows = [
+        ["-0.008", "-0.32"],
+        ["-0.004", "-0.16"],
+        ["0", "0"],
+        ["0.004", "0.16"],
+        ["0.008", "0.32"],
+    ]
+    continuous_rows = [
+        ["0", "0"],
+        ["0.004", "0.16"],
+        ["0.008", "0.32"],
+        ["0", "0"],
+        ["-0.008", "-0.32"],
+        ["-0.004", "-0.16"],
+        ["0", "0"],
+    ]
+    endpoint_job = root / "job_research_ready_endpoint"
+    continuous_job = root / "job_research_ready_continuous"
+    write_curve_job(endpoint_job, "SCLAS_CURVE_V0_ENDPOINT_SWEEP", "endpoint_sweep_curve_v0", endpoint_rows)
+    write_curve_job(continuous_job, "SCLAS_ABAQUS_ODB_EXTRACTOR", "multi_point_curve_v0", continuous_rows, local_fields=True)
+    comparison = {
+        "status": "aligned",
+        "endpoint_job": str(endpoint_job),
+        "continuous_job": str(continuous_job),
+        "common_abs_curvature_1_per_m": 0.008,
+        "peak_moment_ratio_continuous_over_endpoint": 1.0,
+        "warnings": [],
+        "errors": [],
+        "recommended_next_action": "Endpoint and continuous CurveV0 are aligned; proceed to calibration reporting.",
+    }
+    (continuous_job / "curve_v0_comparison_report.json").write_text(
+        json.dumps(comparison, indent=4),
+        encoding="utf-8",
+    )
+    newer_time = datetime.now().timestamp() + 10
+    for path in [
+        continuous_job / "result_data.csv",
+        continuous_job / "result_summary.json",
+        continuous_job / "abaqus_mesh_manifest.json",
+        continuous_job / "curve_v0_comparison_report.json",
+    ]:
+        os.utime(path, (newer_time, newer_time))
+    return endpoint_job, continuous_job
+
+
+def check_research_ready_acceptance_fixture() -> None:
+    root = unique_self_check_dir("self_check_research_ready_root")
+    endpoint_job, continuous_job = write_research_ready_fixture(root)
+
+    accept_proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_acceptance_gate.py"),
+            "--job-root",
+            str(root),
+            "--json",
+            "--strict",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if accept_proc.returncode != 0:
+        fail("Research-ready acceptance fixture failed:\n" + accept_proc.stdout + accept_proc.stderr)
+    acceptance = json.loads(accept_proc.stdout)
+    if acceptance.get("overall_status") != "accepted":
+        fail("Acceptance gate did not accept the research-ready fixture: " + json.dumps(acceptance, indent=2))
+    gate_statuses = {item.get("name"): item.get("status") for item in acceptance.get("gates", [])}
+    for name in ["result_contract", "curve_v0_continuous_path", "contact_preload_closure", "odb_local_fields"]:
+        if gate_statuses.get(name) != "pass":
+            fail("Research-ready fixture gate did not pass: {0}".format(name))
+    if Path(acceptance.get("latest_job", "")).resolve() != continuous_job.resolve():
+        fail("Acceptance gate did not select the continuous research-ready fixture")
+
+    intake_proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_result_intake.py"),
+            "--job-root",
+            str(root),
+            "--json",
+            "--strict",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if intake_proc.returncode != 0:
+        fail("Research-ready result intake fixture failed:\n" + intake_proc.stdout + intake_proc.stderr)
+    intake = json.loads(intake_proc.stdout)
+    if intake.get("status") != "ready":
+        fail("Result intake did not classify the research-ready fixture as ready")
+    if intake.get("blocked_items") or intake.get("review_items"):
+        fail("Research-ready fixture reported blocked/review intake items")
+    if Path(intake.get("job_dir", "")).resolve() != continuous_job.resolve():
+        fail("Result intake did not select the continuous research-ready fixture")
+
+    print(f"[OK] Research-ready acceptance fixture: endpoint={endpoint_job.name}, continuous={continuous_job.name}")
+
+
 def check_latest_job_filtering() -> None:
     root = unique_self_check_dir("self_check_filter_root")
     user_job = root / "job_filter_user"
@@ -1170,6 +1356,7 @@ def main() -> int:
         check_latest_job_filtering,
         check_project_status,
         check_acceptance_gate,
+        check_research_ready_acceptance_fixture,
         check_result_intake,
         check_handoff_snapshot,
         check_next_prompt,
