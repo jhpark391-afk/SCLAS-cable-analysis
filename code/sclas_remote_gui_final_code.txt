@@ -615,6 +615,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Project Status": "프로젝트 상태",
             "Job Index": "작업 목록",
             "Load best": "추천 작업 불러오기",
+            "Acceptance": "통과 판정",
             "Handoff": "인수인계",
             "Open folder": "폴더 열기",
             "No result jobs found": "결과 작업 없음",
@@ -1413,6 +1414,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_project_status = QPushButton("Project Status")
         self.btn_job_index = QPushButton("Job Index")
         self.btn_load_best_job = QPushButton("Load best")
+        self.btn_acceptance_gate = QPushButton("Acceptance")
         self.btn_handoff_snapshot = QPushButton("Handoff")
         self.btn_open_job_folder = QPushButton("Open folder")
         self.btn_refresh_jobs.setToolTip("Scan the job root for recent SCLAS result folders.")
@@ -1422,6 +1424,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_project_status.setToolTip("Show the overall HELIX/SCLAS project status and next action.")
         self.btn_job_index.setToolTip("Show a handoff inventory of recent real SCLAS job folders.")
         self.btn_load_best_job.setToolTip("Load the best current job candidate selected by the Job Index readiness score.")
+        self.btn_acceptance_gate.setToolTip("Evaluate whether the latest Abaqus result is research-ready.")
         self.btn_handoff_snapshot.setToolTip("Save and show a compact handoff snapshot for the next Codex session.")
         self.btn_open_job_folder.setToolTip("Open the selected job folder in Finder or Explorer.")
         self.btn_refresh_jobs.clicked.connect(self.refresh_job_history)
@@ -1431,6 +1434,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_project_status.clicked.connect(self.show_project_status)
         self.btn_job_index.clicked.connect(self.show_job_index)
         self.btn_load_best_job.clicked.connect(self.load_best_job)
+        self.btn_acceptance_gate.clicked.connect(self.show_acceptance_gate)
         self.btn_handoff_snapshot.clicked.connect(self.show_handoff_snapshot)
         self.btn_open_job_folder.clicked.connect(self.open_selected_job_folder)
         history_layout.addWidget(self.job_history_combo, 0, 0, 1, 3)
@@ -1442,7 +1446,8 @@ class SCLASRemoteGUI(QMainWindow):
         history_layout.addWidget(self.btn_open_job_folder, 2, 2)
         history_layout.addWidget(self.btn_job_index, 3, 0, 1, 2)
         history_layout.addWidget(self.btn_load_best_job, 3, 2)
-        history_layout.addWidget(self.btn_handoff_snapshot, 4, 0, 1, 3)
+        history_layout.addWidget(self.btn_acceptance_gate, 4, 0, 1, 2)
+        history_layout.addWidget(self.btn_handoff_snapshot, 4, 2)
         right.addWidget(self.history_box)
 
         left_scroll = self.scroll_panel(left_panel, min_width=360)
@@ -2184,6 +2189,35 @@ class SCLASRemoteGUI(QMainWindow):
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Load best job error", str(exc))
+
+    def show_acceptance_gate(self) -> None:
+        try:
+            from sclas_acceptance_gate import build_gate, human_report, save_markdown_report, save_report
+
+            job_root = Path(self.job_root_input.text().strip()).expanduser()
+            report = build_gate(job_root)
+            saved_path = save_report(report)
+            report["saved_report"] = str(saved_path)
+            saved_markdown_path = save_markdown_report(report)
+            report["saved_markdown_report"] = str(saved_markdown_path)
+            self.last_summary_data = {}
+            self.summary_text.setPlainText(human_report(report))
+            status = report.get("overall_status")
+            tone = "good" if status == "accepted" else "warn" if status == "review" else "error"
+            label = "Result: ready" if status in ("accepted", "review") else "Result: error"
+            self.set_badge(self.lbl_result_status, label, tone)
+            self.log(
+                "[ACCEPT] Acceptance gate | status={0} | latest={1} | next={2}".format(
+                    status,
+                    report.get("latest_job", "-"),
+                    report.get("recommended_next_action", "-"),
+                )
+            )
+            self.log(f"[ACCEPT] Saved report: {saved_path}")
+            self.log(f"[ACCEPT] Saved Markdown report: {saved_markdown_path}")
+        except Exception as exc:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
+            QMessageBox.critical(self, "Acceptance gate error", str(exc))
 
     def show_handoff_snapshot(self) -> None:
         try:
