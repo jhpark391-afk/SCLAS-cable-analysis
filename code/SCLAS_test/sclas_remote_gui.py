@@ -2024,6 +2024,11 @@ class SCLASRemoteGUI(QMainWindow):
             endpoint = latest_job(job_root, "endpoint")
             continuous = latest_job(job_root, "continuous")
             report = compare(endpoint, continuous)
+            endpoint_path = Path(endpoint["path"]) / "result_data.csv"
+            continuous_path = Path(continuous["path"]) / "result_data.csv"
+            self.clear_compare_curves()
+            self.load_result_bundle(endpoint_path, source="CURVEV0_ENDPOINT")
+            self.add_compare_curve(continuous_path, label="continuous CurveV0")
             self.last_summary_data = {}
             self.summary_text.setPlainText(human_report(report))
             status = report.get("status")
@@ -2261,21 +2266,7 @@ class SCLASRemoteGUI(QMainWindow):
         if not path:
             return
         try:
-            k, m = read_result_csv(Path(path))
-            metrics = make_metrics(k, m, source=Path(path).parent.name or "COMPARE_CSV")
-            color_cycle = ["#e08f3e", "#10b981", "#d946ef", "#f43f5e"]
-            color = color_cycle[len(self.compare_items) % len(color_cycle)]
-            item = self.plot_canvas.plot(
-                k,
-                m,
-                pen=pg.mkPen(color=color, width=2.2, style=Qt.DashLine),
-                name=Path(path).parent.name,
-            )
-            self.compare_items.append(item)
-            self.compare_metrics.append(metrics)
-            self.plot_canvas.autoRange()
-            self.log(f"[RESULT] Comparison curve added: {path}")
-            self.update_compare_panel()
+            self.add_compare_curve(Path(path))
             compare_text = (
                 f"결과: 비교 {len(self.compare_items)}개"
                 if self.ui_language == "KO"
@@ -2289,6 +2280,25 @@ class SCLASRemoteGUI(QMainWindow):
             )
         except Exception as exc:
             QMessageBox.critical(self, "Compare CSV error", str(exc))
+
+    def add_compare_curve(self, csv_path: Path, label: str = "") -> dict:
+        k, m = read_result_csv(csv_path)
+        name = label or csv_path.parent.name or "COMPARE_CSV"
+        metrics = make_metrics(k, m, source=name)
+        color_cycle = ["#e08f3e", "#10b981", "#d946ef", "#f43f5e"]
+        color = color_cycle[len(self.compare_items) % len(color_cycle)]
+        item = self.plot_canvas.plot(
+            k,
+            m,
+            pen=pg.mkPen(color=color, width=2.2, style=Qt.DashLine),
+            name=name,
+        )
+        self.compare_items.append(item)
+        self.compare_metrics.append(metrics)
+        self.plot_canvas.autoRange()
+        self.log(f"[RESULT] Comparison curve added: {csv_path}")
+        self.update_compare_panel()
+        return metrics
 
     def clear_compare_curves(self) -> None:
         for item in self.compare_items:

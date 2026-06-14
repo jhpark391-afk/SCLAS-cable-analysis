@@ -2149,6 +2149,11 @@ human-readable comparison report in the result summary panel.
 The button reports `aligned`, `review`, or `blocked` through the result badge
 and logs the peak moment ratio for quick triage.
 
+The same button now also updates the graph: it loads the endpoint sweep as the
+primary curve and overlays the continuous CurveV0 result as a dashed comparison
+curve. This makes the moment-scale mismatch visible immediately instead of only
+reporting it in text.
+
 Verification on Mac:
 
 ```bash
