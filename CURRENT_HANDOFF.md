@@ -1743,6 +1743,10 @@ Interpretation:
 - The previous `WarnElemDistorted` class is removed from SmallSmoke and CurveV0.
 - The next warning-reduction target is B31 helical beam normal/curvature/twist
   handling, not annular solid distortion.
+- Mac-side offline diagnostics now exposes B31-specific warning details under
+  `b31_beam_warning_details` for both single Abaqus jobs and CurveV0 sweep
+  parents. It separately aggregates `WarnBeamCurvature1` and `WarnBeamTwist`
+  and recommends a minimal B31 helix probe when those warnings remain.
 
 ## Important Files
 

@@ -37,6 +37,8 @@ NOTABLE_LOG_PATTERNS = [
     "REF NODE",
 ]
 
+B31_BEAM_WARNING_SETS = ["WarnBeamCurvature1", "WarnBeamTwist"]
+
 
 def read_text(path: Path) -> str:
     try:
@@ -189,6 +191,8 @@ def classify_solver_warning(text):
         return "distorted_elements"
     if "BEAM" in upper and "CURVATURE" in upper:
         return "beam_curvature"
+    if "BEAM" in upper and "TWIST" in upper:
+        return "beam_twist"
     if "CUT-BACK" in upper or "TOO MANY" in upper or "EXCESSIVE" in upper:
         return "increment_cutback_or_excessive_reporting"
     if "OVERCONSTRAINT" in upper:
@@ -198,6 +202,51 @@ def classify_solver_warning(text):
     if "WARNING" in upper:
         return "other_warning"
     return "other_notable"
+
+
+def b31_beam_warning_details(job_dir: Path):
+    details = {
+        "checked": False,
+        "files": [],
+        "warning_sets": {},
+        "total_warning_sets": 0,
+        "actual_warning_categories": {},
+        "first_warning_context": None,
+        "recommended_probe": "If these remain after annular mesh cleanup, isolate a minimal B31 helix and sweep segment count, beam orientation, lay angle, and helix radius.",
+    }
+    log_files = []
+    for pattern in ["*.dat", "*.msg", "*.sta", "solver_stdout.txt"]:
+        log_files.extend(sorted(job_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True))
+    seen = set()
+    unique_logs = []
+    for path in log_files:
+        if path not in seen:
+            unique_logs.append(path)
+            seen.add(path)
+    if not unique_logs:
+        return details
+
+    details["checked"] = True
+    details["files"] = [path.name for path in unique_logs]
+    for path in unique_logs:
+        lines = read_text(path).splitlines()
+        for idx, line in enumerate(lines):
+            upper = line.upper()
+            for warning_set in B31_BEAM_WARNING_SETS:
+                if warning_set.upper() in upper:
+                    details["warning_sets"][warning_set] = details["warning_sets"].get(warning_set, 0) + 1
+                    details["total_warning_sets"] += 1
+                    if details["first_warning_context"] is None:
+                        details["first_warning_context"] = {
+                            "file": path.name,
+                            "line": idx + 1,
+                            "context": context_block(lines, idx),
+                        }
+            if is_actual_warning_line(line):
+                category = classify_solver_warning(line)
+                if category in {"beam_curvature", "beam_twist"}:
+                    details["actual_warning_categories"][category] = details["actual_warning_categories"].get(category, 0) + 1
+    return details
 
 
 def merge_counts(target, source):
@@ -406,6 +455,13 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
             "distorted_sample_count": 0,
             "distorted_sample_min_angle": None,
         },
+        "b31_beam_warning_details": {
+            "warning_sets": {},
+            "total_warning_sets": 0,
+            "actual_warning_categories": {},
+            "first_warning_context": None,
+            "recommended_probe": "If these remain after annular mesh cleanup, isolate a minimal B31 helix and sweep segment count, beam orientation, lay angle, and helix radius.",
+        },
     }
     report["endpoint_sweep_children"] = section
     if not isinstance(child_jobs, list):
@@ -511,6 +567,7 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
         child_detail["warning_categories"] = log_scan.get("warning_categories", {})
         child_detail["note_categories"] = log_scan.get("note_categories", {})
         child_detail["mesh_quality_warning_details"] = mesh_quality_warning_details(child_path)
+        child_detail["b31_beam_warning_details"] = b31_beam_warning_details(child_path)
         if log_scan["blocking_matches"]:
             child_detail["first_blocking_log_hit"] = log_scan["blocking_matches"][0]
         section["blocking_log_hits"] += child_detail["blocking_log_hits"]
@@ -537,6 +594,13 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
             "distorted_sample_min_angle",
             child_mesh_quality.get("distorted_sample_min_angle"),
         )
+        child_b31 = child_detail["b31_beam_warning_details"]
+        aggregate_b31 = section["b31_beam_warning_details"]
+        merge_counts(aggregate_b31["warning_sets"], child_b31.get("warning_sets", {}))
+        aggregate_b31["total_warning_sets"] += child_b31.get("total_warning_sets", 0)
+        merge_counts(aggregate_b31["actual_warning_categories"], child_b31.get("actual_warning_categories", {}))
+        if aggregate_b31["first_warning_context"] is None and child_b31.get("first_warning_context"):
+            aggregate_b31["first_warning_context"] = child_b31.get("first_warning_context")
 
         if log_scan["failed"] or log_scan["blocking_matches"]:
             add_issue(report, "error", "Endpoint sweep child solver logs contain a blocking failure", child_detail)
@@ -752,6 +816,7 @@ def inspect_solver_logs(job_dir: Path, report: dict) -> None:
     section["warning_categories"] = keyword_scan.get("warning_categories", {})
     section["note_categories"] = keyword_scan.get("note_categories", {})
     section["mesh_quality_warning_details"] = mesh_quality_warning_details(job_dir)
+    section["b31_beam_warning_details"] = b31_beam_warning_details(job_dir)
 
     def collect_matches(pattern_items, limit):
         pattern = re.compile("|".join(re.escape(item) for item in pattern_items), re.IGNORECASE)
@@ -798,6 +863,9 @@ def summarize_report(report: dict) -> None:
     summary = report.get("result_summary_json", {})
     sweep_shape = report.get("endpoint_sweep_shape", {})
     sweep_children = report.get("endpoint_sweep_children", {})
+    sweep_b31 = sweep_children.get("b31_beam_warning_details", {}) if isinstance(sweep_children, dict) else {}
+    solver_b31 = logs.get("b31_beam_warning_details", {}) if isinstance(logs, dict) else {}
+    b31_warning_count = int(sweep_b31.get("total_warning_sets") or solver_b31.get("total_warning_sets") or 0)
     log_match_text = "\n".join(
         "{0}\n{1}".format(item.get("text", ""), item.get("context", ""))
         for item in logs.get("matches", [])
@@ -816,7 +884,10 @@ def summarize_report(report: dict) -> None:
     elif summary.get("source") == "SCLAS_CURVE_V0_ENDPOINT_SWEEP":
         if int(summary.get("rows_written") or 0) >= 5:
             if sweep_shape.get("shape_checks_passed") and sweep_children.get("all_children_deep_validated"):
-                action = "Endpoint sweep curve-v0 aggregated at least five validated ODB child endpoints, passed basic shape checks, and deep-validated child ODB/log artifacts; validate it against a continuous bending path before research use."
+                if b31_warning_count:
+                    action = "Endpoint sweep curve-v0 is valid, but B31 helical beam curvature/twist warnings remain; investigate a minimal B31 helix probe before changing the full cable model."
+                else:
+                    action = "Endpoint sweep curve-v0 aggregated at least five validated ODB child endpoints, passed basic shape checks, and deep-validated child ODB/log artifacts; validate it against a continuous bending path before research use."
             elif sweep_shape.get("shape_checks_passed"):
                 action = "Endpoint sweep curve-v0 passed parent shape checks, but inspect child deep-validation diagnostics before promoting it."
             else:
@@ -825,7 +896,10 @@ def summarize_report(report: dict) -> None:
             action = "Endpoint sweep completed partially; add more validated ODB child endpoints or reduce the curvature factors further."
     elif logs.get("completed"):
         if summary.get("abaqus_curve_class") == "two_point_odb_smoke":
-            action = "Stable two-row Abaqus ODB smoke completed; keep it as the bridge baseline and design the multi-point curve as a separate backend task."
+            if b31_warning_count:
+                action = "Stable two-row Abaqus ODB smoke completed; remaining B31 helical beam curvature/twist warnings should be isolated in a minimal helix probe."
+            else:
+                action = "Stable two-row Abaqus ODB smoke completed; keep it as the bridge baseline and design the multi-point curve as a separate backend task."
         elif summary.get("abaqus_curve_class") == "endpoint_sweep_curve_v0":
             action = "Endpoint sweep curve-v0 was extracted; validate it against a continuous bending path before treating it as research data."
         elif summary.get("abaqus_is_research_curve"):
@@ -928,7 +1002,9 @@ def markdown_report(report: dict) -> str:
     sweep_shape_section = report.get("endpoint_sweep_shape", {})
     sweep_children_section = report.get("endpoint_sweep_children", {})
     sweep_mesh_quality = sweep_children_section.get("mesh_quality_warning_details", {}) if isinstance(sweep_children_section, dict) else {}
+    sweep_b31_quality = sweep_children_section.get("b31_beam_warning_details", {}) if isinstance(sweep_children_section, dict) else {}
     solver_mesh_quality = logs_section.get("mesh_quality_warning_details", {}) if isinstance(logs_section, dict) else {}
+    solver_b31_quality = logs_section.get("b31_beam_warning_details", {}) if isinstance(logs_section, dict) else {}
     diagnostic_summary = report.get("diagnostic_summary", {})
     issue_counts = diagnostic_summary.get("issue_counts", {})
 
@@ -952,6 +1028,8 @@ def markdown_report(report: dict) -> str:
         ("Sweep warning categories", top_counts(sweep_children_section.get("warning_categories"))),
         ("Sweep note categories", top_counts(sweep_children_section.get("note_categories"))),
         ("Sweep mesh warning sets", top_counts(sweep_mesh_quality.get("warning_sets"))),
+        ("Sweep B31 warning sets", top_counts(sweep_b31_quality.get("warning_sets"))),
+        ("Sweep B31 warning total", scalar(sweep_b31_quality.get("total_warning_sets"))),
         ("Sweep distorted reported elements", scalar(sweep_mesh_quality.get("distorted_reported_element_count"))),
         ("Sweep distorted table parts", top_counts(sweep_mesh_quality.get("distorted_table_parts"))),
         ("Sweep distorted table min angle", scalar(sweep_mesh_quality.get("distorted_table_min_angle"))),
@@ -967,6 +1045,8 @@ def markdown_report(report: dict) -> str:
         ("Solver warning categories", top_counts(logs_section.get("warning_categories"))),
         ("Solver note categories", top_counts(logs_section.get("note_categories"))),
         ("Solver mesh warning sets", top_counts(solver_mesh_quality.get("warning_sets"))),
+        ("Solver B31 warning sets", top_counts(solver_b31_quality.get("warning_sets"))),
+        ("Solver B31 warning total", scalar(solver_b31_quality.get("total_warning_sets"))),
         ("Solver distorted reported elements", scalar(solver_mesh_quality.get("distorted_reported_element_count"))),
         ("Solver distorted table parts", top_counts(solver_mesh_quality.get("distorted_table_parts"))),
         ("Solver distorted table min angle", scalar(solver_mesh_quality.get("distorted_table_min_angle"))),

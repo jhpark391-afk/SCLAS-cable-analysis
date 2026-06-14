@@ -440,6 +440,10 @@ def check_endpoint_sweep_diagnostics() -> None:
                 "***WARNING: 2 elements are distorted. Either the isoparametric angles are",
                 "            out of the suggested limits. The elements have been identified in",
                 "            element set WarnElemDistorted.",
+                "***WARNING: THE CURVATURE OF SOME B31 BEAM ELEMENTS IS HIGH.",
+                "            THE ELEMENTS HAVE BEEN IDENTIFIED IN ELEMENT SET WarnBeamCurvature1.",
+                "***WARNING: THE TWIST OF SOME B31 BEAM ELEMENTS IS HIGH.",
+                "            THE ELEMENTS HAVE BEEN IDENTIFIED IN ELEMENT SET WarnBeamTwist.",
                 "",
                 "Distorted isoparametric elements",
                 "",
@@ -480,7 +484,7 @@ def check_endpoint_sweep_diagnostics() -> None:
     if any(item.get("severity") == "error" for item in report.get("issues", [])):
         fail("Endpoint sweep diagnostics reported errors: " + json.dumps(report.get("issues"), indent=2))
     action = report.get("diagnostic_summary", {}).get("recommended_next_action", "")
-    if "deep-validated child ODB/log artifacts" not in action:
+    if "B31 helical beam curvature/twist warnings remain" not in action:
         fail("Endpoint sweep diagnostics recommended the wrong next action: " + action)
     summary_section = report.get("result_summary_json", {})
     if summary_section.get("child_job_count") != 5 or summary_section.get("rows_written") != 5:
@@ -511,6 +515,14 @@ def check_endpoint_sweep_diagnostics() -> None:
         fail("Endpoint sweep diagnostics did not aggregate distorted table part counts")
     if mesh_quality.get("distorted_table_min_angle") != 42.0:
         fail("Endpoint sweep diagnostics did not aggregate distorted table min angle")
+    b31_quality = child_section.get("b31_beam_warning_details", {})
+    b31_sets = b31_quality.get("warning_sets", {})
+    if b31_sets.get("WarnBeamCurvature1") != 5 or b31_sets.get("WarnBeamTwist") != 5:
+        fail("Endpoint sweep diagnostics did not aggregate B31 beam warning sets")
+    if b31_quality.get("total_warning_sets") != 10:
+        fail("Endpoint sweep diagnostics did not count total B31 warning sets")
+    if not b31_quality.get("first_warning_context"):
+        fail("Endpoint sweep diagnostics did not retain B31 first warning context")
 
     print(f"[OK] Endpoint sweep diagnostics: {job_dir}")
 
