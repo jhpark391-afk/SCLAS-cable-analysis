@@ -524,6 +524,28 @@ def check_endpoint_sweep_diagnostics() -> None:
     if not b31_quality.get("first_warning_context"):
         fail("Endpoint sweep diagnostics did not retain B31 first warning context")
 
+    summary_proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_job_summary.py"),
+            str(job_dir),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if summary_proc.returncode != 0:
+        fail("sclas_job_summary.py failed:\n" + summary_proc.stdout + summary_proc.stderr)
+    job_summary = json.loads(summary_proc.stdout)
+    if job_summary.get("health") != "REVIEW":
+        fail("Job summary did not classify B31-warning endpoint sweep as REVIEW")
+    if job_summary.get("curve_class") != "endpoint_sweep_curve_v0":
+        fail("Job summary did not preserve endpoint sweep curve class")
+    if job_summary.get("b31_total_warning_sets") != 10:
+        fail("Job summary did not expose B31 warning totals")
+    if "B31 helical beam curvature/twist warnings remain" not in job_summary.get("recommended_next_action", ""):
+        fail("Job summary did not preserve the recommended next action")
+
     print(f"[OK] Endpoint sweep diagnostics: {job_dir}")
 
 

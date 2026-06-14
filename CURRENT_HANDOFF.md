@@ -2068,6 +2068,33 @@ Still needed for a paper-level implementation:
 7. Coupled torsion, tension, compression, and pressure load cases.
 8. Local slip, contact pressure, stress, and fatigue-oriented summary metrics.
 
+## 2026-06-14 Mac Support Update - Concise Job Summary CLI
+
+Mac-side support added `code/sclas_job_summary.py`, a small no-Abaqus command
+that reuses `code/sclas_offline_diagnostics.py` and prints a one-page health
+summary for a copied or generated job folder.
+
+Use it before opening the full diagnostics report:
+
+```bash
+python code/sclas_job_summary.py --latest
+python code/sclas_job_summary.py jobs/SCLAS_jobs/<job_folder>
+python code/sclas_job_summary.py jobs/SCLAS_jobs/<job_folder> --json
+```
+
+It reports the current health label, source/status, curve class, CSV/ODB rows,
+endpoint sweep validation, actual warning counts, mesh distortion counts, B31
+warning sets, beam-orientation manifest status, and the same recommended next
+action used by offline diagnostics.
+
+Verification on Mac:
+
+```bash
+../90_env/venv/bin/python -m py_compile code/sclas_job_summary.py code/sclas_self_check.py code/sclas_offline_diagnostics.py
+../90_env/venv/bin/python code/sclas_self_check.py
+../90_env/venv/bin/python code/sclas_job_summary.py --latest
+```
+
 ## Next Recommended Tasks
 
 1. Preserve the stable Lab-PC validation loop:
@@ -2107,8 +2134,9 @@ project verification commands. If code/sclas_remote_gui.py changes, sync it to
 code/SCLAS_test/sclas_remote_gui.py and code/sclas_remote_gui_final_code.txt.
 
 The GUI is currently usable. The immediate priority is to continue the lab-PC
-Abaqus solver smoke test after commit ba9ce36, inspect the next .dat error if
-any, and continue preparing code/abaqus_runner.py for real Abaqus contact,
-periodic boundary conditions, cyclic bending, job submission, and ODB result
-extraction.
+Abaqus validation loop from the latest GitHub commit. Use
+python code/sclas_job_summary.py --latest for a concise health check, then use
+code/sclas_offline_diagnostics.py when deeper .dat/.msg/log context is needed.
+Continue preparing code/abaqus_runner.py for real Abaqus contact, periodic
+boundary conditions, cyclic bending, job submission, and ODB result extraction.
 ```

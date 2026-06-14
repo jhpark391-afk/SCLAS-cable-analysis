@@ -61,11 +61,16 @@ run_self_check.bat
 Inspect a generated or copied Abaqus job folder without Abaqus:
 
 ```bash
+python code/sclas_job_summary.py --latest
+python code/sclas_job_summary.py jobs/SCLAS_jobs/<job_folder>
 python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder>
 python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder> --save-report
 python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder> --save-markdown
 ```
 
+Use `sclas_job_summary.py` first when you only need the current health,
+curve class, warning totals, and next action. Use
+`sclas_offline_diagnostics.py` when you need the full JSON/Markdown report.
 The offline diagnostics tool checks `result_data.csv`,
 `result_summary.json`, `abaqus_mesh_manifest.json`, generated `.inp` keyword
 placement, and `.dat`/`.msg`/`.sta` solver logs when those files exist.
