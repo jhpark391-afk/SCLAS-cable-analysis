@@ -1070,6 +1070,7 @@ def inspect_manifest(job_dir: Path, report: dict) -> None:
         section[key] = data.get(key)
     section["abaqus_files"] = data.get("abaqus_files", [])
     section["contact_bindings"] = len(data.get("contact_binding_scaffold", []))
+    section["contact_pair_keyword_adjustment"] = data.get("contact_pair_keyword_adjustment", {})
     contact_clearance = data.get("contact_initial_clearance_summary", {})
     if isinstance(contact_clearance, dict) and contact_clearance:
         section["contact_initial_clearance_summary"] = contact_clearance
@@ -1251,7 +1252,9 @@ def summarize_report(report: dict) -> None:
     contact_clearance = manifest.get("contact_initial_clearance_summary", {}) if isinstance(manifest, dict) else {}
     contact_pressure_max = parse_float(local_field.get("contact_pressure_max")) if isinstance(local_field, dict) else None
     contact_opening_abs_max = parse_float(local_field.get("contact_opening_abs_max")) if isinstance(local_field, dict) else None
+    contact_keyword_adjustment = manifest.get("contact_pair_keyword_adjustment", {}) if isinstance(manifest, dict) else {}
     contact_preload_missing = False
+    contact_geometric_overclosure_open = False
     if isinstance(contact_clearance, dict):
         residual_pressure = parse_float(contact_clearance.get("residual_contact_pressure_mpa")) or 0.0
         contact_preload_missing = bool(
@@ -1259,6 +1262,12 @@ def summarize_report(report: dict) -> None:
             and residual_pressure > 0.0
             and contact_clearance.get("residual_pressure_preload_status") == "not_applied"
             and int(contact_clearance.get("overclosed_pair_count") or 0) == 0
+        )
+        contact_geometric_overclosure_open = bool(
+            int(contact_clearance.get("checked_pair_count") or 0)
+            and int(contact_clearance.get("overclosed_pair_count") or 0) > 0
+            and contact_clearance.get("residual_pressure_preload_status") == "geometric_overclosure_only"
+            and contact_keyword_adjustment.get("target_type") == "NODE TO SURFACE"
         )
     contact_pressure_zero_with_opening = bool(
         contact_pressure_max is not None
@@ -1301,6 +1310,8 @@ def summarize_report(report: dict) -> None:
         if summary.get("abaqus_curve_class") == "two_point_odb_smoke":
             if b31_warning_count:
                 action = "Stable two-row Abaqus ODB smoke completed; remaining B31 helical beam curvature/twist warnings should be isolated in a minimal helix probe."
+            elif contact_geometric_overclosure_open and contact_pressure_zero_with_opening:
+                action = "Stable two-row Abaqus ODB smoke completed, but the first contact-physics blocker is that geometric wire-envelope overclosure did not close the Abaqus NODE TO SURFACE beam contact; COPEN remains positive and CPRESS is zero. Next test a controlled general-contact/solid-armour representation or supported surface-thickness preload before calibrating slip."
             elif contact_preload_missing and contact_pressure_zero_with_opening:
                 action = "Stable two-row Abaqus ODB smoke completed; first contact-physics blocker is that residual pressure is declared but no initial interference/preload is applied, leaving CPRESS at zero with open/tangent contact."
             else:
@@ -1308,7 +1319,9 @@ def summarize_report(report: dict) -> None:
         elif summary.get("abaqus_curve_class") == "endpoint_sweep_curve_v0":
             action = "Endpoint sweep curve-v0 was extracted; validate it against a continuous bending path before treating it as research data."
         elif summary.get("abaqus_curve_class") == "multi_point_curve_v0" and continuous_shape.get("shape_checks_passed"):
-            if contact_preload_missing and contact_pressure_zero_with_opening:
+            if contact_geometric_overclosure_open and contact_pressure_zero_with_opening:
+                action = "Continuous CurveV0 multi-point ODB curve passed the basic shape checks; first contact-physics blocker is that geometric wire-envelope overclosure did not close the Abaqus NODE TO SURFACE beam contact, so switch to a supported general-contact or solid-armour contact representation before calibrating CPRESS/slip."
+            elif contact_preload_missing and contact_pressure_zero_with_opening:
                 action = "Continuous CurveV0 multi-point ODB curve passed the basic shape checks; first contact-physics blocker is residual pressure/preload not being applied, so add a small shrink/interference preload or close the reduced geometry before calibrating CPRESS/slip."
             else:
                 action = "Continuous CurveV0 multi-point ODB curve passed the basic shape checks; next compare it against the endpoint sweep and start adding calibrated contact/friction outputs."

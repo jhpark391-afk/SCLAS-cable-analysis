@@ -117,6 +117,8 @@ def completion_flags(summary: dict, comparison: dict) -> list:
 def choose_next_action(summary: dict, comparison: dict, flags: list) -> str:
     for flag in flags:
         if flag.get("area") == "Contact preload/closure" and flag.get("status") == "blocked":
+            if summary.get("contact_residual_preload_status") == "geometric_overclosure_only":
+                return "Contact preload/closure is still blocked: geometric wire-envelope overclosure did not produce nonzero CPRESS on the Abaqus NODE TO SURFACE beam contact. On the remote Abaqus PC, test a supported general-contact/solid-armour contact representation, then rerun SmallSmoke, endpoint sweep, and continuous CurveV0."
             return "Implement or validate contact preload/closure on the remote Abaqus PC, then rerun SmallSmoke, endpoint sweep, and continuous CurveV0."
     for flag in flags:
         if flag.get("area") == "ODB local fields" and flag.get("status") == "blocked":

@@ -132,6 +132,7 @@ def quality_details(report: dict):
     if not local_field and isinstance(result_summary, dict):
         local_field = result_summary.get("odb_local_field_summary", {}) or {}
     contact_clearance = manifest.get("contact_initial_clearance_summary", {}) if isinstance(manifest, dict) else {}
+    contact_keyword = manifest.get("contact_pair_keyword_adjustment", {}) if isinstance(manifest, dict) else {}
 
     available_outputs = local_field.get("available_field_outputs", {})
     present_outputs = local_field.get("present_target_outputs", {})
@@ -185,6 +186,10 @@ def quality_details(report: dict):
         "contact_clearance_max_mm": contact_clearance.get("max_initial_clearance_mm") if isinstance(contact_clearance, dict) else None,
         "contact_residual_preload_status": contact_clearance.get("residual_pressure_preload_status") if isinstance(contact_clearance, dict) else None,
         "contact_residual_pressure_mpa": contact_clearance.get("residual_contact_pressure_mpa") if isinstance(contact_clearance, dict) else None,
+        "contact_pair_keyword_status": contact_keyword.get("status") if isinstance(contact_keyword, dict) else None,
+        "contact_pair_keyword_target_type": contact_keyword.get("target_type") if isinstance(contact_keyword, dict) else None,
+        "contact_pair_keyword_adjusted_count": int_scalar(contact_keyword.get("adjusted_count")) if isinstance(contact_keyword, dict) else 0,
+        "contact_pair_keyword_beam_surface_count": len(contact_keyword.get("beam_surfaces", [])) if isinstance(contact_keyword, dict) and isinstance(contact_keyword.get("beam_surfaces"), list) else 0,
     }
 
 
@@ -322,6 +327,12 @@ def print_human(summary: dict) -> None:
         scalar(summary.get("contact_clearance_max_mm")),
         scalar(summary.get("contact_residual_preload_status")),
         scalar(summary.get("contact_residual_pressure_mpa")),
+    ))
+    print("Contact keyword: status={0}, target={1}, adjusted_pairs={2}, beam_surfaces={3}".format(
+        scalar(summary.get("contact_pair_keyword_status")),
+        scalar(summary.get("contact_pair_keyword_target_type")),
+        scalar(summary.get("contact_pair_keyword_adjusted_count")),
+        scalar(summary.get("contact_pair_keyword_beam_surface_count")),
     ))
     print("Endpoint sweep: validated={0}, shape={1}, children={2}, child_jobs={3}".format(
         scalar(summary.get("endpoint_sweep_validated")),

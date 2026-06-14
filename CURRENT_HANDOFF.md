@@ -1,6 +1,6 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-06-14
+Last updated: 2026-06-15 KST
 
 ## Repository
 
@@ -22,15 +22,25 @@ Latest completed GUI baseline commit:
 b2c17a1 Document Windows HELIX GUI verification
 ```
 
+Latest pulled shared baseline before the 2026-06-15 lab-PC work:
+
+```text
+1c6b59b Align project status readiness gates
+```
+
 ## Current Focus
 
-Continue preparing the Abaqus backend to move from a placeholder/scaffold
-runner toward a literature-informed nonlinear bending workflow. The GUI is
-currently usable enough; the immediate next work is lab-PC Abaqus solver smoke
-testing of the generated `.inp` after the latest coupling fallback fix.
+Continue stabilizing the Abaqus backend validation loop on the Windows lab PC.
+The bridge, endpoint CurveV0 sweep, and continuous multi-point CurveV0 path are
+ODB-backed and repeatable. The current acceptance blocker is now contact
+physics: the reduced B31 beam/contact scaffold exposes `CPRESS`, `COPEN`,
+`CSLIP1`, `CSLIP2`, `CSHEAR1`, and `CSHEAR2`, but `CPRESS` and slip remain zero.
 
-Windows home-computer GUI verification has now passed for the current
-`11.5-resizable-panels` baseline.
+The next modelling work should replace or augment the current B31
+`NODE TO SURFACE` beam contact route with a supported contact representation
+that actually closes the armour/polymer interfaces, such as a controlled
+general-contact/solid-armour representation or a documented Abaqus-supported
+surface-thickness preload route.
 
 ## Current Working State
 
@@ -2368,6 +2378,104 @@ Interpretation:
   shrink/interference preload or a reduced-geometry closure option so residual
   pressure can produce nonzero `CPRESS` before contact/slip calibration.
 
+## 2026-06-15 Windows Abaqus Update - Contact Closure Probe
+
+Latest pulled baseline at the start of this work:
+
+```text
+1c6b59b Align project status readiness gates
+```
+
+What changed:
+
+- `run_lab_abaqus_smoke.ps1`, `run_curve_v0_sweep.ps1`, and
+  `run_curve_v0_continuous.ps1` now accept
+  `-ContactClosureOverclosureMm`.
+- The option applies a reduced-validation-only radial geometry closure to the
+  copied smoke/CurveV0 input payload before Abaqus generation. It records the
+  original and adjusted radii under `metadata.contact_closure_adjustment` and
+  sets `analysis_conditions.abaqus_contact_closure_mode`.
+- `code/sclas_offline_diagnostics.py` now records the manifest
+  `contact_pair_keyword_adjustment` data and can distinguish the first blocker
+  where geometric wire-envelope overclosure exists but Abaqus `NODE TO SURFACE`
+  beam contact remains open.
+- `code/sclas_job_summary.py`, `code/sclas_project_status.py`, and
+  `code/sclas_acceptance_gate.py` now surface the contact keyword target type
+  and give a sharper next action when this beam-contact blocker appears.
+
+Fresh validation:
+
+- Closure SmallSmoke:
+  `jobs\SCLAS_jobs\small_smoke_20260615_011320`
+  - Command used:
+    `powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -SmallSmoke -ContactClosureOverclosureMm 0.05`
+  - Abaqus completed and ODB extraction succeeded with `rows_written=2`.
+  - Manifest clearance summary reported `has_initial_overclosure`,
+    checked pairs `4`, overclosed pairs `4`, and
+    `residual_pressure_preload_status=geometric_overclosure_only`.
+  - ODB still reported `contact_pressure_max=0.0` and `slip_abs_max=0.0`;
+    `COPEN` stayed positive at about `2.04 mm`.
+- Default SmallSmoke:
+  `jobs\SCLAS_jobs\small_smoke_20260615_012722`
+  - Abaqus completed.
+  - `source=SCLAS_ABAQUS_ODB_EXTRACTOR`.
+  - `odb_extraction.status=extracted`.
+  - `odb_extraction.rows_written=2`.
+  - Contact output fields exist, but `CPRESS=0.0` and slip is zero.
+- Endpoint sweep:
+  `jobs\SCLAS_jobs\curve_v0_sweep_20260615_012817`
+  - Parent `result_data.csv` has five numeric rows for factors
+    `-0.1, -0.05, 0, 0.05, 0.1`.
+  - Parent `source=SCLAS_CURVE_V0_ENDPOINT_SWEEP`.
+  - `endpoint_sweep_validation.all_child_jobs_validated=true`.
+  - All five child jobs were ODB-backed with `rows_written>=2`.
+  - Endpoint rows:
+    `(-0.0079999997979, -2.58670125)`,
+    `(-0.00399999989895, -1.29338025)`,
+    `(0, 0)`,
+    `(0.00399999989895, 1.293391125)`,
+    `(0.0079999997979, 2.58674475)`.
+- Continuous CurveV0:
+  `jobs\SCLAS_jobs\curve_v0_20260615_013217`
+  - Abaqus completed.
+  - `source=SCLAS_ABAQUS_ODB_EXTRACTOR`.
+  - `odb_extraction.status=extracted`.
+  - `odb_extraction.rows_written=5`.
+  - Continuous shape checks passed with odd-symmetry relative error about
+    `1.69e-05`.
+  - Explicit comparison against the endpoint sweep was saved into
+    `curve_v0_comparison_report.json/md`; comparison status is `aligned`,
+    peak ratio is `1.0`, positive branch delta is `0.0`, and negative branch
+    delta is about `9.66e-08`.
+- Validation suite:
+  - `python code\sclas_self_check.py` passed.
+  - `python code\sclas_validation_suite.py --json` completed with
+    `status=blocked_acceptance`, as expected, because only the contact preload
+    closure acceptance gate remains blocked.
+
+First blocking error / interpretation:
+
+- There is no current bridge, solver-completion, CSV, or ODB-extraction
+  blocking error in the default SmallSmoke, endpoint sweep, or continuous
+  CurveV0 runs.
+- The first research blocker is contact closure. The current explicit pair
+  deck is adjusted to Abaqus `NODE TO SURFACE` for B31 beam contact. Abaqus is
+  effectively seeing the beam centerline/contact formulation, not the reduced
+  wire-envelope radius used by the manifest clearance diagnostic. Therefore a
+  small geometric wire-envelope overclosure can appear in the manifest while
+  the ODB still has positive `COPEN`, zero `CPRESS`, and zero slip.
+- Abaqus keyword probes confirmed the direction:
+  - Small `*Contact Interference` (`-0.05 mm`) completed but still left
+    `CPRESS=0.0`.
+  - A large centerline-scale interference (`-2.05 mm`) failed early with severe
+    overclosure/distortion and `TOO MANY ATTEMPTS MADE FOR THIS INCREMENT`.
+  - A targeted general-contact probe parsed, but the current reduced beam/solid
+    scaffold generated severe contact discontinuities/negative eigenvalue
+    behavior and also failed with too many attempts.
+- The next fix should not claim calibrated stick-slip behavior until the model
+  uses a supported contact representation that produces nonzero `CPRESS` in a
+  reduced smoke case first.
+
 ## Next Recommended Tasks
 
 1. Preserve the stable Lab-PC validation loop:
@@ -2390,10 +2498,12 @@ Interpretation:
 6. Extend the new ODB local-field summaries from aggregate maxima to
    full per-interface contact/slip/stress ranges, contact status, and
    fatigue-oriented metrics.
-7. Implement and validate a small contact preload/closure path:
-   start with a single reduced CurveV0 factor or SmallSmoke, avoid runs longer
-   than 20 minutes without log progress, and only then rerun the full endpoint
-   sweep.
+7. Implement and validate the next contact-closure representation:
+   start from SmallSmoke, aim for nonzero `CPRESS` before any full sweep, and
+   avoid relying on B31 wire-envelope geometric overclosure alone because the
+   current Abaqus deck uses `NODE TO SURFACE` beam contact. Candidate paths are
+   a controlled general-contact setup with stabilization/contact controls or a
+   reduced solid-armour/contact-surface representation.
 8. After each meaningful task, update this file, commit, and push only code/docs
    changes, never generated Abaqus job artifacts.
 

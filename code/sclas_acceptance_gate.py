@@ -159,7 +159,10 @@ def recommended_next_action(overall: str, gates: list, summary: dict, comparison
         if "curve_v0_continuous_path" in blocked:
             actions.append("generate a continuous multi-point CurveV0 ODB run and compare it with the endpoint sweep")
         if "contact_preload_closure" in blocked:
-            actions.append("apply/validate contact preload or closure so CPRESS is nonzero")
+            if summary.get("contact_residual_preload_status") == "geometric_overclosure_only":
+                actions.append("replace the current geometric wire-envelope closure with a supported general-contact or solid-armour contact representation so CPRESS is nonzero")
+            else:
+                actions.append("apply/validate contact preload or closure so CPRESS is nonzero")
         if "odb_local_fields" in blocked:
             actions.append("extract required ODB fields S, CPRESS, COPEN, and CSLIP*")
         if actions:

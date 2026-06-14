@@ -4,7 +4,8 @@ param(
     [int]$SmallAxialDivisions = 4,
     [int]$SmallCoreCircumferentialDivisions = 8,
     [int]$SmallArmourCircumferentialDivisions = 4,
-    [double]$SmallEffectiveLengthMm = 50.0
+    [double]$SmallEffectiveLengthMm = 50.0,
+    [double]$ContactClosureOverclosureMm = 0.0
 )
 
 $ErrorActionPreference = "Stop"
@@ -106,6 +107,9 @@ $RunSmokeScript = Join-Path $ProjectRoot "run_lab_abaqus_smoke.ps1"
 if (-not (Test-Path $RunSmokeScript)) {
     throw "run_lab_abaqus_smoke.ps1 was not found: $RunSmokeScript"
 }
+if ($ContactClosureOverclosureMm -lt 0.0) {
+    throw "-ContactClosureOverclosureMm must be zero or positive."
+}
 
 if (-not $JobDir) {
     $JobDir = Find-LatestGuiJobDir $ProjectRoot
@@ -125,6 +129,7 @@ Write-Host "Project: $ProjectRoot"
 Write-Host "Source:  $SourceJobDir"
 Write-Host "Sweep:   $sweepDir"
 Write-Host "Factors: $($CurveFactors -join ', ')"
+Write-Host "Contact closure overclosure mm: $(Format-InvariantDouble $ContactClosureOverclosureMm)"
 
 $curveRows = New-Object System.Collections.Generic.List[string]
 $curveRows.Add("curvature_1_per_m,moment_kn_m")
@@ -141,7 +146,8 @@ foreach ($factor in $CurveFactors) {
         -SmallAxialDivisions $SmallAxialDivisions `
         -SmallCoreCircumferentialDivisions $SmallCoreCircumferentialDivisions `
         -SmallArmourCircumferentialDivisions $SmallArmourCircumferentialDivisions `
-        -SmallEffectiveLengthMm $SmallEffectiveLengthMm
+        -SmallEffectiveLengthMm $SmallEffectiveLengthMm `
+        -ContactClosureOverclosureMm $ContactClosureOverclosureMm
 
     $child = Get-ChildItem $jobsRoot -Directory -Filter "curve_v0_*" |
         Where-Object { $_.Name -notlike "curve_v0_sweep_*" } |

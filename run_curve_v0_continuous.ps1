@@ -6,7 +6,8 @@ param(
     [int]$SmallCoreCircumferentialDivisions = 8,
     [int]$SmallArmourCircumferentialDivisions = 4,
     [double]$SmallEffectiveLengthMm = 50.0,
-    [int]$SmallAbaqusOutputIntervals = 4
+    [int]$SmallAbaqusOutputIntervals = 4,
+    [double]$ContactClosureOverclosureMm = 0.0
 )
 
 $ErrorActionPreference = "Stop"
@@ -84,6 +85,9 @@ if ($CurveScale -le 0.0) {
 if (-not $PathFactors -or $PathFactors.Count -lt 2) {
     throw "-PathFactors must contain at least two numeric values."
 }
+if ($ContactClosureOverclosureMm -lt 0.0) {
+    throw "-ContactClosureOverclosureMm must be zero or positive."
+}
 
 $ProjectRoot = Resolve-ProjectRoot
 $RunSmokeScript = Join-Path $ProjectRoot "run_lab_abaqus_smoke.ps1"
@@ -143,6 +147,7 @@ Write-Host "Curve scale: $CurveScale"
 Write-Host "Base curvature: $(Format-InvariantDouble $baseCurvature)"
 Write-Host "Continuous max curvature: $(Format-InvariantDouble $continuousCurvature)"
 Write-Host "Path factors: $($PathFactors -join ', ')"
+Write-Host "Contact closure overclosure mm: $(Format-InvariantDouble $ContactClosureOverclosureMm)"
 
 $runStart = Get-Date
 & powershell -ExecutionPolicy Bypass -File $RunSmokeScript `
@@ -154,7 +159,8 @@ $runStart = Get-Date
     -SmallCoreCircumferentialDivisions $SmallCoreCircumferentialDivisions `
     -SmallArmourCircumferentialDivisions $SmallArmourCircumferentialDivisions `
     -SmallEffectiveLengthMm $SmallEffectiveLengthMm `
-    -SmallAbaqusOutputIntervals $SmallAbaqusOutputIntervals
+    -SmallAbaqusOutputIntervals $SmallAbaqusOutputIntervals `
+    -ContactClosureOverclosureMm $ContactClosureOverclosureMm
 if ($LASTEXITCODE -ne 0) {
     throw "run_lab_abaqus_smoke.ps1 failed with exit code $LASTEXITCODE"
 }
