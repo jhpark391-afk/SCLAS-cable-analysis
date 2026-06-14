@@ -2405,6 +2405,8 @@ Mac-side completion ownership is now documented in
 New status command:
 
 ```bash
+python code/sclas_job_index.py
+python code/sclas_job_index.py --save-report --save-markdown
 python code/sclas_project_status.py
 python code/sclas_project_status.py --json
 python code/sclas_project_status.py --save-report --save-markdown
@@ -2416,6 +2418,7 @@ themselves.
 
 It summarizes:
 
+- recent real `job_*` runs through `sclas_job_index.py`
 - latest job health/source/curve class
 - latest endpoint-vs-continuous CurveV0 comparison status
 - contact preload state, CPRESS max, and slip max

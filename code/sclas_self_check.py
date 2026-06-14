@@ -821,7 +821,40 @@ def check_latest_job_filtering() -> None:
     if Path(include_summary.get("job_dir", "")).name != self_job.name:
         fail("--include-self-check did not allow the newer self_check job")
 
-    print("[OK] Latest job filtering excludes self_check by default")
+    index_cmd = [
+        sys.executable,
+        str(CODE_DIR / "sclas_job_index.py"),
+        "--json",
+        "--job-root",
+        str(root),
+        "--limit",
+        "5",
+        "--save-report",
+        "--save-markdown",
+    ]
+    index_proc = subprocess.run(index_cmd, text=True, capture_output=True)
+    if index_proc.returncode != 0:
+        fail("sclas_job_index.py failed:\n" + index_proc.stdout + index_proc.stderr)
+    index = json.loads(index_proc.stdout)
+    if index.get("total_candidates") != 1 or index.get("reported_count") != 1:
+        fail("Job index did not exclude self_check jobs by default")
+    if index.get("jobs", [{}])[0].get("name") != user_job.name:
+        fail("Job index reported the wrong default job")
+    saved_index = Path(index.get("saved_report", ""))
+    saved_markdown = Path(index.get("saved_markdown_report", ""))
+    if not saved_index.exists() or not saved_markdown.exists():
+        fail("Job index did not save JSON and Markdown reports")
+    if "SCLAS Job Index" not in saved_markdown.read_text(encoding="utf-8"):
+        fail("Job index Markdown report does not contain the expected heading")
+
+    include_index_proc = subprocess.run(index_cmd + ["--include-self-check"], text=True, capture_output=True)
+    if include_index_proc.returncode != 0:
+        fail("sclas_job_index.py --include-self-check failed:\n" + include_index_proc.stdout + include_index_proc.stderr)
+    include_index = json.loads(include_index_proc.stdout)
+    if include_index.get("total_candidates") != 2:
+        fail("Job index --include-self-check did not include both fixture jobs")
+
+    print("[OK] Latest job filtering and job index exclude self_check by default")
 
 
 def check_project_status() -> None:
