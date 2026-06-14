@@ -33,6 +33,7 @@
     <Compile Include="code\sclas_handoff_snapshot.py" />
     <Compile Include="code\sclas_next_prompt.py" />
     <Compile Include="code\sclas_acceptance_gate.py" />
+    <Compile Include="code\sclas_result_intake.py" />
     <Compile Include="code\sclas_validation_suite.py" />
     <Compile Include="code\sclas_odb_extractor.py" />
     <Compile Include="code\sclas_mac_vscode.py" />
@@ -58,6 +59,8 @@
     <Content Include="run_handoff_snapshot.sh" />
     <Content Include="run_next_prompt.bat" />
     <Content Include="run_next_prompt.sh" />
+    <Content Include="run_result_intake.bat" />
+    <Content Include="run_result_intake.sh" />
     <Content Include="run_sclas.bat" />
     <Content Include="run_self_check.bat" />
     <Content Include="run_sclas.sh" />

@@ -1041,6 +1041,8 @@ def check_validation_suite() -> None:
         fail("Validation suite did not embed git ahead/behind state")
     if "dirty" not in report.get("git", {}) or "sync_status" not in report.get("git", {}):
         fail("Validation suite did not embed git dirty/sync status")
+    if not report.get("result_intake", {}).get("status"):
+        fail("Validation suite did not embed result intake status")
     if not report.get("acceptance_gate", {}).get("overall_status"):
         fail("Validation suite did not embed acceptance gate status")
     if not report.get("handoff_snapshot", {}).get("saved_report"):
@@ -1057,6 +1059,40 @@ def check_validation_suite() -> None:
     print("[OK] Validation suite")
 
 
+def check_result_intake() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_result_intake.py"),
+            "--include-self-check",
+            "--json",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("sclas_result_intake.py failed:\n" + proc.stdout + proc.stderr)
+    report = json.loads(proc.stdout)
+    if not report.get("job_dir"):
+        fail("Result intake did not select a job folder")
+    if not report.get("checklist"):
+        fail("Result intake did not expose an intake checklist")
+    if not report.get("acceptance_preview"):
+        fail("Result intake did not expose acceptance-preview gates")
+    if report.get("status") not in ("ready", "review", "blocked"):
+        fail("Result intake returned an unexpected status: " + str(report.get("status")))
+    saved_report = Path(report.get("saved_report", ""))
+    saved_markdown = Path(report.get("saved_markdown_report", ""))
+    if not saved_report.exists() or not saved_markdown.exists():
+        fail("Result intake did not save JSON and Markdown reports")
+    if "HELIX / SCLAS Result Intake" not in saved_markdown.read_text(encoding="utf-8"):
+        fail("Result intake Markdown report does not contain the expected heading")
+
+    print("[OK] Result intake")
+
+
 def main() -> int:
     checks = [
         check_pyproj_references,
@@ -1069,6 +1105,7 @@ def main() -> int:
         check_latest_job_filtering,
         check_project_status,
         check_acceptance_gate,
+        check_result_intake,
         check_handoff_snapshot,
         check_next_prompt,
         check_validation_suite,

@@ -19,6 +19,9 @@ from sclas_handoff_snapshot import save_markdown_report as save_snapshot_markdow
 from sclas_handoff_snapshot import save_report as save_snapshot_report
 from sclas_job_summary import DEFAULT_JOB_ROOT
 from sclas_next_prompt import prompt_text, save_prompt
+from sclas_result_intake import build_intake
+from sclas_result_intake import save_markdown_report as save_intake_markdown
+from sclas_result_intake import save_report as save_intake_report
 
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
@@ -56,6 +59,12 @@ def build_suite(job_root: Path, limit: int = 15, include_self_check: bool = Fals
     acceptance_markdown = save_acceptance_markdown(acceptance)
     acceptance["saved_markdown_report"] = str(acceptance_markdown)
 
+    intake = build_intake(job_root, include_self_check=include_self_check)
+    intake_json = save_intake_report(intake)
+    intake["saved_report"] = str(intake_json)
+    intake_markdown = save_intake_markdown(intake)
+    intake["saved_markdown_report"] = str(intake_markdown)
+
     snapshot = build_snapshot(job_root, limit=limit, include_self_check=include_self_check)
     snapshot_json = save_snapshot_report(snapshot)
     snapshot["saved_report"] = str(snapshot_json)
@@ -80,6 +89,7 @@ def build_suite(job_root: Path, limit: int = 15, include_self_check: bool = Fals
         "git": git_state(),
         "status": status,
         "self_check": self_check,
+        "result_intake": intake,
         "acceptance_gate": acceptance,
         "handoff_snapshot": {
             "saved_report": str(snapshot_json),
@@ -118,6 +128,7 @@ def save_markdown_report(report: dict, output_path: Optional[Path] = None) -> Pa
 
 def markdown_report(report: dict) -> str:
     acceptance = report.get("acceptance_gate", {})
+    intake = report.get("result_intake", {})
     handoff = report.get("handoff_snapshot", {})
     self_check = report.get("self_check", {})
     prompt = report.get("next_prompt", {})
@@ -141,6 +152,7 @@ def markdown_report(report: dict) -> str:
             self_check.get("status", "-"),
             self_check.get("returncode", "-"),
         ),
+        "- Result intake: `{0}`".format(intake.get("status", "-")),
         "- Acceptance: `{0}`".format(acceptance.get("overall_status", "-")),
         "- Latest job: `{0}`".format(acceptance.get("latest_job", "-")),
         "- Next action: {0}".format(report.get("recommended_next_action", "-")),
@@ -149,6 +161,8 @@ def markdown_report(report: dict) -> str:
         "",
         "- Acceptance JSON: `{0}`".format(acceptance.get("saved_report", "-")),
         "- Acceptance Markdown: `{0}`".format(acceptance.get("saved_markdown_report", "-")),
+        "- Result intake JSON: `{0}`".format(intake.get("saved_report", "-")),
+        "- Result intake Markdown: `{0}`".format(intake.get("saved_markdown_report", "-")),
         "- Handoff JSON: `{0}`".format(handoff.get("saved_report", "-")),
         "- Handoff Markdown: `{0}`".format(handoff.get("saved_markdown_report", "-")),
         "- Next prompt: `{0}`".format(prompt.get("saved_prompt", "-")),
@@ -167,6 +181,7 @@ def markdown_report(report: dict) -> str:
 
 def human_report(report: dict) -> str:
     acceptance = report.get("acceptance_gate", {})
+    intake = report.get("result_intake", {})
     handoff = report.get("handoff_snapshot", {})
     prompt = report.get("next_prompt", {})
     self_check = report.get("self_check", {})
@@ -191,6 +206,7 @@ def human_report(report: dict) -> str:
             self_check.get("returncode", "-"),
         ),
         "Acceptance: {0}".format(acceptance.get("overall_status", "-")),
+        "Result intake: {0}".format(intake.get("status", "-")),
         "Latest job: {0}".format(acceptance.get("latest_job", "-")),
         "",
         "Next action:",
@@ -202,6 +218,8 @@ def human_report(report: dict) -> str:
         "Saved outputs:",
         "- Acceptance JSON: {0}".format(acceptance.get("saved_report", "-")),
         "- Acceptance Markdown: {0}".format(acceptance.get("saved_markdown_report", "-")),
+        "- Result intake JSON: {0}".format(intake.get("saved_report", "-")),
+        "- Result intake Markdown: {0}".format(intake.get("saved_markdown_report", "-")),
         "- Handoff JSON: {0}".format(handoff.get("saved_report", "-")),
         "- Handoff Markdown: {0}".format(handoff.get("saved_markdown_report", "-")),
         "- Next prompt: {0}".format(prompt.get("saved_prompt", "-")),

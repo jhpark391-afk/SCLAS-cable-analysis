@@ -90,6 +90,8 @@ python code/sclas_project_status.py
 python code/sclas_project_status.py --save-report --save-markdown
 python code/sclas_handoff_snapshot.py --save-report --save-markdown
 python code/sclas_next_prompt.py --save
+python code/sclas_result_intake.py
+python code/sclas_result_intake.py jobs/SCLAS_jobs/<job_folder> --save-report --save-markdown
 python code/sclas_acceptance_gate.py
 python code/sclas_acceptance_gate.py --save-report --save-markdown
 python code/sclas_curve_compare.py
@@ -124,6 +126,12 @@ and next action.
 Use `run_next_prompt.sh` or `run_next_prompt.bat` to write
 `NEXT_CODEX_PROMPT.md`, a ready-made prompt for the next Mac/home/remote Codex
 session.
+Use `sclas_result_intake.py` or `run_result_intake.sh`/`.bat` immediately after
+copying a remote Abaqus job folder back to this repository. It writes
+`result_intake_report.json` and `result_intake_report.md` into the inspected job
+folder and checks the file contract, ODB extraction evidence, solver logs,
+local ODB fields, and an acceptance-gate preview before you decide what to run
+next.
 Use `sclas_acceptance_gate.py` after remote Abaqus jobs are copied or pulled
 back. It checks whether the latest result is research-ready across result
 contract, continuous CurveV0, contact preload/closure, ODB local fields, and
@@ -135,8 +143,8 @@ pass/review/blocked evidence.
 Use `run_acceptance_gate.sh` or `run_acceptance_gate.bat` for the same saved
 report flow without typing the Python command.
 Use `run_validation_suite.sh` or `run_validation_suite.bat` before a major
-handoff or commit when you want self-check, acceptance gate, handoff snapshot,
-and next-session prompt generation in one repeatable pass. The suite writes
+handoff or commit when you want self-check, result intake, acceptance gate,
+handoff snapshot, and next-session prompt generation in one repeatable pass. The suite writes
 `validation_suite_report.json` and `validation_suite_report.md` at the project
 root, including the current git branch/head for traceability; both are local
 generated artifacts and are ignored by git. The report also records dirty

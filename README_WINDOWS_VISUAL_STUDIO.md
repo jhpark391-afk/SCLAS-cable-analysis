@@ -53,18 +53,22 @@ For the full repeatable handoff/validation pass, run:
 run_validation_suite.bat
 ```
 
-This runs self-check, saves the acceptance gate report, saves the handoff
-snapshot, regenerates the next Codex prompt, and writes
+This runs self-check, saves the result-intake report, saves the acceptance gate
+report, saves the handoff snapshot, regenerates the next Codex prompt, and writes
 `validation_suite_report.json` / `validation_suite_report.md` with the current
 git branch/head plus dirty, upstream, sync label, and ahead/behind counts.
 
 After copying or pulling a remote Abaqus result folder, run:
 
 ```bat
+run_result_intake.bat
 run_acceptance_gate.bat
 ```
 
-This gives a research-readiness pass/review/blocked decision for the latest job.
+The intake script checks whether the copied folder has the expected result CSV,
+summary, solver logs, ODB evidence, local fields, and contact indicators. The
+acceptance gate then gives a research-readiness pass/review/blocked decision for
+the latest job.
 
 Before switching computers or handing work to another Codex session, save a
 compact project snapshot with:
