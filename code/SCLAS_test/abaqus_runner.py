@@ -238,6 +238,193 @@ def contact_binding_scaffold(payload):
     return bindings
 
 
+def float_or_none(value):
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def contact_surface_radial_references(payload):
+    geometry = payload.get("derived_geometry_mm", {})
+    armour = payload.get("armour", {})
+
+    def beam_reference(component, center_key, armour_radius_key, geometry_radius_key):
+        center = float_or_none(geometry.get(center_key))
+        radius = float_or_none(armour.get(armour_radius_key))
+        if radius is None:
+            radius = float_or_none(geometry.get(geometry_radius_key))
+        ref = {
+            "kind": "beam_wire",
+            "component": component,
+            "center_radius_mm": center,
+            "wire_radius_mm": radius,
+        }
+        if center is not None and radius is not None:
+            ref["inner_contact_radius_mm"] = center - radius
+            ref["outer_contact_radius_mm"] = center + radius
+        return ref
+
+    def solid_reference(component, radius_key):
+        return {
+            "kind": "solid_surface",
+            "component": component,
+            "radius_mm": float_or_none(geometry.get(radius_key)),
+        }
+
+    return {
+        "InnerArmourHelix_ContactSurface": beam_reference(
+            "InnerArmourHelix",
+            "inner_armour_center_radius_mm",
+            "inner_wire_radius_mm",
+            "inner_armour_wire_radius_mm",
+        ),
+        "OuterArmourHelix_ContactSurface": beam_reference(
+            "OuterArmourHelix",
+            "outer_armour_center_radius_mm",
+            "outer_wire_radius_mm",
+            "outer_armour_wire_radius_mm",
+        ),
+        "inner_sheath_inner_surface": solid_reference("InnerSheathEquivalent", "inner_sheath_inner_radius_mm"),
+        "inner_sheath_outer_surface": solid_reference("InnerSheathEquivalent", "inner_sheath_outer_radius_mm"),
+        "bedding_inner_surface": solid_reference("BeddingEquivalent", "inner_armour_outer_radius_mm"),
+        "bedding_outer_surface": solid_reference("BeddingEquivalent", "bedding_outer_radius_mm"),
+        "outer_sheath_inner_surface": solid_reference("OuterSheathEquivalent", "outer_sheath_inner_radius_mm"),
+        "outer_sheath_outer_surface": solid_reference("OuterSheathEquivalent", "outer_sheath_outer_radius_mm"),
+    }
+
+
+def contact_pair_initial_clearance(payload, contact_pair):
+    refs = contact_surface_radial_references(payload)
+    master_surface = contact_pair.get("master_surface")
+    slave_surface = contact_pair.get("slave_surface")
+    master_ref = refs.get(master_surface, {})
+    slave_ref = refs.get(slave_surface, {})
+    record = {
+        "interface": contact_pair.get("interface"),
+        "contact_pair": contact_pair.get("name"),
+        "master_surface": master_surface,
+        "slave_surface": slave_surface,
+        "status": "not_checked",
+    }
+    if contact_pair.get("status") != "created":
+        record["status"] = "skipped"
+        record["reason"] = "contact pair was not created"
+        return record
+
+    if master_ref.get("kind") == "beam_wire" and slave_ref.get("kind") == "solid_surface":
+        beam_ref = master_ref
+        solid_ref = slave_ref
+        record["beam_role"] = "master"
+        record["solid_role"] = "slave"
+    elif slave_ref.get("kind") == "beam_wire" and master_ref.get("kind") == "solid_surface":
+        beam_ref = slave_ref
+        solid_ref = master_ref
+        record["beam_role"] = "slave"
+        record["solid_role"] = "master"
+    else:
+        record["status"] = "unsupported"
+        record["reason"] = "radial clearance is implemented for beam-wire to solid-surface pairs"
+        return record
+
+    center_radius = beam_ref.get("center_radius_mm")
+    wire_radius = beam_ref.get("wire_radius_mm")
+    solid_radius = solid_ref.get("radius_mm")
+    if center_radius is None or wire_radius is None or solid_radius is None:
+        record["status"] = "incomplete"
+        record["reason"] = "missing beam center, wire radius, or solid surface radius"
+        return record
+
+    if solid_radius <= center_radius:
+        side = "inner"
+        beam_contact_radius = center_radius - wire_radius
+        clearance = beam_contact_radius - solid_radius
+    else:
+        side = "outer"
+        beam_contact_radius = center_radius + wire_radius
+        clearance = solid_radius - beam_contact_radius
+
+    tolerance = max(1.0e-6, max(abs(center_radius), abs(solid_radius), abs(wire_radius), 1.0) * 1.0e-6)
+    if clearance > tolerance:
+        state = "gapped"
+    elif clearance < -tolerance:
+        state = "overclosed"
+    else:
+        state = "touching"
+
+    record.update({
+        "status": "checked",
+        "initial_contact_state": state,
+        "radial_side": side,
+        "beam_component": beam_ref.get("component"),
+        "solid_component": solid_ref.get("component"),
+        "beam_center_radius_mm": center_radius,
+        "beam_wire_radius_mm": wire_radius,
+        "beam_contact_radius_mm": beam_contact_radius,
+        "solid_surface_radius_mm": solid_radius,
+        "initial_clearance_mm": clearance,
+        "initial_overclosure_mm": max(0.0, -clearance),
+        "tolerance_mm": tolerance,
+    })
+    return record
+
+
+def summarize_contact_initial_clearance(payload, contact_pairs):
+    defaults = contact_defaults_from_payload(payload)
+    residual_pressure = float_or_none(defaults.get("residual_contact_pressure_mpa"))
+    if residual_pressure is None:
+        residual_pressure = 0.0
+    pair_records = []
+    checked_records = []
+    for contact_pair in contact_pairs or []:
+        if not isinstance(contact_pair, dict):
+            continue
+        record = contact_pair_initial_clearance(payload, contact_pair)
+        pair_records.append(record)
+        if record.get("status") == "checked":
+            checked_records.append(record)
+            contact_pair["initial_contact_state"] = record.get("initial_contact_state")
+            contact_pair["initial_clearance_mm"] = record.get("initial_clearance_mm")
+            contact_pair["initial_overclosure_mm"] = record.get("initial_overclosure_mm")
+            contact_pair["radial_contact_side"] = record.get("radial_side")
+
+    gapped = [item for item in checked_records if item.get("initial_contact_state") == "gapped"]
+    touching = [item for item in checked_records if item.get("initial_contact_state") == "touching"]
+    overclosed = [item for item in checked_records if item.get("initial_contact_state") == "overclosed"]
+    clearances = [item.get("initial_clearance_mm") for item in checked_records if item.get("initial_clearance_mm") is not None]
+    overclosures = [item.get("initial_overclosure_mm") for item in checked_records if item.get("initial_overclosure_mm") is not None]
+    status = "not_checked"
+    if checked_records:
+        if overclosed:
+            status = "has_initial_overclosure"
+        elif gapped:
+            status = "open_or_tangent_without_preload"
+        else:
+            status = "touching_without_preload"
+    preload_status = "not_requested"
+    if residual_pressure > 0.0:
+        preload_status = "not_applied"
+        if overclosed:
+            preload_status = "geometric_overclosure_only"
+    return {
+        "status": status,
+        "checked_pair_count": len(checked_records),
+        "gapped_pair_count": len(gapped),
+        "touching_pair_count": len(touching),
+        "overclosed_pair_count": len(overclosed),
+        "min_initial_clearance_mm": min(clearances) if clearances else None,
+        "max_initial_clearance_mm": max(clearances) if clearances else None,
+        "max_initial_overclosure_mm": max(overclosures) if overclosures else None,
+        "residual_contact_pressure_mpa": residual_pressure,
+        "residual_pressure_preload_status": preload_status,
+        "interpretation": "Residual contact pressure is recorded in the contract; the current scaffold does not yet apply a shrink/interference preload keyword.",
+        "next_step": "Apply a small Abaqus initial interference/shrink-fit preload or adjust the reduced geometry so contact pairs close before using CPRESS/slip as calibrated physics.",
+        "pairs": pair_records,
+    }
+
+
 def write_mesh_manifest(
     path,
     payload,
@@ -289,6 +476,7 @@ def write_mesh_manifest(
                 break
     boundary_conditions = boundary_conditions or {}
     boundary_condition_status = boundary_conditions.get("status", "not_created")
+    contact_initial_clearance = summarize_contact_initial_clearance(payload, contact_pairs)
     manifest = {
         "status": "abaqus_mesh_created" if abaqus_created else "mesh_request_only",
         "created_at": timestamp_seconds(),
@@ -319,6 +507,7 @@ def write_mesh_manifest(
         "contact_interaction_scaffold": contact_interactions,
         "contact_pair_scaffold_status": contact_pair_status,
         "contact_pair_scaffold": contact_pairs,
+        "contact_initial_clearance_summary": contact_initial_clearance,
         "contact_pair_keyword_adjustment": contact_pair_keyword_adjustment or {
             "status": "not_attempted",
             "reason": "Abaqus input deck was not generated or no contact pair keyword adjustment was requested.",

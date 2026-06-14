@@ -103,6 +103,7 @@ def quality_details(report: dict):
         b31_quality = logs.get("b31_beam_warning_details", {}) or {}
     if not local_field and isinstance(result_summary, dict):
         local_field = result_summary.get("odb_local_field_summary", {}) or {}
+    contact_clearance = manifest.get("contact_initial_clearance_summary", {}) if isinstance(manifest, dict) else {}
 
     available_outputs = local_field.get("available_field_outputs", {})
     present_outputs = local_field.get("present_target_outputs", {})
@@ -147,6 +148,15 @@ def quality_details(report: dict):
         "odb_top_contact_opening_outputs": local_field.get("top_contact_opening_outputs", []),
         "odb_top_slip_outputs": local_field.get("top_slip_outputs", []),
         "odb_top_stress_outputs": local_field.get("top_stress_outputs", []),
+        "contact_clearance_status": contact_clearance.get("status") if isinstance(contact_clearance, dict) else None,
+        "contact_clearance_checked_pairs": int_scalar(contact_clearance.get("checked_pair_count")) if isinstance(contact_clearance, dict) else None,
+        "contact_clearance_gapped_pairs": int_scalar(contact_clearance.get("gapped_pair_count")) if isinstance(contact_clearance, dict) else None,
+        "contact_clearance_touching_pairs": int_scalar(contact_clearance.get("touching_pair_count")) if isinstance(contact_clearance, dict) else None,
+        "contact_clearance_overclosed_pairs": int_scalar(contact_clearance.get("overclosed_pair_count")) if isinstance(contact_clearance, dict) else None,
+        "contact_clearance_min_mm": contact_clearance.get("min_initial_clearance_mm") if isinstance(contact_clearance, dict) else None,
+        "contact_clearance_max_mm": contact_clearance.get("max_initial_clearance_mm") if isinstance(contact_clearance, dict) else None,
+        "contact_residual_preload_status": contact_clearance.get("residual_pressure_preload_status") if isinstance(contact_clearance, dict) else None,
+        "contact_residual_pressure_mpa": contact_clearance.get("residual_contact_pressure_mpa") if isinstance(contact_clearance, dict) else None,
     }
 
 
@@ -250,6 +260,17 @@ def print_human(summary: dict) -> None:
     ))
     print("Mesh: summary={0}, manifest={1}".format(scalar(summary.get("mesh_status")), scalar(summary.get("manifest_status"))))
     print("Contact scaffold: {0}".format(scalar(summary.get("contact_pair_scaffold_status"))))
+    print("Contact clearance: status={0}, checked={1}, gapped={2}, touching={3}, overclosed={4}, min_gap={5}, max_gap={6}, preload={7}, residual_mpa={8}".format(
+        scalar(summary.get("contact_clearance_status")),
+        scalar(summary.get("contact_clearance_checked_pairs")),
+        scalar(summary.get("contact_clearance_gapped_pairs")),
+        scalar(summary.get("contact_clearance_touching_pairs")),
+        scalar(summary.get("contact_clearance_overclosed_pairs")),
+        scalar(summary.get("contact_clearance_min_mm")),
+        scalar(summary.get("contact_clearance_max_mm")),
+        scalar(summary.get("contact_residual_preload_status")),
+        scalar(summary.get("contact_residual_pressure_mpa")),
+    ))
     print("Endpoint sweep: validated={0}, shape={1}, children={2}, child_jobs={3}".format(
         scalar(summary.get("endpoint_sweep_validated")),
         scalar(summary.get("endpoint_sweep_shape_passed")),

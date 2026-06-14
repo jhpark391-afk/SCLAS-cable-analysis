@@ -1070,6 +1070,22 @@ def inspect_manifest(job_dir: Path, report: dict) -> None:
         section[key] = data.get(key)
     section["abaqus_files"] = data.get("abaqus_files", [])
     section["contact_bindings"] = len(data.get("contact_binding_scaffold", []))
+    contact_clearance = data.get("contact_initial_clearance_summary", {})
+    if isinstance(contact_clearance, dict) and contact_clearance:
+        section["contact_initial_clearance_summary"] = contact_clearance
+        residual_pressure = parse_float(contact_clearance.get("residual_contact_pressure_mpa")) or 0.0
+        preload_status = contact_clearance.get("residual_pressure_preload_status")
+        overclosed_count = int(contact_clearance.get("overclosed_pair_count") or 0)
+        checked_count = int(contact_clearance.get("checked_pair_count") or 0)
+        if checked_count and residual_pressure > 0.0 and preload_status == "not_applied" and overclosed_count == 0:
+            add_issue(report, "warning", "Residual contact pressure is declared but no initial contact preload/overclosure is applied", {
+                "residual_contact_pressure_mpa": residual_pressure,
+                "contact_clearance_status": contact_clearance.get("status"),
+                "gapped_pair_count": contact_clearance.get("gapped_pair_count"),
+                "touching_pair_count": contact_clearance.get("touching_pair_count"),
+                "min_initial_clearance_mm": contact_clearance.get("min_initial_clearance_mm"),
+                "next_step": contact_clearance.get("next_step"),
+            })
     section["components"] = [item.get("name") for item in data.get("components", []) if isinstance(item, dict)]
     beam_orientation = data.get("beam_orientation_adjustments", [])
     if isinstance(beam_orientation, list):
@@ -1231,6 +1247,25 @@ def summarize_report(report: dict) -> None:
     sweep_shape = report.get("endpoint_sweep_shape", {})
     continuous_shape = report.get("continuous_curve_v0_shape", {})
     sweep_children = report.get("endpoint_sweep_children", {})
+    local_field = summary.get("odb_local_field_summary", {}) if isinstance(summary, dict) else {}
+    contact_clearance = manifest.get("contact_initial_clearance_summary", {}) if isinstance(manifest, dict) else {}
+    contact_pressure_max = parse_float(local_field.get("contact_pressure_max")) if isinstance(local_field, dict) else None
+    contact_opening_abs_max = parse_float(local_field.get("contact_opening_abs_max")) if isinstance(local_field, dict) else None
+    contact_preload_missing = False
+    if isinstance(contact_clearance, dict):
+        residual_pressure = parse_float(contact_clearance.get("residual_contact_pressure_mpa")) or 0.0
+        contact_preload_missing = bool(
+            int(contact_clearance.get("checked_pair_count") or 0)
+            and residual_pressure > 0.0
+            and contact_clearance.get("residual_pressure_preload_status") == "not_applied"
+            and int(contact_clearance.get("overclosed_pair_count") or 0) == 0
+        )
+    contact_pressure_zero_with_opening = bool(
+        contact_pressure_max is not None
+        and abs(contact_pressure_max) <= 1.0e-12
+        and contact_opening_abs_max is not None
+        and contact_opening_abs_max > 0.0
+    )
     sweep_b31 = sweep_children.get("b31_beam_warning_details", {}) if isinstance(sweep_children, dict) else {}
     solver_b31 = logs.get("b31_beam_warning_details", {}) if isinstance(logs, dict) else {}
     b31_warning_count = int(sweep_b31.get("total_warning_sets") or solver_b31.get("total_warning_sets") or 0)
@@ -1266,12 +1301,17 @@ def summarize_report(report: dict) -> None:
         if summary.get("abaqus_curve_class") == "two_point_odb_smoke":
             if b31_warning_count:
                 action = "Stable two-row Abaqus ODB smoke completed; remaining B31 helical beam curvature/twist warnings should be isolated in a minimal helix probe."
+            elif contact_preload_missing and contact_pressure_zero_with_opening:
+                action = "Stable two-row Abaqus ODB smoke completed; first contact-physics blocker is that residual pressure is declared but no initial interference/preload is applied, leaving CPRESS at zero with open/tangent contact."
             else:
                 action = "Stable two-row Abaqus ODB smoke completed; keep it as the bridge baseline and design the multi-point curve as a separate backend task."
         elif summary.get("abaqus_curve_class") == "endpoint_sweep_curve_v0":
             action = "Endpoint sweep curve-v0 was extracted; validate it against a continuous bending path before treating it as research data."
         elif summary.get("abaqus_curve_class") == "multi_point_curve_v0" and continuous_shape.get("shape_checks_passed"):
-            action = "Continuous CurveV0 multi-point ODB curve passed the basic shape checks; next compare it against the endpoint sweep and start adding calibrated contact/friction outputs."
+            if contact_preload_missing and contact_pressure_zero_with_opening:
+                action = "Continuous CurveV0 multi-point ODB curve passed the basic shape checks; first contact-physics blocker is residual pressure/preload not being applied, so add a small shrink/interference preload or close the reduced geometry before calibrating CPRESS/slip."
+            else:
+                action = "Continuous CurveV0 multi-point ODB curve passed the basic shape checks; next compare it against the endpoint sweep and start adding calibrated contact/friction outputs."
         elif summary.get("abaqus_is_research_curve"):
             action = "A multi-point Abaqus ODB curve was extracted; validate contact warnings, curve shape, and calibration metrics next."
         else:
@@ -1387,6 +1427,7 @@ def markdown_report(report: dict) -> str:
     summary_section = report.get("result_summary_json", {})
     curve_summary = summary_section.get("curve_summary") if isinstance(summary_section.get("curve_summary"), dict) else csv_section.get("curve_summary", {})
     manifest_section = report.get("abaqus_mesh_manifest_json", {})
+    contact_clearance = manifest_section.get("contact_initial_clearance_summary", {}) if isinstance(manifest_section, dict) else {}
     deck_section = report.get("input_deck", {})
     logs_section = report.get("solver_logs", {})
     sweep_shape_section = report.get("endpoint_sweep_shape", {})
@@ -1423,6 +1464,18 @@ def markdown_report(report: dict) -> str:
         ("Mesh status", scalar(summary_section.get("mesh_status"))),
         ("Manifest status", scalar(manifest_section.get("status"))),
         ("Contact pair scaffold", scalar(manifest_section.get("contact_pair_scaffold_status"))),
+        ("Contact clearance status", scalar(contact_clearance.get("status") if isinstance(contact_clearance, dict) else None)),
+        ("Contact clearance pairs", "checked={0}, gapped={1}, touching={2}, overclosed={3}".format(
+            scalar(contact_clearance.get("checked_pair_count") if isinstance(contact_clearance, dict) else None),
+            scalar(contact_clearance.get("gapped_pair_count") if isinstance(contact_clearance, dict) else None),
+            scalar(contact_clearance.get("touching_pair_count") if isinstance(contact_clearance, dict) else None),
+            scalar(contact_clearance.get("overclosed_pair_count") if isinstance(contact_clearance, dict) else None),
+        )),
+        ("Contact clearance min/max", "{0} / {1}".format(
+            scalar(contact_clearance.get("min_initial_clearance_mm") if isinstance(contact_clearance, dict) else None),
+            scalar(contact_clearance.get("max_initial_clearance_mm") if isinstance(contact_clearance, dict) else None),
+        )),
+        ("Residual preload status", scalar(contact_clearance.get("residual_pressure_preload_status") if isinstance(contact_clearance, dict) else None)),
         ("Boundary scaffold", scalar(manifest_section.get("boundary_condition_scaffold_status"))),
         ("Sweep child jobs", scalar(summary_section.get("child_job_count"))),
         ("Sweep rows", scalar(summary_section.get("rows_written"))),

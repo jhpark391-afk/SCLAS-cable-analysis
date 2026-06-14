@@ -238,9 +238,17 @@ Current partial implementation:
 - `code/sclas_offline_diagnostics.py` and `code/sclas_job_summary.py` surface
   these metrics and curve scalars for single jobs and aggregate them across
   endpoint-sweep child jobs.
+- `abaqus_mesh_manifest.json` now includes
+  `contact_initial_clearance_summary`, which records initial radial clearance
+  or overclosure for created beam-wire / solid-surface contact pairs. Current
+  reduced validation shows two gapped pairs, two touching pairs, no overclosed
+  pairs, and `residual_pressure_preload_status=not_applied`.
 
 Still needed before treating Phase 4 as research-complete:
 
+- apply a controlled Abaqus shrink/interference preload or equivalent
+  reduced-geometry closure so declared residual pressure produces nonzero
+  `CPRESS`
 - full per-interface contact/slip/stress ranges and time/history traces rather
   than top-output scalar digests only
 - closed-cycle energy interpretation beyond the current trapezoidal scalar

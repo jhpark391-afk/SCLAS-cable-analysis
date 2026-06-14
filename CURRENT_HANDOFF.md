@@ -2254,6 +2254,61 @@ Interpretation:
   produce nonzero `CPRESS`/slip where expected before claiming paper-grade
   stick-slip behavior.
 
+## 2026-06-14 Windows Abaqus Update - Contact Clearance Diagnostics
+
+Windows lab-PC work added an explicit initial-contact clearance diagnostic for
+the Abaqus mesh/contact scaffold:
+
+- `code/abaqus_runner.py` now computes
+  `contact_initial_clearance_summary` in `abaqus_mesh_manifest.json`.
+- Each created beam-wire / solid-surface contact pair records radial side,
+  beam contact radius, solid surface radius, initial clearance, initial
+  overclosure, and state (`gapped`, `touching`, or `overclosed`).
+- `code/sclas_offline_diagnostics.py` raises a warning when residual contact
+  pressure is declared but the scaffold has no initial overclosure/preload.
+- `code/sclas_job_summary.py` prints the clearance/preload status in the
+  concise health summary.
+
+Fresh Windows validation after this update:
+
+- SmallSmoke: `jobs\SCLAS_jobs\small_smoke_20260614_153845`
+  - Abaqus job completed.
+  - ODB extraction status `extracted`, rows `2`.
+  - `source=SCLAS_ABAQUS_ODB_EXTRACTOR`.
+  - Actual warning hits `0`, blocking hits `0`.
+  - Contact clearance: checked pairs `4`, gapped `2`, touching `2`,
+    overclosed `0`, min gap `0.0 mm`, max gap `0.5 mm`.
+  - Residual contact pressure is `0.3 MPa`, but preload status is
+    `not_applied`.
+- Endpoint sweep: `jobs\SCLAS_jobs\curve_v0_sweep_20260614_153932`
+  - Parent `result_data.csv` has five numeric rows.
+  - Parent `source=SCLAS_CURVE_V0_ENDPOINT_SWEEP`.
+  - `endpoint_sweep_validation.all_child_jobs_validated=true`.
+  - Offline diagnostics deep-validated all five children.
+  - Shape checks passed with odd-symmetry relative error about `1.68e-05`.
+  - Aggregate ODB fields remain present in 5/5 child jobs, but
+    `contact_pressure_max=0.0` and `slip_abs_max=0.0`.
+- Continuous CurveV0: `jobs\SCLAS_jobs\curve_v0_20260614_154312`
+  - Abaqus job completed.
+  - ODB extraction status `extracted`, rows `5`.
+  - `abaqus_result_quality.curve_class=multi_point_curve_v0`.
+  - Continuous shape checks passed with symmetry error about `1.69e-05`.
+  - Contact clearance: checked pairs `4`, gapped `2`, touching `2`,
+    overclosed `0`, min gap `0.0 mm`, max gap `0.5 mm`.
+  - `contact_pressure_max=0.0`, `slip_abs_max=0.0`,
+    `contact_opening_abs_max=2.580226182937622`.
+  - Recommended next action now correctly identifies the first contact-physics
+    blocker: residual pressure/preload is not being applied.
+
+Interpretation:
+
+- The bridge, endpoint sweep, and continuous CurveV0 path remain stable after
+  the clearance diagnostics update.
+- There is still no solver/extraction blocking error.
+- The next modelling fix should add a small, controlled Abaqus
+  shrink/interference preload or a reduced-geometry closure option so residual
+  pressure can produce nonzero `CPRESS` before contact/slip calibration.
+
 ## Next Recommended Tasks
 
 1. Preserve the stable Lab-PC validation loop:
@@ -2276,7 +2331,11 @@ Interpretation:
 6. Extend the new ODB local-field summaries from aggregate maxima to
    full per-interface contact/slip/stress ranges, contact status, and
    fatigue-oriented metrics.
-7. After each meaningful task, update this file, commit, and push only code/docs
+7. Implement and validate a small contact preload/closure path:
+   start with a single reduced CurveV0 factor or SmallSmoke, avoid runs longer
+   than 20 minutes without log progress, and only then rerun the full endpoint
+   sweep.
+8. After each meaningful task, update this file, commit, and push only code/docs
    changes, never generated Abaqus job artifacts.
 
 ## Home Codex Start Prompt

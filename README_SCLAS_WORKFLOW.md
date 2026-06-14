@@ -77,6 +77,8 @@ maximum curvature/moment.
 For ODB-backed jobs, the same commands also report curve scalar summaries and
 top local-field output channels for contact pressure, opening, slip, shear, and
 stress when those fields are present.
+For Abaqus-generated jobs, they also report the contact clearance/preload
+diagnostic from `abaqus_mesh_manifest.json` when available.
 The offline diagnostics tool checks `result_data.csv`,
 `result_summary.json`, `abaqus_mesh_manifest.json`, generated `.inp` keyword
 placement, and `.dat`/`.msg`/`.sta` solver logs when those files exist.
