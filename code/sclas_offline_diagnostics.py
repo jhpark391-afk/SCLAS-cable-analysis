@@ -122,6 +122,8 @@ def scan_solver_log_keywords(job_dir: Path):
 
     blocking = []
     notable = []
+    actual_warnings = []
+    notes = []
     for path in unique_logs:
         lines = read_text(path).splitlines()
         for idx, line in enumerate(lines):
@@ -132,16 +134,26 @@ def scan_solver_log_keywords(job_dir: Path):
                     "text": line.strip(),
                 })
             elif notable_pattern.search(line):
-                notable.append({
+                item = {
                     "file": path.name,
                     "line": idx + 1,
                     "text": line.strip(),
-                })
+                }
+                notable.append(item)
+                if is_actual_warning_line(line):
+                    actual_warnings.append(item)
+                else:
+                    notes.append(item)
 
     warning_categories = {}
-    for item in notable:
+    for item in actual_warnings:
         category = classify_solver_warning(item.get("text", ""))
         warning_categories[category] = warning_categories.get(category, 0) + 1
+
+    note_categories = {}
+    for item in notes:
+        category = classify_solver_warning(item.get("text", ""))
+        note_categories[category] = note_categories.get(category, 0) + 1
 
     return {
         "files": [path.name for path in unique_logs],
@@ -149,8 +161,16 @@ def scan_solver_log_keywords(job_dir: Path):
         "failed": failed,
         "blocking_matches": blocking,
         "notable_matches": notable,
+        "actual_warning_matches": actual_warnings,
+        "note_matches": notes,
         "warning_categories": warning_categories,
+        "note_categories": note_categories,
     }
+
+
+def is_actual_warning_line(text):
+    upper = str(text).strip().upper()
+    return upper.startswith("***WARNING") or upper.startswith("WARNING:") or "ABAQUS WARNING" in upper
 
 
 def classify_solver_warning(text):
@@ -305,7 +325,10 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
         "all_children_deep_validated": True,
         "blocking_log_hits": 0,
         "notable_log_hits": 0,
+        "actual_warning_log_hits": 0,
+        "note_log_hits": 0,
         "warning_categories": {},
+        "note_categories": {},
     }
     report["endpoint_sweep_children"] = section
     if not isinstance(child_jobs, list):
@@ -406,12 +429,18 @@ def inspect_endpoint_sweep_children(job_dir: Path, report: dict, summary_data: d
         child_detail["solver_failed"] = log_scan["failed"]
         child_detail["blocking_log_hits"] = len(log_scan["blocking_matches"])
         child_detail["notable_log_hits"] = len(log_scan["notable_matches"])
+        child_detail["actual_warning_log_hits"] = len(log_scan.get("actual_warning_matches", []))
+        child_detail["note_log_hits"] = len(log_scan.get("note_matches", []))
         child_detail["warning_categories"] = log_scan.get("warning_categories", {})
+        child_detail["note_categories"] = log_scan.get("note_categories", {})
         if log_scan["blocking_matches"]:
             child_detail["first_blocking_log_hit"] = log_scan["blocking_matches"][0]
         section["blocking_log_hits"] += child_detail["blocking_log_hits"]
         section["notable_log_hits"] += child_detail["notable_log_hits"]
+        section["actual_warning_log_hits"] += child_detail["actual_warning_log_hits"]
+        section["note_log_hits"] += child_detail["note_log_hits"]
         merge_counts(section["warning_categories"], child_detail["warning_categories"])
+        merge_counts(section["note_categories"], child_detail["note_categories"])
 
         if log_scan["failed"] or log_scan["blocking_matches"]:
             add_issue(report, "error", "Endpoint sweep child solver logs contain a blocking failure", child_detail)
@@ -609,6 +638,7 @@ def inspect_solver_logs(job_dir: Path, report: dict) -> None:
         "completed": False,
         "failed": False,
         "warning_categories": {},
+        "note_categories": {},
     }
     report["solver_logs"] = section
     if not unique_logs:
@@ -621,7 +651,10 @@ def inspect_solver_logs(job_dir: Path, report: dict) -> None:
     keyword_scan = scan_solver_log_keywords(job_dir)
     section["blocking_match_count"] = len(keyword_scan.get("blocking_matches", []))
     section["notable_match_count"] = len(keyword_scan.get("notable_matches", []))
+    section["actual_warning_match_count"] = len(keyword_scan.get("actual_warning_matches", []))
+    section["note_match_count"] = len(keyword_scan.get("note_matches", []))
     section["warning_categories"] = keyword_scan.get("warning_categories", {})
+    section["note_categories"] = keyword_scan.get("note_categories", {})
 
     def collect_matches(pattern_items, limit):
         pattern = re.compile("|".join(re.escape(item) for item in pattern_items), re.IGNORECASE)
@@ -815,13 +848,19 @@ def markdown_report(report: dict) -> str:
         ("Sweep shape checks", scalar(sweep_shape_section.get("shape_checks_passed"))),
         ("Sweep child deep checks", scalar(sweep_children_section.get("all_children_deep_validated"))),
         ("Sweep child blocking hits", scalar(sweep_children_section.get("blocking_log_hits"))),
+        ("Sweep actual warning hits", scalar(sweep_children_section.get("actual_warning_log_hits"))),
+        ("Sweep note/progress hits", scalar(sweep_children_section.get("note_log_hits"))),
         ("Sweep warning categories", top_counts(sweep_children_section.get("warning_categories"))),
+        ("Sweep note categories", top_counts(sweep_children_section.get("note_categories"))),
         ("Sweep odd symmetry max rel", scalar(sweep_shape_section.get("odd_symmetry_max_relative_moment_sum"))),
         ("Sweep factor scale", scalar(sweep_shape_section.get("factor_curvature_scale"))),
         ("Input deck", scalar(deck_section.get("file"))),
         ("Couplings after End Assembly", scalar(deck_section.get("coupling_after_end_assembly"))),
         ("Solver log matches", scalar(len(logs_section.get("matches", [])))),
+        ("Solver actual warning hits", scalar(logs_section.get("actual_warning_match_count"))),
+        ("Solver note/progress hits", scalar(logs_section.get("note_match_count"))),
         ("Solver warning categories", top_counts(logs_section.get("warning_categories"))),
+        ("Solver note categories", top_counts(logs_section.get("note_categories"))),
         ("Errors", scalar(issue_counts.get("error"))),
         ("Warnings", scalar(issue_counts.get("warning"))),
     ]

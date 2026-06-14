@@ -1324,6 +1324,78 @@ for the thin bedding annulus, such as partitioning the annular cross-section,
 using a more appropriate thin-layer representation, or changing the scaffold
 geometry for bedding after confirming the impact on the endpoint moment curve.
 
+## Diagnostics Warning/Note Split - 2026-06-14 KST
+
+Offline diagnostics now separates real Abaqus warning lines from completed-job
+keyword echo and progress notes:
+
+- `warning_categories` now counts only actual warning lines such as
+  `***WARNING`.
+- `note_categories` counts notable but non-warning lines such as `*coupling`
+  keyword echo, `COLLECTING ... OVERCONSTRAINT CHECKS`, and solver summary
+  warning-count lines.
+- `actual_warning_log_hits` / `actual_warning_match_count` expose the actual
+  warning line count.
+- `note_log_hits` / `note_match_count` expose the remaining notable note count.
+- `code\sclas_self_check.py` now verifies that overconstraint progress lines
+  are retained as notes, not counted as warnings.
+
+Verification:
+
+```powershell
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m py_compile code\abaqus_runner.py code\SCLAS_test\abaqus_runner.py code\sclas_odb_extractor.py code\sclas_offline_diagnostics.py code\sclas_self_check.py
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe code\sclas_self_check.py
+```
+
+Both passed. The self-check created:
+
+```text
+jobs\SCLAS_jobs\self_check_20260614_133840
+jobs\SCLAS_jobs\self_check_endpoint_sweep_20260614_133840
+```
+
+Rechecking the latest real parent sweep:
+
+```text
+jobs\SCLAS_jobs\curve_v0_sweep_20260614_132815
+```
+
+Result:
+
+```text
+rows=5
+source=SCLAS_CURVE_V0_ENDPOINT_SWEEP
+endpoint_sweep_shape.shape_checks_passed=true
+endpoint_sweep_children.all_children_deep_validated=true
+endpoint_sweep_children.blocking_log_hits=0
+actual_warning_log_hits=15
+note_log_hits=115
+notable_log_hits=130
+```
+
+Actual warning taxonomy is now:
+
+```text
+beam_curvature=10
+distorted_elements=5
+```
+
+Note/progress taxonomy is now:
+
+```text
+coupling_or_reference_node_note=60
+other_warning=25
+increment_cutback_or_excessive_reporting=15
+overconstraint_check=10
+distorted_elements=5
+```
+
+This confirms the next true modelling target is not overconstraint or coupling
+failure. It is the actual input-warning pair:
+
+- `BeddingEquivalent` distorted solid elements.
+- Armour B31 beam curvature/twist normal checks.
+
 ## Important Files
 
 ```text

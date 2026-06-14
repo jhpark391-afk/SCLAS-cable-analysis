@@ -429,6 +429,7 @@ def check_endpoint_sweep_diagnostics() -> None:
         (child_dir / "solver_stdout.txt").write_text(
             "\n".join([
                 "Abaqus JOB curve_v0_child_{0}_mesh COMPLETED".format(idx),
+                "COLLECTING MODEL CONSTRAINT INFORMATION FOR OVERCONSTRAINT CHECKS",
                 "***WARNING: SURFACE TO SURFACE CONTACT APPROACH FOR CONTACT PAIR IS NOT YET AVAILABLE FOR 3D BEAM OR TRUSS SLAVE SURFACE. NODE TO SURFACE APPROACH WILL BE USED INSTEAD.",
                 "",
             ]),
@@ -481,6 +482,11 @@ def check_endpoint_sweep_diagnostics() -> None:
     warning_categories = child_section.get("warning_categories", {})
     if warning_categories.get("beam_contact_surface_to_node_fallback") != 5:
         fail("Endpoint sweep child warning taxonomy did not detect contact fallback warnings")
+    if warning_categories.get("overconstraint_check"):
+        fail("Endpoint sweep warning taxonomy counted overconstraint progress notes as warnings")
+    note_categories = child_section.get("note_categories", {})
+    if note_categories.get("overconstraint_check") != 5:
+        fail("Endpoint sweep note taxonomy did not retain overconstraint progress notes")
 
     print(f"[OK] Endpoint sweep diagnostics: {job_dir}")
 
