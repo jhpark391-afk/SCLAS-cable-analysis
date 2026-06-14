@@ -1011,6 +1011,156 @@ contact_pair_general_contact_overlap=1
 unconnected_regions=1
 ```
 
+## Lab Armour End Coupling Stabilization - 2026-06-14 KST
+
+The next warning bottleneck was the large numerical-singularity and
+unconnected-region warning volume from the armour B31 beam layers. The earlier
+keyword coupling fallback only included the six solid-equivalent layer end-node
+sets. The inner and outer armour beam end nodes were therefore not tied into the
+left/right bending reference surfaces, leaving the beam layers weakly connected
+during the cyclic bending step.
+
+Implementation:
+
+- `code/abaqus_runner.py` now separates `end_coupling_node_specs` from the
+  solid end-face bookkeeping.
+- Solid layers still append their end-node labels through the existing
+  `append_solid_end_face_spec()` path.
+- `InnerArmourHelix` and `OuterArmourHelix` now append their left/right end-node
+  labels after B31 mesh generation and contact-region creation.
+- The Abaqus 2019 keyword coupling fallback builds the injected left/right
+  node-based coupling surfaces from `end_coupling_node_specs`, so the six solid
+  layers plus two armour beam layers are all included.
+- `code/SCLAS_test/abaqus_runner.py` was synchronized.
+
+Static verification:
+
+```powershell
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m py_compile code\abaqus_runner.py code\SCLAS_test\abaqus_runner.py code\sclas_odb_extractor.py code\sclas_offline_diagnostics.py code\sclas_self_check.py
+C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe code\sclas_self_check.py
+```
+
+Both passed. The self-check created:
+
+```text
+jobs\SCLAS_jobs\self_check_20260614_130445
+jobs\SCLAS_jobs\self_check_endpoint_sweep_20260614_130445
+```
+
+Lab-PC SmallSmoke verification:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -SmallSmoke
+```
+
+SmallSmoke created:
+
+```text
+jobs\SCLAS_jobs\small_smoke_20260614_130457
+```
+
+Result:
+
+- Abaqus job completed.
+- ODB extraction status was `extracted`.
+- `result_summary.json.source` was `SCLAS_ABAQUS_ODB_EXTRACTOR`.
+- `odb_extraction.rows_written` was `2`.
+- `boundary_condition_scaffold.keyword_coupling_fallback.status` was
+  `injected`.
+- `left_node_set_count=8` and `right_node_set_count=8`, confirming that both
+  armour beam layers joined the six solid layers in the endpoint coupling
+  fallback.
+- Searching the `.dat` file for
+  `SURFACE TO SURFACE CONTACT APPROACH|NODE TO SURFACE APPROACH|NUMERICAL SINGULARITY|UNCONNECTED REGIONS`
+  returned zero hits.
+
+Single-job warning taxonomy improved from the previous SmallSmoke baseline:
+
+```text
+before: numerical_singularity=133, overconstraint_check=77, unconnected_regions=1
+after:  numerical_singularity=0,   overconstraint_check=2,  unconnected_regions=0
+```
+
+Lab-PC full Curve V0 endpoint sweep:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_sweep.ps1
+```
+
+Runtime was about 13 minutes 58 seconds, below the 20-minute intervention
+threshold. The sweep created:
+
+```text
+jobs\SCLAS_jobs\curve_v0_sweep_20260614_130758
+```
+
+Parent result:
+
+```csv
+curvature_1_per_m,moment_kn_m
+-0.0079999997979,-2.588653
+-0.00399999989895,-1.294349625
+0,0
+0.00399999989895,1.294349
+0.0079999997979,2.58865
+```
+
+Parent diagnostics:
+
+```text
+source=SCLAS_CURVE_V0_ENDPOINT_SWEEP
+rows=5
+endpoint_sweep_shape.shape_checks_passed=true
+endpoint_sweep_children.all_children_deep_validated=true
+endpoint_sweep_children.blocking_log_hits=0
+diagnostic_summary.issue_counts={'error': 0, 'warning': 0, 'info': 0}
+```
+
+Child jobs:
+
+```text
+curve_v0_20260614_130758  factor=-0.1   leftSets=8  rightSets=8  rows=2
+curve_v0_20260614_131052  factor=-0.05  leftSets=8  rightSets=8  rows=2
+curve_v0_20260614_131345  factor=0      leftSets=8  rightSets=8  rows=2
+curve_v0_20260614_131611  factor=0.05   leftSets=8  rightSets=8  rows=2
+curve_v0_20260614_131902  factor=0.1    leftSets=8  rightSets=8  rows=2
+```
+
+For every child:
+
+- Abaqus/Standard completed.
+- ODB extraction status was `extracted`.
+- `result_summary.json.source` was `SCLAS_ABAQUS_ODB_EXTRACTOR`.
+- `odb_extraction.rows_written` was `2`.
+- The endpoint coupling fallback injected eight left and eight right component
+  node sets.
+- Searching `.dat` for the contact-pair fallback, numerical-singularity, and
+  unconnected-region patterns returned zero hits.
+
+Remaining completed-child warning taxonomy for the parent sweep:
+
+```text
+coupling_or_reference_node_note=60
+other_warning=30
+increment_cutback_or_excessive_reporting=15
+beam_curvature=10
+overconstraint_check=10
+distorted_elements=10
+contact_pair_general_contact_overlap=5
+```
+
+Important interpretation:
+
+- The Curve V0 moment baseline changed from about `+/-0.844 kN*m` to about
+  `+/-2.589 kN*m` because the armour beams now participate in the end bending
+  coupling instead of being weakly connected/free at the endpoints.
+- Treat this as a more physical endpoint-coupled v0 baseline, but still not a
+  calibrated research hysteresis model.
+- The next modelling target is the smaller residual warning set:
+  overconstraint checks, contact-pair/general-contact overlap, beam curvature,
+  and distorted element warnings. Do not change those until the first concrete
+  blocking or clearly reducible warning mechanism is isolated.
+
 ## Important Files
 
 ```text
@@ -1130,22 +1280,26 @@ Still needed for a paper-level implementation:
 
 ## Next Recommended Tasks
 
-1. On the lab PC, pull commit `ba9ce36` and re-run the Abaqus noGUI generation
-   plus solver smoke command sequence above.
-2. If the solver still fails during input processing, capture the first
-   `FATAL` / `ERROR` block from the `.dat` file and fix only that Abaqus input
-   issue.
-3. If input processing succeeds, make a reduced-size smoke model so Abaqus
-   solve iterations are fast enough for backend development.
-4. Preserve the GUI contract:
+1. Preserve the stable Lab-PC validation loop:
+   `run_lab_abaqus_smoke.ps1 -SmallSmoke` for bridge health, then
+   `run_curve_v0_sweep.ps1` for the five-factor endpoint sweep.
+2. If any Abaqus run exceeds 20 minutes without visible progress, stop waiting,
+   record it as a long-running case, inspect current logs, and retry with fewer
+   factors or a reduced mesh.
+3. Keep the GUI/backend result contract stable:
    - `input_data.json` as backend input
    - `result_data.csv` with `curvature_1_per_m,moment_kn_m`
    - `result_summary.json` for optional metrics
+4. Reduce the remaining completed-solver warning classes only after isolating a
+   concrete mechanism in `.dat`/`.msg`/manifest data:
+   overconstraint checks, contact-pair/general-contact overlap, beam curvature,
+   and distorted element warnings.
 5. Add true periodic boundary equations or a documented equivalent-cell
    approximation.
-6. Add Abaqus job submission/status handling and ODB extraction into
-   `result_data.csv`.
-7. After each meaningful task, update this file, commit, and push.
+6. Extend ODB extraction beyond the current endpoint rows toward local slip,
+   contact pressure, stress, and fatigue-oriented summary metrics.
+7. After each meaningful task, update this file, commit, and push only code/docs
+   changes, never generated Abaqus job artifacts.
 
 ## Home Codex Start Prompt
 

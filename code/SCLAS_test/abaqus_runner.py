@@ -526,6 +526,7 @@ def build_abaqus_mesh_model(payload, job_dir):
     contact_property = create_contact_property_scaffold(model, payload)
     contact_regions = []
     solid_end_face_specs = []
+    end_coupling_node_specs = []
 
     def append_contact_region(record, created_count, expected_count):
         if created_count >= expected_count:
@@ -547,6 +548,16 @@ def build_abaqus_mesh_model(payload, job_dir):
             labels = []
         return labels
 
+    def append_end_coupling_node_spec(component_name, instance_name, left_node_labels=None, right_node_labels=None):
+        end_coupling_node_specs.append(
+            {
+                "component": component_name,
+                "assembly_instance": instance_name,
+                "left_node_labels": left_node_labels or [],
+                "right_node_labels": right_node_labels or [],
+            }
+        )
+
     def append_solid_end_face_spec(component_name, instance_name, left_probe, right_probe, left_node_labels=None, right_node_labels=None):
         solid_end_face_specs.append(
             {
@@ -558,6 +569,7 @@ def build_abaqus_mesh_model(payload, job_dir):
                 "right_node_labels": right_node_labels or [],
             }
         )
+        append_end_coupling_node_spec(component_name, instance_name, left_node_labels, right_node_labels)
 
     def region_sequence(found):
         try:
@@ -1270,7 +1282,7 @@ def build_abaqus_mesh_model(payload, job_dir):
             "** SCLAS Abaqus 2019 end-coupling keyword fallback",
             "** Assembly-scoped end node sets and node-based surfaces.",
         ]
-        for spec in solid_end_face_specs:
+        for spec in end_coupling_node_specs:
             component = safe_name(spec.get("component", "solid"), 24)
             instance_name = spec.get("assembly_instance")
             left_labels = spec.get("left_node_labels", [])
@@ -1628,6 +1640,12 @@ def build_abaqus_mesh_model(payload, job_dir):
         part.generateMesh()
         inst = assembly.Instance(name=name + "_1", part=part, dependent=ON)
         create_beam_contact_regions(part, inst, name)
+        append_end_coupling_node_spec(
+            name,
+            inst.name,
+            left_node_labels=end_node_labels(part, -0.5 * length),
+            right_node_labels=end_node_labels(part, 0.5 * length),
+        )
         return part
 
     core_radius = float(geometry["core_outer_radius_mm"])
