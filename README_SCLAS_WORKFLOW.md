@@ -114,7 +114,8 @@ and `sclas_job_index.md` under `jobs/SCLAS_jobs`.
 Use `sclas_handoff_snapshot.py --save-report --save-markdown` before switching
 between Mac, home, and remote-lab Codex sessions. It writes
 `handoff_snapshot.json` and `handoff_snapshot.md` at the project root with the
-current git state, project status, job index, best job, and next action.
+current git state, project status, acceptance-gate status, job index, best job,
+and next action.
 Use `run_next_prompt.sh` or `run_next_prompt.bat` to write
 `NEXT_CODEX_PROMPT.md`, a ready-made prompt for the next Mac/home/remote Codex
 session.
@@ -123,7 +124,9 @@ back. It checks whether the latest result is research-ready across result
 contract, continuous CurveV0, contact preload/closure, ODB local fields, and
 warning budget. With `--save-report` and `--save-markdown`, it writes
 `acceptance_gate_report.json` and `acceptance_gate_report.md` into the latest
-job folder.
+job folder. The handoff snapshot and generated next-session prompt also carry
+the latest acceptance status so the next Codex session starts from the same
+pass/review/blocked evidence.
 If a CurveV0 comparison report exists in a job folder, `sclas_job_summary.py`
 also prints the comparison status, peak ratio, and branch deltas.
 Use `sclas_curve_compare.py` after both endpoint sweep and continuous CurveV0

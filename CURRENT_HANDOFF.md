@@ -2423,11 +2423,12 @@ themselves.
 It summarizes:
 
 - recent real `job_*` runs through `sclas_job_index.py`
-- a one-file handoff snapshot with git state, best job, status, and next action
+- a one-file handoff snapshot with git state, best job, status, acceptance
+  gate, and next action
 - `NEXT_CODEX_PROMPT.md`, a ready-made prompt for the next Codex session
   generated directly by `run_next_prompt.sh` or `run_next_prompt.bat`
 - an acceptance gate that separates completed Abaqus output from research-ready
-  contact/CurveV0 evidence
+  contact/CurveV0 evidence and is now embedded in the handoff snapshot/prompt
 - latest job health/source/curve class
 - latest endpoint-vs-continuous CurveV0 comparison status
 - contact preload state, CPRESS max, and slip max

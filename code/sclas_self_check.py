@@ -958,6 +958,13 @@ def check_handoff_snapshot() -> None:
         fail("Handoff snapshot did not carry the current contact preload next action")
     if not snapshot.get("project_status", {}).get("completion_flags"):
         fail("Handoff snapshot did not embed project status")
+    acceptance = snapshot.get("acceptance_gate", {})
+    if not acceptance.get("overall_status"):
+        fail("Handoff snapshot did not embed acceptance gate status")
+    if acceptance.get("overall_status") != "blocked":
+        fail("Handoff snapshot should carry the blocked acceptance state for synthetic fixtures")
+    if focus.get("acceptance_status") != acceptance.get("overall_status"):
+        fail("Handoff focus did not mirror the acceptance gate status")
     if not snapshot.get("job_index", {}).get("jobs"):
         fail("Handoff snapshot did not embed the job index")
     saved_report = Path(snapshot.get("saved_report", ""))
@@ -990,7 +997,9 @@ def check_next_prompt() -> None:
     for expected in [
         "git pull",
         "python code/sclas_handoff_snapshot.py --save-report --save-markdown",
+        "python code/sclas_acceptance_gate.py --save-report --save-markdown",
         "python code/sclas_self_check.py",
+        "Acceptance gate:",
         "contact preload",
     ]:
         if expected not in prompt:

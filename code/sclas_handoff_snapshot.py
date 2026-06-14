@@ -12,6 +12,7 @@ from typing import Optional
 from sclas_job_index import build_index
 from sclas_job_summary import DEFAULT_JOB_ROOT, collect_summary, latest_job_dir
 from sclas_offline_diagnostics import build_report
+from sclas_acceptance_gate import build_gate
 from sclas_project_status import build_status
 
 
@@ -50,11 +51,28 @@ def safe_latest_summary(job_root: Path, include_self_check: bool) -> dict:
         return {"error": str(exc)}
 
 
+def safe_acceptance_gate(job_root: Path, include_self_check: bool) -> dict:
+    try:
+        return build_gate(job_root, include_self_check=include_self_check)
+    except Exception as exc:
+        return {
+            "overall_status": "unavailable",
+            "error": str(exc),
+            "recommended_next_action": "Run or copy a valid SCLAS job folder, then rerun the acceptance gate.",
+        }
+
+
 def build_snapshot(job_root: Path, limit: int = 15, include_self_check: bool = False) -> dict:
     index = build_index(job_root, limit=limit, include_self_check=include_self_check)
     status = build_status(job_root, include_self_check=include_self_check)
+    acceptance = safe_acceptance_gate(job_root, include_self_check=include_self_check)
     latest_summary = safe_latest_summary(job_root, include_self_check=include_self_check)
     best_job = index.get("best_job") or {}
+    next_action = (
+        acceptance.get("recommended_next_action")
+        or status.get("recommended_next_action")
+        or latest_summary.get("recommended_next_action")
+    )
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "project_dir": str(PROJECT_DIR),
@@ -62,6 +80,7 @@ def build_snapshot(job_root: Path, limit: int = 15, include_self_check: bool = F
         "include_self_check": include_self_check,
         "git": git_state(),
         "project_status": status,
+        "acceptance_gate": acceptance,
         "job_index": index,
         "latest_summary": latest_summary,
         "handoff_focus": {
@@ -69,7 +88,8 @@ def build_snapshot(job_root: Path, limit: int = 15, include_self_check: bool = F
             "best_job_path": best_job.get("path"),
             "best_job_readiness_score": best_job.get("readiness_score"),
             "best_job_readiness_label": best_job.get("readiness_label"),
-            "next_action": status.get("recommended_next_action") or latest_summary.get("recommended_next_action"),
+            "acceptance_status": acceptance.get("overall_status"),
+            "next_action": next_action,
         },
     }
 
@@ -81,6 +101,7 @@ def default_report_path(suffix: str) -> Path:
 def human_report(snapshot: dict) -> str:
     focus = snapshot.get("handoff_focus", {})
     status = snapshot.get("project_status", {})
+    acceptance = snapshot.get("acceptance_gate", {})
     index = snapshot.get("job_index", {})
     git = snapshot.get("git", {})
     lines = [
@@ -98,6 +119,7 @@ def human_report(snapshot: dict) -> str:
             focus.get("best_job_readiness_score", "-"),
         ),
         "- Best job path: {0}".format(focus.get("best_job_path", "-")),
+        "- Acceptance: {0}".format(focus.get("acceptance_status", "-")),
         "- Next action: {0}".format(focus.get("next_action", "-")),
         "",
         "Project status:",
@@ -108,6 +130,14 @@ def human_report(snapshot: dict) -> str:
             status.get("contact_preload_status", "-"),
             status.get("contact_pressure_max", "-"),
             status.get("slip_abs_max", "-"),
+        ),
+        "",
+        "Acceptance gate:",
+        "- Overall: {0}".format(acceptance.get("overall_status", "-")),
+        "- Latest job: {0}".format(acceptance.get("latest_job", "-")),
+        "- Contact: CPRESS={0}, slip={1}".format(
+            acceptance.get("contact_pressure_max", "-"),
+            acceptance.get("slip_abs_max", "-"),
         ),
         "",
         "Job index:",
@@ -128,6 +158,7 @@ def human_report(snapshot: dict) -> str:
 def markdown_report(snapshot: dict) -> str:
     focus = snapshot.get("handoff_focus", {})
     status = snapshot.get("project_status", {})
+    acceptance = snapshot.get("acceptance_gate", {})
     index = snapshot.get("job_index", {})
     git = snapshot.get("git", {})
     return "\n".join([
@@ -146,6 +177,7 @@ def markdown_report(snapshot: dict) -> str:
             focus.get("best_job_readiness_label", "-"),
             focus.get("best_job_readiness_score", "-"),
         ),
+        "- Acceptance: `{0}`".format(focus.get("acceptance_status", "-")),
         "- Next action: {0}".format(focus.get("next_action", "-")),
         "",
         "## Project Status",
@@ -157,6 +189,19 @@ def markdown_report(snapshot: dict) -> str:
             status.get("contact_preload_status", "-"),
             status.get("contact_pressure_max", "-"),
             status.get("slip_abs_max", "-"),
+        ),
+        "",
+        "## Acceptance Gate",
+        "",
+        "- Overall: `{0}`".format(acceptance.get("overall_status", "-")),
+        "- Latest job: `{0}`".format(acceptance.get("latest_job", "-")),
+        "- CurveV0 comparison: `{0}`, peak ratio `{1}`".format(
+            acceptance.get("curve_v0_comparison_status", "-"),
+            acceptance.get("curve_v0_peak_ratio", "-"),
+        ),
+        "- Contact: CPRESS `{0}`, slip `{1}`".format(
+            acceptance.get("contact_pressure_max", "-"),
+            acceptance.get("slip_abs_max", "-"),
         ),
         "",
         "## Job Index",

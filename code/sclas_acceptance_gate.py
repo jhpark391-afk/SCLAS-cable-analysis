@@ -147,6 +147,25 @@ def choose_overall(gates: list) -> str:
 
 
 def recommended_next_action(overall: str, gates: list, summary: dict, comparison: dict) -> str:
+    blocked = {
+        item.get("name")
+        for item in gates
+        if item.get("critical") and item.get("status") == "blocked"
+    }
+    if blocked:
+        actions = []
+        if "result_contract" in blocked:
+            actions.append("produce or copy an Abaqus ODB-backed result contract")
+        if "curve_v0_continuous_path" in blocked:
+            actions.append("generate a continuous multi-point CurveV0 ODB run and compare it with the endpoint sweep")
+        if "contact_preload_closure" in blocked:
+            actions.append("apply/validate contact preload or closure so CPRESS is nonzero")
+        if "odb_local_fields" in blocked:
+            actions.append("extract required ODB fields S, CPRESS, COPEN, and CSLIP*")
+        if actions:
+            return "On the remote Abaqus PC, {0}; then rerun SmallSmoke, endpoint sweep, continuous CurveV0, and the acceptance gate.".format(
+                "; ".join(actions)
+            )
     for item in gates:
         if not item.get("critical") or item.get("status") != "blocked":
             continue

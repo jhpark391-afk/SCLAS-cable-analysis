@@ -17,6 +17,7 @@ def default_prompt_path() -> Path:
 def prompt_text(snapshot: dict) -> str:
     focus = snapshot.get("handoff_focus", {})
     status = snapshot.get("project_status", {})
+    acceptance = snapshot.get("acceptance_gate", {})
     index = snapshot.get("job_index", {})
     git = snapshot.get("git", {})
     return "\n".join([
@@ -30,6 +31,7 @@ def prompt_text(snapshot: dict) -> str:
         "git pull",
         "git status --short --branch",
         "python code/sclas_handoff_snapshot.py --save-report --save-markdown",
+        "python code/sclas_acceptance_gate.py --save-report --save-markdown",
         "python code/sclas_self_check.py",
         "```",
         "",
@@ -59,6 +61,10 @@ def prompt_text(snapshot: dict) -> str:
             status.get("contact_preload_status", "-"),
             status.get("contact_pressure_max", "-"),
             status.get("slip_abs_max", "-"),
+        ),
+        "- Acceptance gate: `{0}` for `{1}`".format(
+            acceptance.get("overall_status", "-"),
+            acceptance.get("latest_job", "-"),
         ),
         "",
         "Immediate next action:",
