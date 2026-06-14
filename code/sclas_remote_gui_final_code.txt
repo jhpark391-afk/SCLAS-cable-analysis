@@ -1359,7 +1359,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.plot_canvas.getAxis("bottom").setTextPen("#a7a7a7")
         self.plot_canvas.getAxis("left").setPen("#555555")
         self.plot_canvas.getAxis("bottom").setPen("#555555")
-        self.curve = self.plot_canvas.plot(pen=pg.mkPen(color="#8ab4ff", width=2.8))
+        self.plot_legend = self.plot_canvas.addLegend(offset=(12, 12))
+        self.curve = self.plot_canvas.plot(pen=pg.mkPen(color="#8ab4ff", width=2.8), name="Primary")
         right.addWidget(self.plot_canvas, 100)
         self.metric_panel = QFrame()
         self.metric_panel.setObjectName("MetricStrip")
@@ -2028,7 +2029,7 @@ class SCLASRemoteGUI(QMainWindow):
             continuous_path = Path(continuous["path"]) / "result_data.csv"
             self.clear_compare_curves()
             self.load_result_bundle(endpoint_path, source="CURVEV0_ENDPOINT")
-            self.add_compare_curve(continuous_path, label="continuous CurveV0")
+            self.add_compare_curve(continuous_path, label="Continuous CurveV0")
             self.last_summary_data = {}
             self.summary_text.setPlainText(human_report(report))
             status = report.get("status")

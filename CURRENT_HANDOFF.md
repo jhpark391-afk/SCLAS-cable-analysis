@@ -2154,6 +2154,10 @@ primary curve and overlays the continuous CurveV0 result as a dashed comparison
 curve. This makes the moment-scale mismatch visible immediately instead of only
 reporting it in text.
 
+The plot now includes a legend. The primary result appears as `Primary`, and
+the automatic continuous overlay appears as `Continuous CurveV0`, so the
+comparison plot is readable without relying only on color.
+
 Verification on Mac:
 
 ```bash
