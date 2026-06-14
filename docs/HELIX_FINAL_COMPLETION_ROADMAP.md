@@ -40,9 +40,9 @@ These areas can be pushed forward without running Abaqus locally:
      warnings, or failure modes.
 
 3. Project status automation
-   - Provide a concise status command that reports the latest job health,
-     endpoint/continuous CurveV0 comparison, contact preload state, ODB local
-     field state, and next recommended action.
+   - Maintain `code/sclas_session_brief.py` and `run_session_brief.sh`/`.bat` as
+     the one-page startup command for git sync, latest job health, result intake,
+     acceptance gates, and next recommended action.
    - Keep this status command included in `run_self_check.bat` coverage through
      `code/sclas_self_check.py`.
 

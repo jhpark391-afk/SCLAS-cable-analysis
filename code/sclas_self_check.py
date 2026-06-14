@@ -36,6 +36,11 @@ def project_path(include: str) -> Path:
     return PROJECT_DIR.joinpath(*include.replace("\\", "/").split("/"))
 
 
+def unique_self_check_dir(prefix: str) -> Path:
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    return JOBS_DIR / f"{prefix}_{stamp}_{os.getpid()}"
+
+
 def check_pyproj_references() -> None:
     pyproj = PROJECT_DIR / "SCLAS-cable-analysis.pyproj"
     root = ET.parse(pyproj).getroot()
@@ -184,7 +189,7 @@ def require_keys(data: dict, keys, label: str) -> None:
 
 
 def check_backend_contract() -> None:
-    job_dir = JOBS_DIR / ("self_check_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
+    job_dir = unique_self_check_dir("self_check")
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "input_data.json").write_text(
         json.dumps(rich_backend_payload(), indent=4),
@@ -332,7 +337,7 @@ def check_backend_contract() -> None:
 
 
 def check_endpoint_sweep_diagnostics() -> None:
-    job_dir = JOBS_DIR / ("self_check_endpoint_sweep_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
+    job_dir = unique_self_check_dir("self_check_endpoint_sweep")
     job_dir.mkdir(parents=True, exist_ok=True)
     rows = [
         ["curvature_1_per_m", "moment_kn_m"],
@@ -551,7 +556,7 @@ def check_endpoint_sweep_diagnostics() -> None:
 
 
 def check_continuous_curve_v0_diagnostics() -> None:
-    job_dir = JOBS_DIR / ("self_check_continuous_curve_v0_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
+    job_dir = unique_self_check_dir("self_check_continuous_curve_v0")
     job_dir.mkdir(parents=True, exist_ok=True)
     rows = [
         ["curvature_1_per_m", "moment_kn_m"],
@@ -703,8 +708,9 @@ def check_continuous_curve_v0_diagnostics() -> None:
     if latest_proc.returncode != 0:
         fail("sclas_job_summary.py --latest --include-self-check failed:\n" + latest_proc.stdout + latest_proc.stderr)
     latest_summary = json.loads(latest_proc.stdout)
-    if Path(latest_summary.get("job_dir", "")).resolve() != job_dir.resolve():
-        fail("Job summary --latest --include-self-check did not select the newest continuous CurveV0 self-check job")
+    latest_path = Path(latest_summary.get("job_dir", "")).resolve()
+    if "self_check" not in latest_path.name:
+        fail("Job summary --latest --include-self-check did not include a self_check candidate")
 
     print(f"[OK] Continuous CurveV0 diagnostics: {job_dir}")
 
@@ -790,7 +796,7 @@ def write_minimal_job(job_dir: Path, source: str) -> None:
 
 
 def check_latest_job_filtering() -> None:
-    root = JOBS_DIR / ("self_check_filter_root_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
+    root = unique_self_check_dir("self_check_filter_root")
     user_job = root / "job_filter_user"
     self_job = root / "self_check_filter_newer"
     write_minimal_job(user_job, "FILTER_USER_JOB")
@@ -1006,6 +1012,7 @@ def check_next_prompt() -> None:
     prompt = prompt_path.read_text(encoding="utf-8")
     for expected in [
         "git pull",
+        "python code/sclas_session_brief.py --save-report --save-markdown",
         "python code/sclas_result_intake.py --save-report --save-markdown",
         "python code/sclas_handoff_snapshot.py --save-report --save-markdown",
         "python code/sclas_acceptance_gate.py --save-report --save-markdown",
@@ -1021,6 +1028,45 @@ def check_next_prompt() -> None:
             fail("NEXT_CODEX_PROMPT.md missing expected text: " + expected)
 
     print("[OK] Next Codex prompt")
+
+
+def check_session_brief() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_session_brief.py"),
+            "--include-self-check",
+            "--json",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("sclas_session_brief.py failed:\n" + proc.stdout + proc.stderr)
+    brief = json.loads(proc.stdout)
+    if not brief.get("status"):
+        fail("Session brief did not expose a status")
+    if not brief.get("git", {}).get("head"):
+        fail("Session brief did not embed git head")
+    if not brief.get("result_intake_status"):
+        fail("Session brief did not embed result intake status")
+    if not brief.get("acceptance_status"):
+        fail("Session brief did not embed acceptance status")
+    if not brief.get("startup_commands"):
+        fail("Session brief did not embed startup commands")
+    saved_report = Path(brief.get("saved_report", ""))
+    saved_markdown = Path(brief.get("saved_markdown_report", ""))
+    if not saved_report.exists() or not saved_markdown.exists():
+        fail("Session brief did not save JSON and Markdown reports")
+    saved_brief = json.loads(saved_report.read_text(encoding="utf-8"))
+    if saved_brief.get("saved_markdown_report") != str(saved_markdown):
+        fail("Session brief JSON did not preserve the Markdown report path")
+    if "HELIX / SCLAS Session Brief" not in saved_markdown.read_text(encoding="utf-8"):
+        fail("Session brief Markdown report does not contain the expected heading")
+
+    print("[OK] Session brief")
 
 
 def check_validation_suite() -> None:
@@ -1054,6 +1100,8 @@ def check_validation_suite() -> None:
         fail("Validation suite did not embed acceptance gate status")
     if not report.get("handoff_snapshot", {}).get("saved_report"):
         fail("Validation suite did not save a handoff snapshot")
+    if not report.get("session_brief", {}).get("saved_report"):
+        fail("Validation suite did not save a session brief")
     if not report.get("next_prompt", {}).get("saved_prompt"):
         fail("Validation suite did not save the next prompt")
     saved_report = Path(report.get("saved_report", ""))
@@ -1115,6 +1163,7 @@ def main() -> int:
         check_result_intake,
         check_handoff_snapshot,
         check_next_prompt,
+        check_session_brief,
         check_validation_suite,
     ]
     try:

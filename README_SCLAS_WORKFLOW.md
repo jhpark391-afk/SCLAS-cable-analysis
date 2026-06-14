@@ -64,6 +64,7 @@ run_validation_suite.bat
 Save a handoff snapshot from the shell with:
 
 ```bash
+./run_session_brief.sh
 ./run_validation_suite.sh
 ./run_acceptance_gate.sh
 ./run_handoff_snapshot.sh
@@ -73,6 +74,7 @@ Save a handoff snapshot from the shell with:
 On Windows:
 
 ```bat
+run_session_brief.bat
 run_validation_suite.bat
 run_acceptance_gate.bat
 run_handoff_snapshot.bat
@@ -88,6 +90,8 @@ python code/sclas_job_index.py
 python code/sclas_job_index.py --save-report --save-markdown
 python code/sclas_project_status.py
 python code/sclas_project_status.py --save-report --save-markdown
+python code/sclas_session_brief.py
+python code/sclas_session_brief.py --save-report --save-markdown
 python code/sclas_handoff_snapshot.py --save-report --save-markdown
 python code/sclas_next_prompt.py --save
 python code/sclas_result_intake.py
@@ -123,6 +127,12 @@ between Mac, home, and remote-lab Codex sessions. It writes
 `handoff_snapshot.json` and `handoff_snapshot.md` at the project root with the
 current git state, project status, result-intake status, acceptance-gate status,
 job index, best job, and next action.
+Use `sclas_session_brief.py` or `run_session_brief.sh`/`.bat` at the start of a
+Codex session when you want the shortest startup dashboard: git sync, latest job,
+intake/acceptance status, blocked gates, and separated Mac/home vs remote Abaqus
+next actions. With `--save-report` and `--save-markdown`, it writes
+`session_brief.json` and `session_brief.md` at the project root; both are ignored
+by git.
 Use `run_next_prompt.sh` or `run_next_prompt.bat` to write
 `NEXT_CODEX_PROMPT.md`, a ready-made prompt for the next Mac/home/remote Codex
 session.

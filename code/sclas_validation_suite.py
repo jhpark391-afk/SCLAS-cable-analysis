@@ -22,6 +22,10 @@ from sclas_next_prompt import prompt_text, save_prompt
 from sclas_result_intake import build_intake
 from sclas_result_intake import save_markdown_report as save_intake_markdown
 from sclas_result_intake import save_report as save_intake_report
+from sclas_session_brief import build_brief
+from sclas_session_brief import default_report_path as default_brief_report_path
+from sclas_session_brief import save_markdown_report as save_brief_markdown
+from sclas_session_brief import save_report as save_brief_report
 
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
@@ -72,6 +76,14 @@ def build_suite(job_root: Path, limit: int = 15, include_self_check: bool = Fals
     snapshot["saved_markdown_report"] = str(snapshot_markdown)
 
     prompt_path = save_prompt(prompt_text(snapshot))
+    brief = build_brief(job_root, limit=limit, include_self_check=include_self_check)
+    brief_json = default_brief_report_path("json")
+    brief_markdown = default_brief_report_path("md")
+    brief["saved_report"] = str(brief_json)
+    brief["saved_markdown_report"] = str(brief_markdown)
+    save_brief_report(brief, brief_json)
+    save_brief_markdown(brief, brief_markdown)
+
     status = "pass"
     if self_check.get("status") == "failed":
         status = "failed"
@@ -94,9 +106,11 @@ def build_suite(job_root: Path, limit: int = 15, include_self_check: bool = Fals
         "handoff_snapshot": {
             "saved_report": str(snapshot_json),
             "saved_markdown_report": str(snapshot_markdown),
+            "intake_status": snapshot.get("handoff_focus", {}).get("intake_status"),
             "acceptance_status": snapshot.get("handoff_focus", {}).get("acceptance_status"),
             "next_action": snapshot.get("handoff_focus", {}).get("next_action"),
         },
+        "session_brief": brief,
         "next_prompt": {
             "saved_prompt": str(prompt_path),
         },
@@ -130,6 +144,7 @@ def markdown_report(report: dict) -> str:
     acceptance = report.get("acceptance_gate", {})
     intake = report.get("result_intake", {})
     handoff = report.get("handoff_snapshot", {})
+    brief = report.get("session_brief", {})
     self_check = report.get("self_check", {})
     prompt = report.get("next_prompt", {})
     git = report.get("git", {})
@@ -154,6 +169,7 @@ def markdown_report(report: dict) -> str:
         ),
         "- Result intake: `{0}`".format(intake.get("status", "-")),
         "- Acceptance: `{0}`".format(acceptance.get("overall_status", "-")),
+        "- Session brief: `{0}`".format(brief.get("status", "-")),
         "- Latest job: `{0}`".format(acceptance.get("latest_job", "-")),
         "- Next action: {0}".format(report.get("recommended_next_action", "-")),
         "",
@@ -165,6 +181,8 @@ def markdown_report(report: dict) -> str:
         "- Result intake Markdown: `{0}`".format(intake.get("saved_markdown_report", "-")),
         "- Handoff JSON: `{0}`".format(handoff.get("saved_report", "-")),
         "- Handoff Markdown: `{0}`".format(handoff.get("saved_markdown_report", "-")),
+        "- Session brief JSON: `{0}`".format(brief.get("saved_report", "-")),
+        "- Session brief Markdown: `{0}`".format(brief.get("saved_markdown_report", "-")),
         "- Next prompt: `{0}`".format(prompt.get("saved_prompt", "-")),
         "",
     ]
@@ -183,6 +201,7 @@ def human_report(report: dict) -> str:
     acceptance = report.get("acceptance_gate", {})
     intake = report.get("result_intake", {})
     handoff = report.get("handoff_snapshot", {})
+    brief = report.get("session_brief", {})
     prompt = report.get("next_prompt", {})
     self_check = report.get("self_check", {})
     git = report.get("git", {})
@@ -207,6 +226,7 @@ def human_report(report: dict) -> str:
         ),
         "Acceptance: {0}".format(acceptance.get("overall_status", "-")),
         "Result intake: {0}".format(intake.get("status", "-")),
+        "Session brief: {0}".format(brief.get("status", "-")),
         "Latest job: {0}".format(acceptance.get("latest_job", "-")),
         "",
         "Next action:",
@@ -222,6 +242,8 @@ def human_report(report: dict) -> str:
         "- Result intake Markdown: {0}".format(intake.get("saved_markdown_report", "-")),
         "- Handoff JSON: {0}".format(handoff.get("saved_report", "-")),
         "- Handoff Markdown: {0}".format(handoff.get("saved_markdown_report", "-")),
+        "- Session brief JSON: {0}".format(brief.get("saved_report", "-")),
+        "- Session brief Markdown: {0}".format(brief.get("saved_markdown_report", "-")),
         "- Next prompt: {0}".format(prompt.get("saved_prompt", "-")),
     ]
     if report.get("saved_report") or report.get("saved_markdown_report"):

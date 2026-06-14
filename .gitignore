@@ -48,6 +48,8 @@ handoff_snapshot.md
 NEXT_CODEX_PROMPT.md
 validation_suite_report.json
 validation_suite_report.md
+session_brief.json
+session_brief.md
 
 # Presentation/build scratch output
 outputs/

@@ -47,6 +47,16 @@ To verify the local project contract after edits, run:
 run_self_check.bat
 ```
 
+For a one-page startup dashboard, run:
+
+```bat
+run_session_brief.bat
+```
+
+This saves `session_brief.json` / `session_brief.md` with git sync, latest job,
+result-intake status, acceptance status, blocked gates, and separate Mac/home vs
+remote Abaqus next actions.
+
 For the full repeatable handoff/validation pass, run:
 
 ```bat
