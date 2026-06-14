@@ -2432,7 +2432,8 @@ It summarizes:
 - an acceptance gate that separates completed Abaqus output from research-ready
   contact/CurveV0 evidence and is now embedded in the handoff snapshot/prompt
 - a validation suite launcher that runs self-check, acceptance, handoff, and
-  next-prompt generation in one repeatable pass
+  next-prompt generation in one repeatable pass and writes
+  `validation_suite_report.json/md`
 - latest job health/source/curve class
 - latest endpoint-vs-continuous CurveV0 comparison status
 - contact preload state, CPRESS max, and slip max

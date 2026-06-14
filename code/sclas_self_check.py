@@ -1010,6 +1010,41 @@ def check_next_prompt() -> None:
     print("[OK] Next Codex prompt")
 
 
+def check_validation_suite() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_validation_suite.py"),
+            "--include-self-check",
+            "--skip-self-check",
+            "--json",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("sclas_validation_suite.py failed:\n" + proc.stdout + proc.stderr)
+    report = json.loads(proc.stdout)
+    if report.get("self_check", {}).get("status") != "skipped":
+        fail("Validation suite did not honor --skip-self-check")
+    if not report.get("acceptance_gate", {}).get("overall_status"):
+        fail("Validation suite did not embed acceptance gate status")
+    if not report.get("handoff_snapshot", {}).get("saved_report"):
+        fail("Validation suite did not save a handoff snapshot")
+    if not report.get("next_prompt", {}).get("saved_prompt"):
+        fail("Validation suite did not save the next prompt")
+    saved_report = Path(report.get("saved_report", ""))
+    saved_markdown = Path(report.get("saved_markdown_report", ""))
+    if not saved_report.exists() or not saved_markdown.exists():
+        fail("Validation suite did not save JSON and Markdown reports")
+    if "HELIX / SCLAS Validation Suite" not in saved_markdown.read_text(encoding="utf-8"):
+        fail("Validation suite Markdown report does not contain the expected heading")
+
+    print("[OK] Validation suite")
+
+
 def main() -> int:
     checks = [
         check_pyproj_references,
@@ -1024,6 +1059,7 @@ def main() -> int:
         check_acceptance_gate,
         check_handoff_snapshot,
         check_next_prompt,
+        check_validation_suite,
     ]
     try:
         for check in checks:

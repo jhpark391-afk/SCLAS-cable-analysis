@@ -136,7 +136,9 @@ Use `run_acceptance_gate.sh` or `run_acceptance_gate.bat` for the same saved
 report flow without typing the Python command.
 Use `run_validation_suite.sh` or `run_validation_suite.bat` before a major
 handoff or commit when you want self-check, acceptance gate, handoff snapshot,
-and next-session prompt generation in one repeatable pass.
+and next-session prompt generation in one repeatable pass. The suite writes
+`validation_suite_report.json` and `validation_suite_report.md` at the project
+root; both are local generated artifacts and are ignored by git.
 If a CurveV0 comparison report exists in a job folder, `sclas_job_summary.py`
 also prints the comparison status, peak ratio, and branch deltas.
 Use `sclas_curve_compare.py` after both endpoint sweep and continuous CurveV0

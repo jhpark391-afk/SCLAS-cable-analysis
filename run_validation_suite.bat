@@ -29,28 +29,14 @@ echo Run setup_windows.bat first, or install Python and make sure py.exe or pyth
 exit /b 1
 
 :run
-echo [1/4] Running SCLAS self-check
-%PYTHON_CMD% "%PROJECT_DIR%code\sclas_self_check.py"
-if errorlevel 1 goto :failed
-
-echo.
-echo [2/4] Saving acceptance gate report
-%PYTHON_CMD% "%PROJECT_DIR%code\sclas_acceptance_gate.py" --save-report --save-markdown
-if errorlevel 1 goto :failed
-
-echo.
-echo [3/4] Saving handoff snapshot
-%PYTHON_CMD% "%PROJECT_DIR%code\sclas_handoff_snapshot.py" --save-report --save-markdown
-if errorlevel 1 goto :failed
-
-echo.
-echo [4/4] Saving next Codex prompt
-%PYTHON_CMD% "%PROJECT_DIR%code\sclas_next_prompt.py" --save
+%PYTHON_CMD% "%PROJECT_DIR%code\sclas_validation_suite.py" --save-report --save-markdown
 if errorlevel 1 goto :failed
 
 echo.
 echo Validation suite complete.
-echo Generated local reports are intentionally ignored by git.
+echo Generated local reports are intentionally ignored by git:
+echo   %PROJECT_DIR%validation_suite_report.json
+echo   %PROJECT_DIR%validation_suite_report.md
 endlocal
 exit /b 0
 

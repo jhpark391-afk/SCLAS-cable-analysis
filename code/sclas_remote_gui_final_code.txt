@@ -2262,50 +2262,26 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_validate_all.setEnabled(False)
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            from sclas_acceptance_gate import build_gate, human_report as gate_human_report, save_markdown_report as save_gate_markdown, save_report as save_gate_report
-            from sclas_handoff_snapshot import build_snapshot, save_markdown_report as save_snapshot_markdown, save_report as save_snapshot_report
-            from sclas_next_prompt import prompt_text, save_prompt
+            from sclas_validation_suite import build_suite, human_report, save_markdown_report, save_report
 
             self.log("[VALIDATE] Running local validation suite...")
-            proc = subprocess.run(
-                [sys.executable, str(APP_DIR / "sclas_self_check.py")],
-                cwd=str(PROJECT_DIR),
-                text=True,
-                capture_output=True,
-            )
-            if proc.stdout:
-                self.log(proc.stdout.strip())
-            if proc.stderr:
-                self.log(proc.stderr.strip())
-            if proc.returncode != 0:
-                raise RuntimeError("sclas_self_check.py failed with exit code {0}".format(proc.returncode))
-
             job_root = Path(self.job_root_input.text().strip()).expanduser()
-            acceptance = build_gate(job_root)
-            gate_json = save_gate_report(acceptance)
-            acceptance["saved_report"] = str(gate_json)
-            gate_md = save_gate_markdown(acceptance)
-            acceptance["saved_markdown_report"] = str(gate_md)
-
-            snapshot = build_snapshot(job_root, limit=15)
-            snapshot_json = save_snapshot_report(snapshot)
-            snapshot["saved_report"] = str(snapshot_json)
-            snapshot_md = save_snapshot_markdown(snapshot)
-            snapshot["saved_markdown_report"] = str(snapshot_md)
-
-            prompt_path = save_prompt(prompt_text(snapshot))
+            report = build_suite(job_root, limit=15)
+            suite_json = save_report(report)
+            report["saved_report"] = str(suite_json)
+            suite_md = save_markdown_report(report)
+            report["saved_markdown_report"] = str(suite_md)
+            if report.get("self_check", {}).get("status") == "failed":
+                raise RuntimeError("sclas_self_check.py failed")
             self.last_summary_data = {}
-            self.summary_text.setPlainText(gate_human_report(acceptance))
+            self.summary_text.setPlainText(human_report(report))
+            acceptance = report.get("acceptance_gate", {})
             status = acceptance.get("overall_status")
             tone = "good" if status == "accepted" else "warn" if status == "review" else "error"
             label = "Result: ready" if status in ("accepted", "review") else "Result: error"
             self.set_badge(self.lbl_result_status, label, tone)
             self.log(
-                "[VALIDATE] Complete | acceptance={0} | handoff={1} | prompt={2}".format(
-                    status,
-                    snapshot_json,
-                    prompt_path,
-                )
+                "[VALIDATE] Complete | status={0} | suite={1}".format(report.get("status", "-"), suite_json)
             )
             self.refresh_job_history()
         except Exception as exc:

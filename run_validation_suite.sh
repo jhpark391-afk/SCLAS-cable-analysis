@@ -15,21 +15,10 @@ else
     exit 1
 fi
 
-echo "[1/4] Running SCLAS self-check"
-"$PYTHON" "$PROJECT_DIR/code/sclas_self_check.py"
-
-echo
-echo "[2/4] Saving acceptance gate report"
-"$PYTHON" "$PROJECT_DIR/code/sclas_acceptance_gate.py" --save-report --save-markdown
-
-echo
-echo "[3/4] Saving handoff snapshot"
-"$PYTHON" "$PROJECT_DIR/code/sclas_handoff_snapshot.py" --save-report --save-markdown
-
-echo
-echo "[4/4] Saving next Codex prompt"
-"$PYTHON" "$PROJECT_DIR/code/sclas_next_prompt.py" --save
+"$PYTHON" "$PROJECT_DIR/code/sclas_validation_suite.py" --save-report --save-markdown
 
 echo
 echo "Validation suite complete."
-echo "Generated local reports are intentionally ignored by git."
+echo "Generated local reports are intentionally ignored by git:"
+echo "  $PROJECT_DIR/validation_suite_report.json"
+echo "  $PROJECT_DIR/validation_suite_report.md"
