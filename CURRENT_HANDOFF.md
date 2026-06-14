@@ -1487,6 +1487,119 @@ Interpretation:
   that assigns local radial/tangent-consistent normals rather than simply
   dropping the orientation line.
 
+## Bedding Element Formulation / Smoke Helper Probe - 2026-06-14 KST
+
+The next reduced-risk probe checked whether switching the reduced-smoke solid
+element request from the default reduced-integration solid to `C3D8` reduces the
+remaining `BeddingEquivalent` distortion warning.
+
+Short-name C3D8 probe:
+
+```text
+jobs\SCLAS_jobs\c3d8p_134742
+```
+
+- Abaqus completed and ODB extraction wrote two rows.
+- `result_summary.json.source` remained `SCLAS_ABAQUS_ODB_EXTRACTOR`.
+- Actual warning taxonomy did not improve:
+
+```text
+distorted_elements=1
+beam_curvature=2
+WarnElemDistorted=1
+WarnBeamCurvature1=1
+WarnBeamTwist=1
+distorted_sample_parts:
+  BEDDINGEQUIVALENT=500
+distorted_sample_min_angle=41.6927
+```
+
+Interpretation:
+
+- Do not adopt `C3D8` as the bedding distortion fix. It completed, but the
+  distorted bedding sample angle worsened versus the prior `42.087` baseline.
+- The next bedding fix should be geometry/partitioning/representation-specific,
+  not a simple element-formulation switch.
+
+The first long-name C3D8 probe also exposed a smoke-helper robustness issue:
+
+```text
+jobs\SCLAS_jobs\small_smoke_c3d8_20260614_134702
+```
+
+The Abaqus runner produced `small_smoke_c3d8_20260614_134702.inp` because
+`safe_name(model_name + "_mesh", 32)` can clip the `_mesh` suffix for long
+metadata-derived job names. `run_lab_abaqus_smoke.ps1` previously looked only
+for `*_mesh.inp` or `*_mes.inp`, so it failed before solver submission even
+though a valid `.inp` existed.
+
+Helper fix:
+
+- `run_lab_abaqus_smoke.ps1` now keeps the preferred `*_mesh.inp`/`*_mes.inp`
+  lookup, then falls back to the latest `.inp` in the job folder with a yellow
+  status message.
+- Re-run with `-SkipGeneration` on the long-name probe completed successfully:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -JobDir "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\small_smoke_c3d8_20260614_134702" -SkipGeneration
+```
+
+- Abaqus completed and ODB extraction wrote two rows.
+- The warning profile matched the short-name C3D8 probe, confirming the helper
+  fix only made input-deck discovery more robust and did not change the model.
+
+Post-fallback verification:
+
+- Normal bridge check passed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_lab_abaqus_smoke.ps1 -SmallSmoke
+```
+
+```text
+jobs\SCLAS_jobs\small_smoke_20260614_135114
+```
+
+- Abaqus completed, ODB extraction status was `extracted`, and
+  `odb_extraction.rows_written=2`.
+- Latest CurveV0 endpoint sweep also passed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_curve_v0_sweep.ps1
+```
+
+```text
+jobs\SCLAS_jobs\curve_v0_sweep_20260614_135200
+```
+
+- Parent `result_data.csv` has five data rows:
+
+```text
+curvature_1_per_m,moment_kn_m
+-0.0079999997979,-2.588653
+-0.00399999989895,-1.294349625
+0,0
+0.00399999989895,1.294349
+0.0079999997979,2.58865
+```
+
+- Parent `result_summary.json.source` is `SCLAS_CURVE_V0_ENDPOINT_SWEEP`.
+- `endpoint_sweep_validation.all_child_jobs_validated=true`.
+- Saved parent offline diagnostics report confirms
+  `endpoint_sweep_shape.shape_checks_passed=true`,
+  `endpoint_sweep_children.all_children_deep_validated=true`, and
+  `blocking_log_hits=0`.
+- The remaining actual warning profile is unchanged and non-blocking:
+
+```text
+WarnElemDistorted=5
+WarnBeamCurvature1=5
+WarnBeamTwist=5
+distorted_sample_parts:
+  BEDDINGEQUIVALENT=2500
+distorted_sample_min_angle=42.087
+```
+
 ## Important Files
 
 ```text

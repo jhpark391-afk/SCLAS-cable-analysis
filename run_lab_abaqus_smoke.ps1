@@ -250,12 +250,13 @@ $inp = Get-ChildItem $JobDir -Filter "*.inp" |
     Select-Object -First 1
 if (-not $inp) {
     $inpCandidates = Get-ChildItem $JobDir -Filter "*.inp" -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -ExpandProperty Name
+        Sort-Object LastWriteTime -Descending
     if ($inpCandidates) {
-        throw "No generated *_mesh.inp or *_mes.inp file was found. Available .inp files: $($inpCandidates -join ', ')"
+        $inp = $inpCandidates | Select-Object -First 1
+        Write-Host "No generated *_mesh.inp or *_mes.inp file was found; using latest .inp: $($inp.Name)" -ForegroundColor Yellow
+    } else {
+        throw "No Abaqus .inp file was found. Check abaqus_stdout.txt and abaqus_mesh_manifest.json."
     }
-    throw "No Abaqus .inp file was found. Check abaqus_stdout.txt and abaqus_mesh_manifest.json."
 }
 $jobName = [IO.Path]::GetFileNameWithoutExtension($inp.Name)
 Write-Host "Input deck: $($inp.Name)"
