@@ -2138,6 +2138,17 @@ python code/sclas_curve_compare.py \
 continuous CurveV0 jobs and expects the intentionally different moment scale to
 be classified as `review`.
 
+## 2026-06-14 Mac Support Update - GUI CurveV0 Compare Button
+
+The Analysis tab now exposes the comparison path directly in the GUI. In
+`Recent Jobs`, click `Compare CurveV0` to find the latest endpoint sweep and
+latest continuous `multi_point_curve_v0` folder under the configured local job
+root, run the same comparison as `code/sclas_curve_compare.py`, and print the
+human-readable comparison report in the result summary panel.
+
+The button reports `aligned`, `review`, or `blocked` through the result badge
+and logs the peak moment ratio for quick triage.
+
 Verification on Mac:
 
 ```bash

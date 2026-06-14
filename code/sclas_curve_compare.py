@@ -226,47 +226,56 @@ def scalar(value, default="-"):
     return default if value in (None, "") else value
 
 
-def print_human(report: dict) -> None:
-    print("SCLAS CurveV0 Comparison")
-    print("=======================")
-    print("Status: {0}".format(report.get("status", "-")))
-    print("Endpoint: {0}".format(report.get("endpoint_job", "-")))
-    print("Continuous: {0}".format(report.get("continuous_job", "-")))
-    print("Common |kappa|: {0}".format(scalar(report.get("common_abs_curvature_1_per_m"))))
-    print("Peak |M| ratio continuous/endpoint: {0}".format(scalar(report.get("peak_moment_ratio_continuous_over_endpoint"))))
-    print("Positive branch: endpoint={0}, continuous={1}, rel_delta={2}".format(
-        scalar(report.get("endpoint_moment_at_positive_common_curvature")),
-        scalar(report.get("continuous_moment_at_positive_common_curvature")),
-        scalar(report.get("positive_branch_relative_delta")),
-    ))
-    print("Negative branch: endpoint={0}, continuous={1}, rel_delta={2}".format(
-        scalar(report.get("endpoint_moment_at_negative_common_curvature")),
-        scalar(report.get("continuous_moment_at_negative_common_curvature")),
-        scalar(report.get("negative_branch_relative_delta")),
-    ))
-    print("Endpoint shape: rows={0}, max|kappa|={1}, max|M|={2}, symmetry={3}".format(
-        scalar(report.get("endpoint_metrics", {}).get("row_count")),
-        scalar(report.get("endpoint_metrics", {}).get("max_abs_curvature")),
-        scalar(report.get("endpoint_metrics", {}).get("max_abs_moment")),
-        scalar(report.get("endpoint_metrics", {}).get("odd_symmetry_relative")),
-    ))
-    print("Continuous shape: rows={0}, max|kappa|={1}, max|M|={2}, symmetry={3}".format(
-        scalar(report.get("continuous_metrics", {}).get("row_count")),
-        scalar(report.get("continuous_metrics", {}).get("max_abs_curvature")),
-        scalar(report.get("continuous_metrics", {}).get("max_abs_moment")),
-        scalar(report.get("continuous_metrics", {}).get("odd_symmetry_relative")),
-    ))
+def human_report(report: dict) -> str:
+    lines = [
+        "SCLAS CurveV0 Comparison",
+        "=======================",
+        "Status: {0}".format(report.get("status", "-")),
+        "Endpoint: {0}".format(report.get("endpoint_job", "-")),
+        "Continuous: {0}".format(report.get("continuous_job", "-")),
+        "Common |kappa|: {0}".format(scalar(report.get("common_abs_curvature_1_per_m"))),
+        "Peak |M| ratio continuous/endpoint: {0}".format(scalar(report.get("peak_moment_ratio_continuous_over_endpoint"))),
+        "Positive branch: endpoint={0}, continuous={1}, rel_delta={2}".format(
+            scalar(report.get("endpoint_moment_at_positive_common_curvature")),
+            scalar(report.get("continuous_moment_at_positive_common_curvature")),
+            scalar(report.get("positive_branch_relative_delta")),
+        ),
+        "Negative branch: endpoint={0}, continuous={1}, rel_delta={2}".format(
+            scalar(report.get("endpoint_moment_at_negative_common_curvature")),
+            scalar(report.get("continuous_moment_at_negative_common_curvature")),
+            scalar(report.get("negative_branch_relative_delta")),
+        ),
+        "Endpoint shape: rows={0}, max|kappa|={1}, max|M|={2}, symmetry={3}".format(
+            scalar(report.get("endpoint_metrics", {}).get("row_count")),
+            scalar(report.get("endpoint_metrics", {}).get("max_abs_curvature")),
+            scalar(report.get("endpoint_metrics", {}).get("max_abs_moment")),
+            scalar(report.get("endpoint_metrics", {}).get("odd_symmetry_relative")),
+        ),
+        "Continuous shape: rows={0}, max|kappa|={1}, max|M|={2}, symmetry={3}".format(
+            scalar(report.get("continuous_metrics", {}).get("row_count")),
+            scalar(report.get("continuous_metrics", {}).get("max_abs_curvature")),
+            scalar(report.get("continuous_metrics", {}).get("max_abs_moment")),
+            scalar(report.get("continuous_metrics", {}).get("odd_symmetry_relative")),
+        ),
+    ]
     if report.get("warnings"):
-        print("Warnings:")
+        lines.append("Warnings:")
         for warning in report["warnings"]:
-            print("- {0}".format(warning))
+            lines.append("- {0}".format(warning))
     if report.get("errors"):
-        print("Errors:")
+        lines.append("Errors:")
         for error in report["errors"]:
-            print("- {0}".format(error))
-    print()
-    print("Next action:")
-    print(report.get("recommended_next_action", "-"))
+            lines.append("- {0}".format(error))
+    lines.extend([
+        "",
+        "Next action:",
+        report.get("recommended_next_action", "-"),
+    ])
+    return "\n".join(lines)
+
+
+def print_human(report: dict) -> None:
+    print(human_report(report))
 
 
 def parse_args(argv=None):

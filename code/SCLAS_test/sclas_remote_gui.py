@@ -609,6 +609,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Refresh": "새로고침",
             "Load selected": "선택 항목 불러오기",
             "Diagnose selected": "선택 항목 진단",
+            "Compare CurveV0": "CurveV0 비교",
             "No result jobs found": "결과 작업 없음",
             "Model: pending": "모델: 대기",
             "Model: edited": "모델: 수정됨",
@@ -1400,16 +1401,20 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_refresh_jobs = QPushButton("Refresh")
         self.btn_load_job = QPushButton("Load selected")
         self.btn_diagnose_job = QPushButton("Diagnose selected")
+        self.btn_compare_curve_v0 = QPushButton("Compare CurveV0")
         self.btn_refresh_jobs.setToolTip("Scan the job root for recent SCLAS result folders.")
         self.btn_load_job.setToolTip("Load result_data.csv from the selected job folder.")
         self.btn_diagnose_job.setToolTip("Inspect selected job files with the offline Abaqus diagnostics tool.")
+        self.btn_compare_curve_v0.setToolTip("Compare the latest endpoint sweep and continuous CurveV0 result folders.")
         self.btn_refresh_jobs.clicked.connect(self.refresh_job_history)
         self.btn_load_job.clicked.connect(self.load_selected_job)
         self.btn_diagnose_job.clicked.connect(self.diagnose_selected_job)
-        history_layout.addWidget(self.job_history_combo, 0, 0, 1, 3)
+        self.btn_compare_curve_v0.clicked.connect(self.compare_curve_v0_jobs)
+        history_layout.addWidget(self.job_history_combo, 0, 0, 1, 4)
         history_layout.addWidget(self.btn_refresh_jobs, 1, 0)
         history_layout.addWidget(self.btn_load_job, 1, 1)
         history_layout.addWidget(self.btn_diagnose_job, 1, 2)
+        history_layout.addWidget(self.btn_compare_curve_v0, 1, 3)
         right.addWidget(self.history_box)
 
         left_scroll = self.scroll_panel(left_panel, min_width=360)
@@ -2010,6 +2015,30 @@ class SCLASRemoteGUI(QMainWindow):
         except Exception as exc:
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "Offline diagnostics error", str(exc))
+
+    def compare_curve_v0_jobs(self) -> None:
+        try:
+            from sclas_curve_compare import compare, human_report, latest_job
+
+            job_root = Path(self.job_root_input.text().strip()).expanduser()
+            endpoint = latest_job(job_root, "endpoint")
+            continuous = latest_job(job_root, "continuous")
+            report = compare(endpoint, continuous)
+            self.last_summary_data = {}
+            self.summary_text.setPlainText(human_report(report))
+            status = report.get("status")
+            tone = "good" if status == "aligned" else "warn" if status == "review" else "error"
+            label = "Result: ready" if status in ("aligned", "review") else "Result: error"
+            self.set_badge(self.lbl_result_status, label, tone)
+            self.log(
+                "[COMPARE] CurveV0 endpoint/continuous | status={0} | ratio={1}".format(
+                    status,
+                    report.get("peak_moment_ratio_continuous_over_endpoint", "-"),
+                )
+            )
+        except Exception as exc:
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
+            QMessageBox.critical(self, "CurveV0 comparison error", str(exc))
 
     @staticmethod
     def counts_text(counts, limit: int = 4) -> str:
