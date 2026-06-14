@@ -75,13 +75,40 @@ def latest_job_dir(job_root: Path) -> Path:
         raise FileNotFoundError("No SCLAS job folders were found under: {0}".format(job_root))
     def job_mtime(path: Path) -> float:
         mtimes = []
-        for file_name in ["result_summary.json", "result_data.csv", "offline_diagnostics_report.json"]:
+        for file_name in ["result_summary.json", "result_data.csv", "offline_diagnostics_report.json", "curve_v0_comparison_report.json"]:
             candidate = path / file_name
             if candidate.exists():
                 mtimes.append(candidate.stat().st_mtime)
         return max(mtimes) if mtimes else path.stat().st_mtime
 
     return max(candidates, key=job_mtime)
+
+
+def load_curve_v0_comparison(job_dir: Path) -> dict:
+    path = job_dir / "curve_v0_comparison_report.json"
+    if not path.exists():
+        return {"exists": False}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {
+            "exists": True,
+            "parse_error": str(exc),
+        }
+    return {
+        "exists": True,
+        "path": str(path),
+        "status": data.get("status"),
+        "endpoint_job": data.get("endpoint_job"),
+        "continuous_job": data.get("continuous_job"),
+        "common_abs_curvature_1_per_m": data.get("common_abs_curvature_1_per_m"),
+        "peak_moment_ratio_continuous_over_endpoint": data.get("peak_moment_ratio_continuous_over_endpoint"),
+        "positive_branch_relative_delta": data.get("positive_branch_relative_delta"),
+        "negative_branch_relative_delta": data.get("negative_branch_relative_delta"),
+        "warning_count": len(data.get("warnings", [])) if isinstance(data.get("warnings"), list) else 0,
+        "error_count": len(data.get("errors", [])) if isinstance(data.get("errors"), list) else 0,
+        "recommended_next_action": data.get("recommended_next_action"),
+    }
 
 
 def quality_details(report: dict):
@@ -163,11 +190,16 @@ def quality_details(report: dict):
 def health_label(report: dict, details: dict) -> str:
     counts = report.get("diagnostic_summary", {}).get("issue_counts", {})
     manifest = report.get("abaqus_mesh_manifest_json", {})
+    comparison_status = details.get("curve_v0_comparison_status")
     if int_scalar(counts.get("error")):
         return "BLOCKED"
     if details.get("blocking_log_hits"):
         return "BLOCKED"
+    if comparison_status == "blocked":
+        return "BLOCKED"
     if manifest.get("contact_pair_scaffold_status") in ("partial", "failed"):
+        return "REVIEW"
+    if comparison_status == "review":
         return "REVIEW"
     if int_scalar(counts.get("warning")) or details.get("actual_warning_hits") or details.get("b31_total_warning_sets"):
         return "REVIEW"
@@ -185,6 +217,9 @@ def collect_summary(report: dict) -> dict:
     diagnostic = report.get("diagnostic_summary", {})
     issue_counts = diagnostic.get("issue_counts", {})
     details = quality_details(report)
+    job_dir = Path(report.get("job_dir", ""))
+    comparison = load_curve_v0_comparison(job_dir) if str(job_dir) else {"exists": False}
+    details["curve_v0_comparison_status"] = comparison.get("status")
     curve_summary = result_summary.get("curve_summary") if isinstance(result_summary.get("curve_summary"), dict) else None
     if curve_summary is None:
         curve_summary = result_csv.get("curve_summary", {})
@@ -218,10 +253,26 @@ def collect_summary(report: dict) -> dict:
         "curve_max_abs_moment": curve_summary.get("max_abs_moment_kn_m") if isinstance(curve_summary, dict) else None,
         "curve_loop_energy_proxy": curve_summary.get("loop_energy_proxy_kn") if isinstance(curve_summary, dict) else None,
         "curve_moment_span": curve_summary.get("moment_span_kn_m") if isinstance(curve_summary, dict) else None,
+        "curve_v0_comparison_report_exists": comparison.get("exists"),
+        "curve_v0_comparison_report_path": comparison.get("path"),
+        "curve_v0_comparison_status": comparison.get("status"),
+        "curve_v0_comparison_peak_ratio": comparison.get("peak_moment_ratio_continuous_over_endpoint"),
+        "curve_v0_comparison_positive_delta": comparison.get("positive_branch_relative_delta"),
+        "curve_v0_comparison_negative_delta": comparison.get("negative_branch_relative_delta"),
+        "curve_v0_comparison_common_abs_curvature": comparison.get("common_abs_curvature_1_per_m"),
+        "curve_v0_comparison_warning_count": comparison.get("warning_count"),
+        "curve_v0_comparison_error_count": comparison.get("error_count"),
+        "curve_v0_comparison_next_action": comparison.get("recommended_next_action"),
+        "curve_v0_comparison_parse_error": comparison.get("parse_error"),
         "issue_counts": issue_counts,
         "recommended_next_action": diagnostic.get("recommended_next_action"),
     }
     summary.update(details)
+    if (
+        summary.get("curve_v0_comparison_status") in ("review", "blocked")
+        and summary.get("curve_v0_comparison_next_action")
+    ):
+        summary["recommended_next_action"] = summary.get("curve_v0_comparison_next_action")
     return summary
 
 
@@ -286,6 +337,13 @@ def print_human(summary: dict) -> None:
     print("Continuous CurveV0 scale: max|kappa|={0}, max|M|={1}".format(
         scalar(summary.get("continuous_curve_v0_max_abs_curvature")),
         scalar(summary.get("continuous_curve_v0_max_abs_moment")),
+    ))
+    print("CurveV0 comparison: exists={0}, status={1}, peak_ratio={2}, pos_delta={3}, neg_delta={4}".format(
+        scalar(summary.get("curve_v0_comparison_report_exists")),
+        scalar(summary.get("curve_v0_comparison_status")),
+        scalar(summary.get("curve_v0_comparison_peak_ratio")),
+        scalar(summary.get("curve_v0_comparison_positive_delta")),
+        scalar(summary.get("curve_v0_comparison_negative_delta")),
     ))
     print("Warnings: actual={0}, blocking={1}, categories={2}".format(
         scalar(summary.get("actual_warning_hits")),

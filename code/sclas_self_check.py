@@ -740,6 +740,27 @@ def check_curve_v0_comparison() -> None:
         fail("CurveV0 comparison did not save Markdown report")
     if "SCLAS CurveV0 Comparison" not in saved_markdown.read_text(encoding="utf-8"):
         fail("CurveV0 comparison Markdown report does not contain the expected heading")
+    summary_proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_job_summary.py"),
+            report["continuous_job"],
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if summary_proc.returncode != 0:
+        fail("sclas_job_summary.py failed to read saved CurveV0 comparison report:\n" + summary_proc.stdout + summary_proc.stderr)
+    job_summary = json.loads(summary_proc.stdout)
+    if job_summary.get("curve_v0_comparison_status") != "review":
+        fail("Job summary did not expose saved CurveV0 comparison status")
+    if job_summary.get("curve_v0_comparison_warning_count") != 3:
+        fail("Job summary did not expose saved CurveV0 comparison warning count")
+    if job_summary.get("curve_v0_comparison_peak_ratio", 0.0) < 10.0:
+        fail("Job summary did not expose saved CurveV0 comparison peak ratio")
+    if "boundary-condition scaling" not in job_summary.get("recommended_next_action", ""):
+        fail("Job summary did not prioritize saved CurveV0 comparison next action")
 
     print("[OK] CurveV0 endpoint/continuous comparison")
 

@@ -76,6 +76,8 @@ python code/sclas_offline_diagnostics.py jobs/SCLAS_jobs/<job_folder> --save-mar
 Use `sclas_job_summary.py` first when you only need the current health,
 curve class, warning totals, and next action. Use
 `sclas_offline_diagnostics.py` when you need the full JSON/Markdown report.
+If a CurveV0 comparison report exists in a job folder, `sclas_job_summary.py`
+also prints the comparison status, peak ratio, and branch deltas.
 Use `sclas_curve_compare.py` after both endpoint sweep and continuous CurveV0
 jobs exist. It compares peak moment scale, positive/negative branch moments at
 the common curvature, and odd-symmetry indicators. With `--save-report` and

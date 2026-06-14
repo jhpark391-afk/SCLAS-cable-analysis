@@ -2162,6 +2162,9 @@ comparison plot is readable without relying only on color.
 `--save-markdown`. The GUI `Compare CurveV0` action now saves
 `curve_v0_comparison_report.json` and `curve_v0_comparison_report.md` into the
 continuous CurveV0 job folder before showing the report in the summary panel.
+`code/sclas_job_summary.py` now reads that saved JSON report and surfaces the
+comparison status, peak moment ratio, branch deltas, warning count, and next
+action in concise job summaries.
 
 Verification on Mac:
 
