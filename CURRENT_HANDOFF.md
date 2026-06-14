@@ -2397,6 +2397,31 @@ Interpretation:
 8. After each meaningful task, update this file, commit, and push only code/docs
    changes, never generated Abaqus job artifacts.
 
+## 2026-06-14 Mac Support Update - Final Roadmap and Status Dashboard
+
+Mac-side completion ownership is now documented in
+`docs/HELIX_FINAL_COMPLETION_ROADMAP.md`.
+
+New status command:
+
+```bash
+python code/sclas_project_status.py
+python code/sclas_project_status.py --json
+```
+
+It summarizes:
+
+- latest job health/source/curve class
+- latest endpoint-vs-continuous CurveV0 comparison status
+- contact preload state, CPRESS max, and slip max
+- completion flags for GUI contract, CurveV0 comparison, contact closure, and
+  ODB local fields
+- the next recommended action
+
+`code/sclas_self_check.py` now verifies this status command. The current
+expected top blocker remains contact preload/closure until the remote Abaqus
+side produces nonzero CPRESS/slip under the declared residual pressure.
+
 ## Home Codex Start Prompt
 
 Use this prompt when starting work on the home or Mac Codex computer:

@@ -765,6 +765,29 @@ def check_curve_v0_comparison() -> None:
     print("[OK] CurveV0 endpoint/continuous comparison")
 
 
+def check_project_status() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_project_status.py"),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("sclas_project_status.py failed:\n" + proc.stdout + proc.stderr)
+    status = json.loads(proc.stdout)
+    if not status.get("completion_flags"):
+        fail("Project status did not emit completion flags")
+    if status.get("curve_v0_comparison_status") != "review":
+        fail("Project status did not expose latest CurveV0 comparison status")
+    if "contact preload" not in status.get("recommended_next_action", "").lower():
+        fail("Project status did not prioritize the contact preload/closure blocker")
+
+    print("[OK] Project status dashboard")
+
+
 def main() -> int:
     checks = [
         check_pyproj_references,
@@ -774,6 +797,7 @@ def main() -> int:
         check_endpoint_sweep_diagnostics,
         check_continuous_curve_v0_diagnostics,
         check_curve_v0_comparison,
+        check_project_status,
     ]
     try:
         for check in checks:

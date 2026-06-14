@@ -28,6 +28,8 @@ See `docs/SCLAS_RESEARCH_BACKLOG.md` for the current public-reference scan and
 implementation backlog.
 See `docs/ABAQUS_BACKEND_IMPLEMENTATION_PLAN.md` for the staged Abaqus contact,
 cyclic bending, and ODB extraction plan.
+See `docs/HELIX_FINAL_COMPLETION_ROADMAP.md` for the final completion split
+between Mac/home Codex work and remote Windows/Abaqus work.
 See `docs/HELIX_BACKEND_HANDOFF_BOGWANG_KR.md` for the current Korean handoff
 contract for the Abaqus backend owner.
 
@@ -63,6 +65,7 @@ Inspect a generated or copied Abaqus job folder without Abaqus:
 ```bash
 python code/sclas_job_summary.py --latest
 python code/sclas_job_summary.py jobs/SCLAS_jobs/<job_folder>
+python code/sclas_project_status.py
 python code/sclas_curve_compare.py
 python code/sclas_curve_compare.py \
   --endpoint jobs/SCLAS_jobs/<endpoint_sweep_folder> \

@@ -27,6 +27,7 @@
     <Compile Include="code\sclas_offline_diagnostics.py" />
     <Compile Include="code\sclas_job_summary.py" />
     <Compile Include="code\sclas_curve_compare.py" />
+    <Compile Include="code\sclas_project_status.py" />
     <Compile Include="code\sclas_odb_extractor.py" />
     <Compile Include="code\sclas_mac_vscode.py" />
     <Compile Include="code\sclas_remote_gui.py" />
@@ -55,6 +56,7 @@
     <Content Include="data\케이블 기하 모델링 수치 변수.csv" />
     <Content Include="docs\ABAQUS_BACKEND_IMPLEMENTATION_PLAN.md" />
     <Content Include="docs\ABAQUS_BACKEND_IMPLEMENTATION_PLAN_KR.md" />
+    <Content Include="docs\HELIX_FINAL_COMPLETION_ROADMAP.md" />
     <Content Include="docs\SCLAS_RESEARCH_BACKLOG.md" />
     <Content Include="docs\SCLAS_RESEARCH_BACKLOG_KR.md" />
     <Content Include="docs\🔄 GUI와 아바쿠스의 데이터 교환 방식.docx" />
