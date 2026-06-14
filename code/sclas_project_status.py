@@ -24,6 +24,22 @@ def safe_call(fn, default=None):
         return {"error": str(exc)} if default is None else default
 
 
+def numeric(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def present_local_fields(summary: dict) -> set:
+    fields = summary.get("odb_present_local_fields")
+    if isinstance(fields, dict):
+        return {str(key) for key, value in fields.items() if value}
+    if isinstance(fields, list):
+        return {str(item) for item in fields}
+    return set()
+
+
 def latest_summary(job_root: Path, include_self_check: bool = False) -> dict:
     job_dir = latest_job_dir(job_root, include_self_check=include_self_check)
     return collect_summary(build_report(job_dir))
@@ -60,22 +76,40 @@ def completion_flags(summary: dict, comparison: dict) -> list:
             "detail": "peak_ratio={0}".format(comparison.get("peak_moment_ratio_continuous_over_endpoint", "-")),
         })
 
-    contact_pressure = summary.get("odb_contact_pressure_max")
-    slip = summary.get("odb_slip_abs_max")
+    contact_pressure = numeric(summary.get("odb_contact_pressure_max"))
+    slip = numeric(summary.get("odb_slip_abs_max"))
     preload = summary.get("contact_residual_preload_status")
-    contact_status = "ready" if contact_pressure and float(contact_pressure) > 0.0 else "blocked"
+    if contact_pressure is None or contact_pressure <= 0.0:
+        contact_status = "blocked"
+    elif preload in ("not_applied", "not_requested", None, ""):
+        contact_status = "review"
+    elif slip is None or slip <= 0.0:
+        contact_status = "review"
+    else:
+        contact_status = "ready"
     flags.append({
         "area": "Contact preload/closure",
         "status": contact_status,
         "detail": "preload={0}, CPRESS max={1}, slip max={2}".format(preload, contact_pressure, slip),
     })
 
-    fields = summary.get("odb_present_local_fields", {})
-    field_status = "ready" if fields else "pending"
+    fields = present_local_fields(summary)
+    required = {"S", "CPRESS", "COPEN"}
+    missing = sorted(required - fields)
+    slip_ok = bool({"CSLIP1", "CSLIP2"} & fields)
+    if missing:
+        field_status = "blocked"
+        field_detail = "missing required ODB fields: {0}".format(", ".join(missing))
+    elif not slip_ok:
+        field_status = "review"
+        field_detail = "stress/contact fields exist, but CSLIP1/CSLIP2 slip output is missing"
+    else:
+        field_status = "ready"
+        field_detail = ", ".join(sorted(fields))
     flags.append({
         "area": "ODB local fields",
         "status": field_status,
-        "detail": ", ".join(sorted(fields.keys())) if isinstance(fields, dict) and fields else "-",
+        "detail": field_detail,
     })
     return flags
 
@@ -84,6 +118,9 @@ def choose_next_action(summary: dict, comparison: dict, flags: list) -> str:
     for flag in flags:
         if flag.get("area") == "Contact preload/closure" and flag.get("status") == "blocked":
             return "Implement or validate contact preload/closure on the remote Abaqus PC, then rerun SmallSmoke, endpoint sweep, and continuous CurveV0."
+    for flag in flags:
+        if flag.get("area") == "ODB local fields" and flag.get("status") == "blocked":
+            return "Extract required ODB local fields S, CPRESS, COPEN, and CSLIP* on the remote Abaqus PC, then rerun result intake and acceptance."
     if comparison.get("recommended_next_action"):
         return comparison.get("recommended_next_action")
     if summary.get("recommended_next_action"):

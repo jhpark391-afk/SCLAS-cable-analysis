@@ -43,6 +43,8 @@ These areas can be pushed forward without running Abaqus locally:
    - Maintain `code/sclas_session_brief.py` and `run_session_brief.sh`/`.bat` as
      the one-page startup command for git sync, latest job health, result intake,
      acceptance gates, and next recommended action.
+   - Keep `code/sclas_project_status.py` aligned with the acceptance gate for
+     contact preload/closure and required ODB local-field readiness.
    - Keep this status command included in `run_self_check.bat` coverage through
      `code/sclas_self_check.py`.
 

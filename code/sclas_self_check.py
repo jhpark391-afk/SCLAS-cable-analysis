@@ -978,6 +978,32 @@ def check_research_ready_acceptance_fixture() -> None:
     if Path(intake.get("job_dir", "")).resolve() != continuous_job.resolve():
         fail("Result intake did not select the continuous research-ready fixture")
 
+    status_proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_project_status.py"),
+            "--job-root",
+            str(root),
+            "--json",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if status_proc.returncode != 0:
+        fail("Research-ready project status fixture failed:\n" + status_proc.stdout + status_proc.stderr)
+    status = json.loads(status_proc.stdout)
+    flag_statuses = {item.get("area"): item.get("status") for item in status.get("completion_flags", [])}
+    if flag_statuses.get("Contact preload/closure") != "ready":
+        fail("Project status did not classify research-ready contact as ready")
+    if flag_statuses.get("ODB local fields") != "ready":
+        fail("Project status did not classify research-ready ODB local fields as ready")
+    if status.get("latest_job_health") != "PASS":
+        fail("Project status did not expose the research-ready fixture as PASS")
+    if Path(status.get("latest_job", "")).resolve() != continuous_job.resolve():
+        fail("Project status did not select the continuous research-ready fixture")
+
     print(f"[OK] Research-ready acceptance fixture: endpoint={endpoint_job.name}, continuous={continuous_job.name}")
 
 
