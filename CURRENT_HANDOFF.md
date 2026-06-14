@@ -2436,7 +2436,8 @@ and next action into the summary panel. It also saves
 `project_status_report.json` and `project_status_report.md` into the latest job
 folder so another Codex session can read the same handoff snapshot. The same
 Recent Jobs panel now also has an `Open folder` button for opening the selected
-job folder in Finder or Windows Explorer.
+job folder in Finder or Windows Explorer, plus a `Job Index` button for saving
+and displaying a recent-job inventory directly in the GUI.
 
 ## Home Codex Start Prompt
 
