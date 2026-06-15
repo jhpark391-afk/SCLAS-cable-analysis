@@ -1061,6 +1061,24 @@ def check_calibration_report() -> None:
     if "HELIX / SCLAS Calibration Report" not in saved_markdown.read_text(encoding="utf-8"):
         fail("Calibration report Markdown does not contain the expected heading")
 
+    summary_proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_job_summary.py"),
+            str(continuous_job),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if summary_proc.returncode != 0:
+        fail("sclas_job_summary.py failed to read calibration summary:\n" + summary_proc.stdout + summary_proc.stderr)
+    job_summary = json.loads(summary_proc.stdout)
+    if job_summary.get("calibration_status") not in ("calibrated", "requires_calibration_tuning"):
+        fail("Job summary did not include calibration_status")
+    if job_summary.get("calibration_elastic_stiffness") is None:
+        fail("Job summary did not include calibration_elastic_stiffness")
+
     print("[OK] Calibration report templates")
 
 

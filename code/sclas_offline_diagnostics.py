@@ -1419,6 +1419,14 @@ def build_report(job_dir: Path) -> dict:
         inspect_manifest(job_dir, report)
         inspect_inp(job_dir, report)
         inspect_solver_logs(job_dir, report)
+    
+    cal_path = job_dir / "calibration_report.json"
+    if cal_path.exists():
+        try:
+            report["calibration_report"] = load_json(cal_path)
+        except Exception:
+            pass
+
     summarize_report(report)
     return report
 

@@ -2833,6 +2833,29 @@ class SCLASRemoteGUI(QMainWindow):
                     f"- torsion proxy: {float(derived.get('torsion_proxy_N_m2', 0.0)):.6g} N.m^2",
                 ])
 
+        cal_status = data.get("calibration_status")
+        if cal_status:
+            if self.ui_language == "KO":
+                lines.extend([
+                    "",
+                    "캘리브레이션 비교 보고서:",
+                    f"- 상태: {cal_status}",
+                    f"- 탄성 강성: {float(data.get('calibration_elastic_stiffness', 0.0)):.6g} kN.m^2",
+                    f"- 슬립 강성: {float(data.get('calibration_slip_stiffness', 0.0)):.6g} kN.m^2",
+                    f"- 이력 에너지 손실: {float(data.get('calibration_hysteresis_loss', 0.0)):.6g} kN",
+                    f"- 고착-미끄러짐 전이 곡률: {float(data.get('calibration_transition_curvature', 0.0)):.6g} 1/m",
+                ])
+            else:
+                lines.extend([
+                    "",
+                    "Calibration Report:",
+                    f"- status: {cal_status}",
+                    f"- elastic stiffness: {float(data.get('calibration_elastic_stiffness', 0.0)):.6g} kN.m^2",
+                    f"- slip stiffness: {float(data.get('calibration_slip_stiffness', 0.0)):.6g} kN.m^2",
+                    f"- hysteresis loss: {float(data.get('calibration_hysteresis_loss', 0.0)):.6g} kN",
+                    f"- transition curvature: {float(data.get('calibration_transition_curvature', 0.0)):.6g} 1/m",
+                ])
+
         note = data.get("note")
         if note:
             lines.extend(["", f"{'메모' if self.ui_language == 'KO' else 'Note'}: {note}"])

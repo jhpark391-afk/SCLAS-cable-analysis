@@ -273,6 +273,17 @@ def collect_summary(report: dict) -> dict:
         "issue_counts": issue_counts,
         "recommended_next_action": diagnostic.get("recommended_next_action"),
     }
+    
+    cal_report = report.get("calibration_report", {})
+    if cal_report:
+        summary["calibration_status"] = cal_report.get("status")
+        cal_metrics = cal_report.get("metrics", {})
+        if cal_metrics:
+            summary["calibration_elastic_stiffness"] = cal_metrics.get("elastic_bending_stiffness_kn_m2")
+            summary["calibration_slip_stiffness"] = cal_metrics.get("slip_zone_bending_stiffness_kn_m2")
+            summary["calibration_hysteresis_loss"] = cal_metrics.get("hysteresis_energy_loss_kn")
+            summary["calibration_transition_curvature"] = cal_metrics.get("stick_to_slip_curvature_1_per_m")
+
     summary.update(details)
     if (
         summary.get("curve_v0_comparison_status") in ("review", "blocked")
