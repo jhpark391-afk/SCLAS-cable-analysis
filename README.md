@@ -13,7 +13,7 @@
 graph TD
     subgraph "Frontend (PyQt5)"
         A["1. Design/Mesh parameters"] --> B["2. JSON Data Serialization (input_data.json)"]
-        G["6. GUI Visualization & Reports"] <-- H["5. Result Parse & Deserialize"]
+        H["5. Result Parse & Deserialize"] --> G["6. GUI Visualization & Reports"]
     end
     
     subgraph "Backend (Abaqus noGUI Solver)"
