@@ -2716,6 +2716,22 @@ def run_placeholder_solver(payload):
     return curvature, moment_kn_m, derived
 
 
+def read_result_csv_simple(path):
+    k_vals = []
+    m_vals = []
+    with open(path, "r") as f:
+        lines = f.readlines()
+        for line in lines[1:]:
+            parts = line.strip().split(",")
+            if len(parts) >= 2:
+                try:
+                    k_vals.append(float(parts[0]))
+                    m_vals.append(float(parts[1]))
+                except ValueError:
+                    pass
+    return k_vals, m_vals
+
+
 def main(argv):
     input_path = parse_input_path(argv)
     if not os.path.exists(input_path):
@@ -2726,6 +2742,9 @@ def main(argv):
     job_dir = os.path.dirname(os.path.abspath(input_path))
 
     mesh_status = {"status": "not_attempted"}
+    has_real_results = False
+    result_csv = os.path.join(job_dir, "result_data.csv")
+
     if abaqus_available():
         try:
             mesh_status = build_abaqus_mesh_model(payload, job_dir)
@@ -2744,6 +2763,55 @@ def main(argv):
                 beam_orientation_adjustments=mesh_status.get("beam_orientation_adjustments"),
             )
             print("Wrote Abaqus mesh scaffold: {0}".format(", ".join(mesh_status.get("files", []))))
+
+            job_name = mesh_status.get("job_name")
+            if job_name:
+                inp_file = job_name + ".inp"
+                inp_path = os.path.join(job_dir, inp_file)
+                if os.path.exists(inp_path):
+                    # 1. Create and submit the job using the input file
+                    from abaqus import mdb
+                    print("Submitting Abaqus solver job: {0}".format(job_name))
+                    job = mdb.JobFromInputFile(name=job_name, inputFileName=inp_path)
+                    job.submit()
+                    job.waitForCompletion()
+                    print("Abaqus solver job {0} finished.".format(job_name))
+
+                    # 2. Locate and copy sclas_odb_extractor.py to the job directory
+                    project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(job_dir))))
+                    src_extractor = os.path.join(project_dir, "code", "sclas_odb_extractor.py")
+                    dest_extractor = os.path.join(job_dir, "sclas_odb_extractor.py")
+                    if os.path.exists(src_extractor):
+                        import shutil
+                        shutil.copy2(src_extractor, dest_extractor)
+
+                    # 3. Run ODB extractor via abaqus python
+                    odb_path = os.path.join(job_dir, job_name + ".odb")
+                    if os.path.exists(odb_path) and os.path.exists(dest_extractor):
+                        print("Running ODB extraction...")
+                        old_cwd = os.getcwd()
+                        os.chdir(job_dir)
+                        try:
+                            import subprocess
+                            cmd = ["abaqus", "python", "sclas_odb_extractor.py", job_name + ".odb", "--job-dir", ".", "--input-data", "input_data.json"]
+                            subprocess.call(cmd)
+                        finally:
+                            os.chdir(old_cwd)
+
+                    # 4. Read back the real result if it was successfully written
+                    if os.path.exists(result_csv):
+                        try:
+                            curvature, moment_kn_m = read_result_csv_simple(result_csv)
+                            if curvature:
+                                derived = {
+                                    "source": "Abaqus/Standard FEA simulation",
+                                    "max_curvature_1_per_m": max(curvature),
+                                }
+                                has_real_results = True
+                                print("Successfully read back real simulation results: {0} points".format(len(curvature)))
+                        except Exception as read_exc:
+                            print("Read back real result failed: {0}".format(read_exc))
+
         except Exception as exc:
             error_detail = "{0}\n{1}".format(str(exc), traceback.format_exc())
             mesh_status = {"status": "abaqus_mesh_failed", "error": str(exc)}
@@ -2754,11 +2822,12 @@ def main(argv):
         mesh_status = {"status": "abaqus_api_not_available", "manifest": "abaqus_mesh_manifest.json"}
         print("Abaqus API not available; wrote abaqus_mesh_manifest.json only.")
 
-    curvature, moment_kn_m, derived = run_placeholder_solver(payload)
-    result_csv = os.path.join(job_dir, "result_data.csv")
-    write_result_csv(result_csv, curvature, moment_kn_m)
+    if not has_real_results:
+        curvature, moment_kn_m, derived = run_placeholder_solver(payload)
+        write_result_csv(result_csv, curvature, moment_kn_m)
+        print("Wrote placeholder {0}".format(result_csv))
+
     write_summary(os.path.join(job_dir, "result_summary.json"), "SCLAS_ABAQUS_MESH_BRIDGE", payload, curvature, moment_kn_m, derived, mesh_status)
-    print("Wrote {0}".format(result_csv))
     return 0
 
 
