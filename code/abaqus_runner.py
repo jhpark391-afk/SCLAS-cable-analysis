@@ -2115,7 +2115,9 @@ def build_abaqus_mesh_model(payload, job_dir):
     def elem_code_for_solid():
         import abaqusConstants as ac
 
-        return getattr(ac, requested_elem, ac.C3D8R)
+        if requested_elem.startswith("C3D"):
+            return getattr(ac, requested_elem, ac.C3D8R)
+        return ac.C3D8R
 
     mesh_control_adjustments = []
     beam_orientation_adjustments = []
