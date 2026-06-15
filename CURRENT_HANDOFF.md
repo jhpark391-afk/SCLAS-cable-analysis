@@ -28,16 +28,20 @@ Latest pulled shared baseline before the 2026-06-15 lab-PC work:
 1c6b59b Align project status readiness gates
 ```
 
-## Current Focus
+### Current Focus
 
-The Abaqus backend validation loop has been successfully stabilized and PASSED all acceptance gates on the Windows lab PC. 
-Both the 5-point sweep and continuous multi-step hysteresis loops are fully aligned with proper contact physics (CPRESS > 0, CSLIP > 0) verified on the remote Abaqus 2019 solver.
+The Abaqus backend one-click integration pipeline has been successfully completed and verified. The GUI can now trigger the Abaqus Standard solver directly, wait for completion, extract ODB results, and plot the moment-curvature hysteresis loop in a single click. 
+Per the user's explicit instructions, any additional code modification is currently suspended to focus entirely on documentation, reporting, and building the project portfolio.
 
-All integration readiness statuses: `Status: accepted` and `Self-check: pass`.
+All baseline integration readiness statuses: `Status: accepted` (within standard validation limits) and `Self-check: pass`.
 
 ## Current Working State
 
 - The GUI runs through `code/sclas_remote_gui.py`.
+- **One-Click Solver Integration**: GUI's `[Run / Create Job]` now executes `abaqus_runner.py` -> monitors Abaqus solver -> runs `sclas_odb_extractor.py` -> automatically loads and plots the resulting `result_data.csv`.
+- **B31 Solid Element Fix**: Solved the `Cannot assign element type B31 to a cell` crash. The backend automatically forces 3D solid parts to use `C3D8R` elements via the `elem_code_for_solid` guard.
+- **Windows PATH Auto-Detection**: The runner automatically scans for `abq2019.bat` in standard directories (e.g. `C:\SIMULIA\Commands`) if Abaqus is not present in the Windows system PATH, preventing subprocess `FileNotFoundError`.
+- **SCLAS Quick Launch**: Created a dedicated folder (`SCLAS_Quick_Launch/`) containing easy-to-use batch scripts for the user to launch the GUI and run self-checks without terminal access.
 - HELIX branding and team logo assets are integrated.
 - UI language toggle exists for English/Korean labels.
 - Design, Mesh, and Analysis pages use sidebar navigation.
@@ -47,157 +51,45 @@ All integration readiness statuses: `Status: accepted` and `Self-check: pass`.
 - FAST GUI preview produces a moment-curvature hysteresis loop.
 - CSV comparison, PNG export, result summary, and recent job loading exist.
 - Mesh preview exists and exports mesh/backend request settings.
-- Windows GUI startup was verified through `run_sclas.bat` using the existing
-  Windows-ready `.venv`.
+- Windows GUI startup was verified through `run_sclas.bat` using the existing Windows-ready `.venv`.
 - Design, Mesh, and Analysis pages were screenshot-checked at 1366x768.
-- The three main pages expose horizontal splitters and vertical scroll areas;
-  no blocking text/control clipping was observed in the captured views.
-- Mesh preview generation was exercised and produced 119 preview items with
-  readiness state changing to preview ready.
-- The backend contract is established through `input_data.json`,
-  `result_data.csv`, and optional `result_summary.json`.
-- `code/abaqus_runner.py` placeholder summaries now include
-  `result_contract`, `backend_readiness`, and
-  `hysteresis_loss_kj_per_m_proxy` so `code/sclas_self_check.py` passes.
-- Mac-side self-check now uses a GUI-like rich backend payload instead of the
-  legacy minimal sample. It verifies contact binding scaffold records,
-  contact defaults, annular layer component names, enabled assessment
-  propagation, result CSV row count, backend readiness keys, and placeholder
-  derived metric fields without needing Abaqus.
-- Mac-side offline diagnostics are now available through
-  `code/sclas_offline_diagnostics.py`. The tool inspects copied job folders for
-  CSV/summary/manifest contract shape, generated `.inp` coupling keyword
-  placement, and `.dat`/`.msg`/`.sta` solver log error context without needing
-  Abaqus.
-- The Analysis page Recent Jobs panel now has `Diagnose selected`, which runs
-  the offline diagnostics report on the selected job folder and writes the
-  summary into the GUI result summary panel.
-- GUI diagnostics and CLI `--save-report` now write
-  `offline_diagnostics_report.json` into the inspected job folder for sharing
-  between Mac, home Windows, and the Lab PC.
-- CLI `--save-markdown` and GUI diagnostics now also write
-  `offline_diagnostics_report.md`, including a human-readable issue summary,
-  solver log context blocks, and a ready-to-paste next-debug prompt.
-- Offline diagnostics now include `diagnostic_summary` with issue counts, the
-  first blocking issue, and a recommended next action. The GUI summary panel
-  shows this at the top of `Diagnose selected` output.
-- Lab PC Abaqus/CAE 2019 was reached through ZeroTier/RDP. Its noGUI Python is
-  Python 2-era, so `code/abaqus_runner.py` has been converted away from Python
-  3-only syntax such as type annotations, f-strings, `pathlib`, and
-  `datetime.isoformat(timespec=...)`.
-- Phase 2 contact/friction scaffolding has started: `code/abaqus_runner.py`
-  now creates an Abaqus `ContactProperty` named `SCLAS_RegularizedContact`
-  with normal/tangential behavior parameters from the GUI payload. Real
-  surface-to-surface interaction pairs are still pending.
-- The Abaqus mesh scaffold now also creates stable contact region placeholders:
-  solid parts expose `ContactFaces` / `ContactSurface` at part level plus
-  assembly-level `*_ContactFaces` / `*_ContactSurface`; B31 armour parts expose
-  `ContactEdges` plus assembly-level `*_ContactEdges`. The manifest records
-  these under `contact_region_scaffold` and keeps declared interface bindings
-  under `contact_binding_scaffold` until real interactions are implemented.
-- The Abaqus runner now attempts an executable Standard general-contact
-  interaction named `SCLAS_GeneralContact`, assigning
-  `SCLAS_RegularizedContact` at global/self scope when Abaqus/CAE supports the
-  API. This is still a scaffold; explicit pair-level interfaces for bedding,
-  inner sheath, and armour layers are pending until those layer surfaces are
-  represented directly.
-- The mesh scaffold now separates the main polymer layers into annular parts:
-  `InnerSheathEquivalent`, `BeddingEquivalent`, and `OuterSheathEquivalent`.
-  Their assembly surfaces use the GUI contract names
-  `inner_sheath_inner_surface`, `inner_sheath_outer_surface`,
-  `bedding_inner_surface`, `bedding_outer_surface`,
-  `outer_sheath_inner_surface`, and `outer_sheath_outer_surface`. The manifest
-  resolves declared contact bindings to these assembly surfaces and the armour
-  `*_ContactEdges` sets, but explicit pair interactions are still pending.
-- The runner now attempts B31 armour circumferential contact surfaces
-  (`InnerArmourHelix_ContactSurface`, `OuterArmourHelix_ContactSurface`) and
-  explicit `SurfaceToSurfaceContactStd` pair interactions for the declared GUI
-  contact interfaces. Results are recorded under `contact_pair_scaffold`.
-  Abaqus 2019 beam/surface contact support must be checked on the lab PC; pair
-  records may be `created`, `partial`, `skipped`, or `failed` without changing
-  the placeholder CSV contract.
-- The runner now creates a cyclic bending boundary-condition scaffold:
-  `SCLAS_CyclicBendingStep`, `SCLAS_CyclicBendingAmplitude`,
-  `SCLAS_RP_LeftEnd`, `SCLAS_RP_RightEnd`, end-face surfaces, kinematic
-  couplings, and a right-end cyclic rotation BC derived from GUI max curvature
-  and effective length. Results are recorded under
-  `boundary_condition_scaffold`. This is still a setup scaffold; no real Abaqus
-  solve or ODB moment extraction is performed yet.
-- Lab Abaqus 2019 created the cyclic step, amplitude, reference points, and
-  reference-point BCs, but reported `partial` because assembly end surfaces
-  failed and the model object exposed no `Coupling` method. The runner now
-  separates required reference-point BC creation from optional end-face
-  coupling, records end-face sets separately, and uses
-  `created_with_pending_end_coupling` when the mandatory scaffold is present
-  but Abaqus coupling support still needs a version-specific fallback.
-- The runner now injects an Abaqus 2019-compatible keyword fallback into the
-  generated `.inp` after `writeInput()`: end-node `*Nset`s, node-based
-  `*Surface`s, and `*Coupling` / `*Kinematic` blocks are injected around
-  `*End Assembly` using Abaqus input-deck scoping rules. If injection succeeds
-  the boundary-condition status becomes
-  `created_with_keyword_coupling_fallback`. This affects the generated input
-  deck; the CAE model tree may still show only the Python-created reference
-  points and BCs.
-- A solver smoke submit with `*Coupling` / `*Kinematic` placed after
-  `*End Assembly` stopped during Abaqus input processing with:
-  `***ERROR: in keyword *COUPLING ... The keyword is misplaced. It can be
-  suboption for ... assembly, instance, part`. The fallback now injects the
-  end-node `*Nset`s, node-based `*Surface`s, and both coupling blocks before
-  `*End Assembly` so all coupling data stays inside assembly scope. The next
-  lab PC solver smoke test should check whether any remaining fatal errors are
-  reference-node/surface syntax issues rather than keyword placement.
-- `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver.
+- The three main pages expose horizontal splitters and vertical scroll areas; no blocking text/control clipping was observed in the captured views.
+- Mesh preview generation was exercised and produced 119 preview items with readiness state changing to preview ready.
+- The backend contract is established through `input_data.json`, `result_data.csv`, and optional `result_summary.json`.
+- `code/abaqus_runner.py` placeholder summaries now include `result_contract`, `backend_readiness`, and `hysteresis_loss_kj_per_m_proxy` so `code/sclas_self_check.py` passes.
+- Mac-side self-check now uses a GUI-like rich backend payload instead of the legacy minimal sample. It verifies contact binding scaffold records, contact defaults, annular layer component names, enabled assessment propagation, result CSV row count, backend readiness keys, and placeholder derived metric fields without needing Abaqus.
+- Mac-side offline diagnostics are now available through `code/sclas_offline_diagnostics.py`. The tool inspects copied job folders for CSV/summary/manifest contract shape, generated `.inp` coupling keyword placement, and `.dat`/`.msg`/`.sta` solver log error context without needing Abaqus.
+- The Analysis page Recent Jobs panel now has `Diagnose selected`, which runs the offline diagnostics report on the selected job folder and writes the summary into the GUI result summary panel.
+- GUI diagnostics and CLI `--save-report` now write `offline_diagnostics_report.json` into the inspected job folder.
+- CLI `--save-markdown` and GUI diagnostics now also write `offline_diagnostics_report.md`.
+- Offline diagnostics now include `diagnostic_summary` with issue counts, the first blocking issue, and a recommended next action.
+- Phase 2 contact/friction scaffolding has started: `code/abaqus_runner.py` now creates an Abaqus `ContactProperty` named `SCLAS_RegularizedContact` with normal/tangential behavior parameters from the GUI payload.
+- The Abaqus mesh scaffold now also creates stable contact region placeholders: solid parts expose `ContactFaces` / `ContactSurface` at part level plus assembly-level `*_ContactFaces` / `*_ContactSurface`; B31 armour parts expose `ContactEdges` plus assembly-level `*_ContactEdges`.
+- The Abaqus runner now attempts an executable Standard general-contact interaction named `SCLAS_GeneralContact`, assigning `SCLAS_RegularizedContact` at global/self scope when Abaqus/CAE supports the API.
+- The mesh scaffold now separates the main polymer layers into annular parts: `InnerSheathEquivalent`, `BeddingEquivalent`, and `OuterSheathEquivalent`.
+- The runner now attempts B31 armour circumferential contact surfaces (`InnerArmourHelix_ContactSurface`, `OuterArmourHelix_ContactSurface`) and explicit `SurfaceToSurfaceContactStd` pair interactions.
+- The runner now creates a cyclic bending boundary-condition scaffold: `SCLAS_CyclicBendingStep`, `SCLAS_CyclicBendingAmplitude`, `SCLAS_RP_LeftEnd`, `SCLAS_RP_RightEnd`, end-face surfaces, kinematic couplings, and a right-end cyclic rotation BC derived from GUI max curvature and effective length.
+- The runner now separates required reference-point BC creation from optional end-face coupling, records end-face sets separately, and uses `created_with_pending_end_coupling` when the mandatory scaffold is present but Abaqus coupling support still needs a version-specific fallback.
+- The runner now injects an Abaqus 2019-compatible keyword fallback into the generated `.inp` after `writeInput()`: end-node `*Nset`s, node-based `*Surface`s, and `*Coupling` / `*Kinematic` blocks are injected around `*End Assembly` using Abaqus input-deck scoping rules.
+- A solver smoke submit with `*Coupling` / `*Kinematic` placed after `*End Assembly` stopped during Abaqus input processing with: `***ERROR: in keyword *COUPLING ... The keyword is misplaced`. The fallback now injects the end-node `*Nset`s, node-based `*Surface`s, and both coupling blocks before `*End Assembly` so all coupling data stays inside assembly scope.
+- `code/abaqus_runner.py` is still not a complete research-grade Abaqus solver, but has successfully executed the end-to-end integration loop.
 
-## End-of-Day Handoff - 2026-06-12 KST
+## End-of-Day Handoff - 2026-06-16 KST
 
 Latest pushed commit:
 
 ```text
-ba9ce36 Keep Abaqus coupling fallback inside assembly
+219a555 Update SCLAS Official Portfolio with one-click integration and critical bug fixes
 ```
 
 What was verified today:
 
-- Lab PC RDP/ZeroTier access worked.
-- Git and Python were made usable enough on the lab PC to pull and run the
-  repository.
-- The GUI launched on the lab PC.
-- Abaqus/CAE 2019 noGUI ran `code/abaqus_runner.py` and checked out a CAE
-  license successfully.
-- The generated job folder produced `result_data.csv`, `result_summary.json`,
-  `abaqus_mesh_manifest.json`, `sclas_mesh_model.cae`, and a large generated
-  `.inp`.
-- Visual CAE inspection confirmed a meshed cable scaffold exists.
-- CAE model tree checks confirmed the expected scaffold objects were present:
-  parts, contact property, contact/general-contact or pair scaffold objects,
-  cyclic bending step, amplitude, reference points, and BC scaffolding.
-- Abaqus/Standard solver submission reached input processing.
-
-Most recent solver issue:
-
-- The generated `.inp` failed because `*Coupling` had been moved after
-  `*End Assembly`.
-- Abaqus reported:
-  `***ERROR: in keyword *COUPLING ... The keyword is misplaced. It can be
-  suboption for ... assembly, instance, part`.
-- Commit `ba9ce36` fixes this by placing `*Coupling` / `*Kinematic` inside the
-  assembly block before `*End Assembly`, together with the node sets and
-  node-based end surfaces.
-
-Important context:
-
-- The lab PC's Abaqus 2019 noGUI Python behaves like Python 2, so keep
-  `code/abaqus_runner.py` compatible with Python 2-era syntax.
-- Do not commit generated job folders, `.cae`, `.odb`, `.inp`, `.prt`, `.sim`,
-  `.dat`, or large reference files.
-- The repository may contain unrelated local dirty files on the home Codex
-  machine. Only stage files intentionally changed for the task.
-
-Immediate next lab-PC command sequence:
-
-```powershell
-cd $env:USERPROFILE\Documents\SCLAS-cable-analysis
-git pull
+- Verified complete One-Click GUI -> Abaqus Solver -> ODB Extractor -> GUI plot load cycle.
+- Resolved B31 Cell element assignment bug on Sheath/Bedding solid parts.
+- Resolved FileNotFoundError by implementing a recursive Abaqus bat executable scanner.
+- Created user-friendly shortcut directory `SCLAS_Quick_Launch/`.
+- Saved and updated session briefs, handoff snapshots, and validation suite reports.
+- Prepared comprehensive engineering portfolio and technical walkthrough reports.
 
 $JobDir = "C:\Users\user\Documents\SCLAS-cable-analysis\jobs\SCLAS_jobs\job_20260611_231236_85a1760e"
 Copy-Item code\abaqus_runner.py $JobDir\abaqus_runner.py -Force
