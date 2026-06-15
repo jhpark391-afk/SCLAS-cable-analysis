@@ -55,3 +55,7 @@ progress_timeline.md
 
 # Presentation/build scratch output
 outputs/
+
+# Local quick launch shortcuts
+SCLAS_Quick_Launch/
+
