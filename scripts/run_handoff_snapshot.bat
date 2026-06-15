@@ -1,24 +1,24 @@
 @echo off
 setlocal
 
-set "PROJECT_DIR=%~dp0"
-set "PROMPT_ENTRY=%PROJECT_DIR%code\sclas_next_prompt.py"
-set "PROMPT_ARGS=--save"
+set "PROJECT_DIR=%~dp0..\"
+set "SNAPSHOT_ENTRY=%PROJECT_DIR%code\sclas_handoff_snapshot.py"
+set "SNAPSHOT_ARGS=--save-report --save-markdown"
 
 if exist "%PROJECT_DIR%.venv\Scripts\python.exe" (
-    "%PROJECT_DIR%.venv\Scripts\python.exe" "%PROMPT_ENTRY%" %PROMPT_ARGS%
+    "%PROJECT_DIR%.venv\Scripts\python.exe" "%SNAPSHOT_ENTRY%" %SNAPSHOT_ARGS%
     goto :done
 )
 
 where py >nul 2>nul
 if not errorlevel 1 (
-    py -3 "%PROMPT_ENTRY%" %PROMPT_ARGS%
+    py -3 "%SNAPSHOT_ENTRY%" %SNAPSHOT_ARGS%
     goto :done
 )
 
 where python >nul 2>nul
 if not errorlevel 1 (
-    python "%PROMPT_ENTRY%" %PROMPT_ARGS%
+    python "%SNAPSHOT_ENTRY%" %SNAPSHOT_ARGS%
     goto :done
 )
 
@@ -30,8 +30,9 @@ exit /b 1
 set "EXIT_CODE=%ERRORLEVEL%"
 if "%EXIT_CODE%"=="0" (
     echo.
-    echo Next Codex prompt saved:
-    echo   %PROJECT_DIR%NEXT_CODEX_PROMPT.md
+    echo Handoff snapshot saved:
+    echo   %PROJECT_DIR%handoff_snapshot.json
+    echo   %PROJECT_DIR%handoff_snapshot.md
 )
 endlocal
 exit /b %EXIT_CODE%

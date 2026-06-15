@@ -12,9 +12,9 @@ $ErrorActionPreference = "Stop"
 
 function Resolve-ProjectRoot {
     if ($PSScriptRoot) {
-        return $PSScriptRoot
+        return Split-Path $PSScriptRoot -Parent
     }
-    return (Get-Location).Path
+    return Split-Path (Get-Location).Path -Parent
 }
 
 function Find-LatestGuiJobDir {

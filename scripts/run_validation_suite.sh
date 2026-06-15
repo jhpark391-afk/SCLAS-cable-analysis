@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORKSPACE_DIR="$(cd "$PROJECT_DIR/.." && pwd)"
 
 if [ -x "$WORKSPACE_DIR/90_env/venv/bin/python" ]; then
@@ -15,7 +15,10 @@ else
     exit 1
 fi
 
-"$PYTHON" "$PROJECT_DIR/code/sclas_acceptance_gate.py" --save-report --save-markdown
+"$PYTHON" "$PROJECT_DIR/code/sclas_validation_suite.py" --save-report --save-markdown
 
 echo
-echo "Acceptance gate report saved in the latest job folder."
+echo "Validation suite complete."
+echo "Generated local reports are intentionally ignored by git:"
+echo "  $PROJECT_DIR/validation_suite_report.json"
+echo "  $PROJECT_DIR/validation_suite_report.md"

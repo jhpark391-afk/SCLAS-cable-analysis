@@ -1,5 +1,0 @@
-numpy
-psutil
-PyQt5
-pyqtgraph
-PyOpenGL

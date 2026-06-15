@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "PROJECT_DIR=%~dp0"
+set "PROJECT_DIR=%~dp0..\"
 set "GATE_ENTRY=%PROJECT_DIR%code\sclas_acceptance_gate.py"
 set "GATE_ARGS=--save-report --save-markdown"
 

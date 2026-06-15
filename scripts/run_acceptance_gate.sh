@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORKSPACE_DIR="$(cd "$PROJECT_DIR/.." && pwd)"
 
 if [ -x "$WORKSPACE_DIR/90_env/venv/bin/python" ]; then
@@ -15,8 +15,7 @@ else
     exit 1
 fi
 
-"$PYTHON" "$PROJECT_DIR/code/sclas_next_prompt.py" --save
+"$PYTHON" "$PROJECT_DIR/code/sclas_acceptance_gate.py" --save-report --save-markdown
 
 echo
-echo "Next Codex prompt saved:"
-echo "  $PROJECT_DIR/NEXT_CODEX_PROMPT.md"
+echo "Acceptance gate report saved in the latest job folder."

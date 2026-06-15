@@ -55,16 +55,6 @@ def check_pyproj_references() -> None:
     print("[OK] Visual Studio project references exist")
 
 
-def check_synced_files() -> None:
-    pairs = [
-        (CODE_DIR / "sclas_remote_gui.py", CODE_DIR / "SCLAS_test" / "sclas_remote_gui.py"),
-        (CODE_DIR / "abaqus_runner.py", CODE_DIR / "SCLAS_test" / "abaqus_runner.py"),
-    ]
-    for left, right in pairs:
-        if sha256(left) != sha256(right):
-            fail(f"Test copy is not synchronized: {left.name}")
-    print("[OK] Main GUI/backend files match SCLAS_test copies")
-
 
 def check_compile() -> None:
     if not compileall.compile_dir(str(CODE_DIR), quiet=1):
@@ -1538,7 +1528,6 @@ def check_research_report() -> None:
 def main() -> int:
     checks = [
         check_pyproj_references,
-        check_synced_files,
         check_compile,
         check_backend_contract,
         check_endpoint_sweep_diagnostics,

@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "PROJECT_DIR=%~dp0"
+set "PROJECT_DIR=%~dp0..\"
 set "VENV_PYTHON=%PROJECT_DIR%.venv\Scripts\python.exe"
 
 if exist "%VENV_PYTHON%" (

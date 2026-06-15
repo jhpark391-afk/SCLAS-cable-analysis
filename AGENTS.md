@@ -8,9 +8,9 @@ HELIX = Helical Element Localised Interaction eXamination.
 
 Every Codex session on this repository should start by reading:
 
-1. `CURRENT_HANDOFF.md`
-2. `README_SCLAS_WORKFLOW.md`
-3. `README_LITERATURE_NOTES.md`
+1. `docs/internal_handoff/CURRENT_HANDOFF_KR.md` (or `docs/internal_handoff/CURRENT_HANDOFF.md`)
+2. `docs/guides/README_SCLAS_WORKFLOW.md`
+3. `docs/guides/README_LITERATURE_NOTES.md`
 
 Then run:
 
@@ -26,25 +26,17 @@ explicitly asks to inspect the old state.
 Use these as the main project surfaces:
 
 - GUI source: `code/sclas_remote_gui.py`
-- Windows/test GUI copy: `code/SCLAS_test/sclas_remote_gui.py`
-- Text mirror of GUI source: `code/sclas_remote_gui_final_code.txt`
 - Abaqus backend bridge: `code/abaqus_runner.py`
 - Backend handoff: `docs/HELIX_BACKEND_HANDOFF_BOGWANG_KR.md`
-- Literature notes: `README_LITERATURE_NOTES.md`
+- Literature notes: `docs/guides/README_LITERATURE_NOTES.md`
 
-When editing `code/sclas_remote_gui.py`, sync the same content to:
-
-```text
-code/SCLAS_test/sclas_remote_gui.py
-code/sclas_remote_gui_final_code.txt
-```
+Only edit the source code under the `code/` folder. Do not keep duplicate copies.
 
 ## Verification
 
-After GUI edits, run:
+After GUI or backend edits, run:
 
 ```bash
-python -m py_compile code/sclas_remote_gui.py code/SCLAS_test/sclas_remote_gui.py
 python code/sclas_self_check.py
 ```
 
@@ -57,13 +49,7 @@ On macOS, the project normally uses:
 On Windows, prefer:
 
 ```bat
-run_self_check.bat
-```
-
-After backend edits, also compile:
-
-```bash
-python -m py_compile code/abaqus_runner.py code/SCLAS_test/abaqus_runner.py
+scripts/run_self_check.bat
 ```
 
 ## Git Handoff Rules
@@ -78,14 +64,13 @@ Use this rhythm:
 git pull
 git status --short --branch
 # work
-# verify
+# verify (scripts/run_self_check.bat or scripts/run_validation_suite.bat)
 git add <changed files>
 git commit -m "Describe the completed change"
 git push
 ```
 
-Update `CURRENT_HANDOFF.md` whenever the current focus, next tasks, or project
-state changes.
+Update `docs/internal_handoff/CURRENT_HANDOFF_KR.md` (and `docs/internal_handoff/CURRENT_HANDOFF.md`) whenever the current focus, next tasks, or project state changes.
 
 ## Research Accuracy
 
