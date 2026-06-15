@@ -2792,9 +2792,19 @@ def main(argv):
                         old_cwd = os.getcwd()
                         os.chdir(job_dir)
                         try:
+                            abaqus_cmd = "abaqus"
+                            potential_paths = [
+                                "C:\\SIMULIA\\Commands\\abq2019.bat",
+                                "C:\\SIMULIA\\Commands\\abaqus.bat",
+                            ]
+                            for path in potential_paths:
+                                if os.path.exists(path):
+                                    abaqus_cmd = path
+                                    break
+
                             import subprocess
-                            cmd = ["abaqus", "python", "sclas_odb_extractor.py", job_name + ".odb", "--job-dir", ".", "--input-data", "input_data.json"]
-                            subprocess.call(cmd)
+                            cmd_str = '"{0}" python sclas_odb_extractor.py {1}.odb --job-dir . --input-data input_data.json'.format(abaqus_cmd, job_name)
+                            subprocess.call(cmd_str, shell=True)
                         finally:
                             os.chdir(old_cwd)
 
