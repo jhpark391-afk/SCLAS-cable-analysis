@@ -272,6 +272,7 @@ def check_backend_contract() -> None:
             "contact_interaction_scaffold_status",
             "contact_pair_scaffold_status",
             "boundary_condition_scaffold_status",
+            "equivalent_properties_from_gui",
             "components",
         ],
         "abaqus_mesh_manifest.json",
@@ -1029,6 +1030,40 @@ def check_research_ready_acceptance_fixture() -> None:
     print(f"[OK] Research-ready acceptance fixture: endpoint={endpoint_job.name}, continuous={continuous_job.name}")
 
 
+def check_calibration_report() -> None:
+    root = unique_self_check_dir("self_check_calibration_root")
+    endpoint_job, continuous_job = write_research_ready_fixture(root)
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_calibration_report.py"),
+            "--job-root",
+            str(root),
+            "--json",
+            "--save-report",
+            "--save-markdown",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        fail("sclas_calibration_report.py failed:\n" + proc.stdout + proc.stderr)
+    report = json.loads(proc.stdout)
+    if report.get("status") not in ("calibrated", "requires_calibration_tuning"):
+        fail("Calibration report returned an unexpected status: " + str(report.get("status")))
+    if not report.get("metrics"):
+        fail("Calibration report did not evaluate metrics")
+    saved_report = Path(report.get("saved_report", ""))
+    saved_markdown = Path(report.get("saved_markdown_report", ""))
+    if not saved_report.exists() or not saved_markdown.exists():
+        fail("Calibration report did not save JSON and Markdown files")
+    if "HELIX / SCLAS Calibration Report" not in saved_markdown.read_text(encoding="utf-8"):
+        fail("Calibration report Markdown does not contain the expected heading")
+
+    print("[OK] Calibration report templates")
+
+
 def check_latest_job_filtering() -> None:
     root = unique_self_check_dir("self_check_filter_root")
     user_job = root / "job_filter_user"
@@ -1495,6 +1530,7 @@ def main() -> int:
         check_project_status,
         check_acceptance_gate,
         check_research_ready_acceptance_fixture,
+        check_calibration_report,
         check_result_intake,
         check_research_report,
         check_progress_timeline,

@@ -516,6 +516,7 @@ def write_mesh_manifest(
         "beam_orientation_adjustments": beam_orientation_adjustments,
         "boundary_condition_scaffold_status": boundary_condition_status,
         "boundary_condition_scaffold": boundary_conditions,
+        "equivalent_properties_from_gui": payload.get("equivalent_properties", {}),
         "components": [
             {
                 "name": "three_core_equivalent_solids",

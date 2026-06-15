@@ -1115,6 +1115,42 @@ def inspect_manifest(job_dir: Path, report: dict) -> None:
     if data.get("status") == "abaqus_mesh_created" and not data.get("abaqus_files"):
         add_issue(report, "warning", "Manifest says Abaqus mesh was created but no files are listed")
 
+    # 6. Add periodic/equivalent-cell status checks.
+    mesh_settings = data.get("mesh_settings_from_gui")
+    if isinstance(mesh_settings, dict):
+        model_strategy = mesh_settings.get("model_strategy")
+        section["model_strategy"] = model_strategy
+        if model_strategy == "periodic_homogenized_cell":
+            if data.get("status") == "abaqus_mesh_created":
+                bc_status = data.get("boundary_condition_scaffold_status")
+                if bc_status in ("not_created", "failed"):
+                    add_issue(report, "warning", "Model strategy is periodic_homogenized_cell, but boundary conditions are not created or failed", {
+                        "boundary_condition_scaffold_status": bc_status
+                    })
+            
+            components = data.get("components", [])
+            comp_names = {c.get("name") for c in components if isinstance(c, dict)}
+            required_eq_solids = [
+                "inner_sheath_equivalent_solid",
+                "bedding_equivalent_solid",
+                "outer_sheath_equivalent_solid"
+            ]
+            missing_eq = [name for name in required_eq_solids if name not in comp_names]
+            if missing_eq:
+                add_issue(report, "warning", "Model strategy is periodic_homogenized_cell, but some equivalent components are missing in manifest", {
+                    "missing_components": missing_eq
+                })
+
+            eq_props = data.get("equivalent_properties_from_gui")
+            if not isinstance(eq_props, dict) or not eq_props:
+                add_issue(report, "warning", "Model strategy is periodic_homogenized_cell, but equivalent properties are missing in manifest")
+            else:
+                ei_val = parse_float(eq_props.get("core_equivalent_EI_N_m2"))
+                if ei_val is None or ei_val <= 0.0:
+                    add_issue(report, "warning", "Model strategy is periodic_homogenized_cell, but core_equivalent_EI_N_m2 is missing or non-positive", {
+                        "core_equivalent_EI_N_m2": ei_val
+                    })
+
 
 def keyword_positions(lines, keyword):
     keyword_upper = keyword.upper()
