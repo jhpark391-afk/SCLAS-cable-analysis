@@ -11,12 +11,12 @@
 
 ```mermaid
 graph TD
-    subgraph Frontend (PyQt5)
+    subgraph "Frontend (PyQt5)"
         A["1. Design/Mesh parameters"] --> B["2. JSON Data Serialization (input_data.json)"]
         G["6. GUI Visualization & Reports"] <-- H["5. Result Parse & Deserialize"]
     end
     
-    subgraph Backend (Abaqus noGUI Solver)
+    subgraph "Backend (Abaqus noGUI Solver)"
         B --> C["3. Geometry / Mesh generation (*.cae, *.inp)"]
         C --> D["4. Non-linear Bending Solve (Abaqus Standard)"]
         D --> E["5. ODB History/Field extraction (sclas_odb_extractor.py)"]
@@ -69,19 +69,30 @@ pip install -r requirements.txt
 
 ### 2. GUI 프로그램 실행
 ```bash
-python code/sclas_remote_gui.py
+# Windows
+run_sclas.bat
+
+# macOS
+./run_sclas.sh
 ```
 
 ### 3. 소프트웨어 자가 검증 (QA Self-Check)
 협업 환경이나 다른 컴퓨터로 동기화했을 때 코드 및 참조 관계가 정상적인지 점검하려면 다음을 수행합니다.
 ```bash
-python code/sclas_self_check.py
+# Windows
+scripts\run_self_check.bat
+
+# macOS
+bash scripts/run_self_check.sh
 ```
 
 ---
 
 ## 📁 디렉토리 구조 (Repository Directory Structure)
 * `code/`: PyQt5 GUI 핵심 소스코드 및 아바쿠스 연동 스크립트.
-* `code/SCLAS_test/`: 형상 관리 및 빌드 동기화를 위한 테스트 전용 디렉토리.
-* `docs/`: 백엔드 구현 계획서, 프론트엔드 아키텍처 및 캘리브레이션 기술 설계 리포트.
+* `docs/`: 백엔드 구현 계획서, 프론트엔드 아키텍처, 캘리브레이션 기술 설계 리포트 및 인수인계 문서.
+  * `docs/guides/`: 사용자 설명서 및 기술 참조 가이드.
+  * `docs/internal_handoff/`: 내부 협업 및 개발 인수인계 파일.
 * `portfolio/`: 기업 프레젠테이션용 PPTX 슬라이드 및 포트폴리오 개요.
+* `scripts/`: 실행 및 시스템 자가 검증용 보조 배치/셸 스크립트.
+* `SCLAS_Quick_Launch/`: 비전문가 사용자를 위한 터미널 없는 퀵 런처 바로가기 폴더.
