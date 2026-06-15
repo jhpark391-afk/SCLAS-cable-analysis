@@ -1260,6 +1260,27 @@ def build_abaqus_mesh_model(payload, job_dir):
         required_expected = 5
         optional_created = 0
         try:
+            import abaqusConstants as ac
+
+            def create_static_step_with_stabilization(step_name, prev_step):
+                try:
+                    return model.StaticStep(
+                        name=step_name, previous=prev_step, nlgeom=ON, initialInc=0.05,
+                        stabilizationMethod=ac.DISSIPATED_ENERGY_FRACTION,
+                        stabilizationMagnitude=0.0002
+                    )
+                except Exception as e_method:
+                    try:
+                        return model.StaticStep(
+                            name=step_name, previous=prev_step, nlgeom=ON, initialInc=0.05,
+                            stabilize=0.0002
+                        )
+                    except Exception as e_stabilize:
+                        record["notes"].append("Static step stabilization not supported: method={0}, stabilize={1}".format(e_method, e_stabilize))
+                        return model.StaticStep(
+                            name=step_name, previous=prev_step, nlgeom=ON, initialInc=0.05
+                        )
+
             if multistep_smoke:
                 step_sequence = []
                 previous_step = "Initial"
@@ -1268,7 +1289,7 @@ def build_abaqus_mesh_model(payload, job_dir):
                         step_name = record["step"]
                     else:
                         step_name = safe_name(record["step"] + "_{0:02d}".format(index + 1), 38)
-                    model.StaticStep(name=step_name, previous=previous_step, nlgeom=ON)
+                    create_static_step_with_stabilization(step_name, previous_step)
                     step_sequence.append(
                         {
                             "name": step_name,
@@ -1283,7 +1304,7 @@ def build_abaqus_mesh_model(payload, job_dir):
                 else:
                     record["created_regions"].append("cyclic_bending_multistep_smoke")
             else:
-                model.StaticStep(name=record["step"], previous="Initial", nlgeom=ON)
+                create_static_step_with_stabilization(record["step"], "Initial")
                 record["created_regions"].append("cyclic_bending_step")
             required_created += 1
         except Exception as exc:
@@ -1361,66 +1382,73 @@ def build_abaqus_mesh_model(payload, job_dir):
         except Exception as exc:
             record["optional_warnings"].append("right end surface failed: {0}".format(exc))
 
-        try:
-            import abaqusConstants as ac
-            coupling_method_name = None
-            for candidate in ["Coupling", "KinematicCoupling"]:
-                if hasattr(model, candidate):
-                    coupling_method_name = candidate
-                    break
-            record["available_constraint_methods"] = [
-                candidate for candidate in ["Coupling", "KinematicCoupling", "MultipointConstraint", "Equation"] if hasattr(model, candidate)
-            ]
-            if not coupling_method_name:
-                raise AttributeError("no Coupling/KinematicCoupling method on Abaqus model")
+        mesh_cfg = payload.get("mesh", {})
+        model_strategy = mesh_cfg.get("model_strategy", "periodic_homogenized_cell")
+        use_periodic_bc = (model_strategy == "periodic_homogenized_cell")
 
-            left_surface_region = None
-            right_surface_region = None
-            if record["left_end_surface"] in assembly.surfaces.keys():
-                left_surface_region = assembly.surfaces[record["left_end_surface"]]
-            elif record["left_end_face_set"] in assembly.sets.keys():
-                left_surface_region = assembly.sets[record["left_end_face_set"]]
-            if record["right_end_surface"] in assembly.surfaces.keys():
-                right_surface_region = assembly.surfaces[record["right_end_surface"]]
-            elif record["right_end_face_set"] in assembly.sets.keys():
-                right_surface_region = assembly.sets[record["right_end_face_set"]]
-            if left_surface_region is None or right_surface_region is None:
-                raise KeyError("end face regions were not available for coupling")
+        if not use_periodic_bc:
+            try:
+                import abaqusConstants as ac
+                coupling_method_name = None
+                for candidate in ["Coupling", "KinematicCoupling"]:
+                    if hasattr(model, candidate):
+                        coupling_method_name = candidate
+                        break
+                record["available_constraint_methods"] = [
+                    candidate for candidate in ["Coupling", "KinematicCoupling", "MultipointConstraint", "Equation"] if hasattr(model, candidate)
+                ]
+                if not coupling_method_name:
+                    raise AttributeError("no Coupling/KinematicCoupling method on Abaqus model")
 
-            coupling_method = getattr(model, coupling_method_name)
-            coupling_method(
-                name="SCLAS_LeftEnd_KinematicCoupling",
-                controlPoint=assembly.sets[record["left_reference_point_set"]],
-                surface=left_surface_region,
-                influenceRadius=getattr(ac, "WHOLE_SURFACE"),
-                couplingType=getattr(ac, "KINEMATIC"),
-                localCsys=None,
-                u1=ON,
-                u2=ON,
-                u3=ON,
-                ur1=ON,
-                ur2=ON,
-                ur3=ON,
-            )
-            coupling_method(
-                name="SCLAS_RightEnd_KinematicCoupling",
-                controlPoint=assembly.sets[record["right_reference_point_set"]],
-                surface=right_surface_region,
-                influenceRadius=getattr(ac, "WHOLE_SURFACE"),
-                couplingType=getattr(ac, "KINEMATIC"),
-                localCsys=None,
-                u1=ON,
-                u2=ON,
-                u3=ON,
-                ur1=ON,
-                ur2=ON,
-                ur3=ON,
-            )
-            record["optional_created_regions"].append("end_couplings")
-            record["coupling_method"] = coupling_method_name
-            optional_created += 1
-        except Exception as exc:
-            record["optional_warnings"].append("end coupling pending: {0}".format(exc))
+                left_surface_region = None
+                right_surface_region = None
+                if record["left_end_surface"] in assembly.surfaces.keys():
+                    left_surface_region = assembly.surfaces[record["left_end_surface"]]
+                elif record["left_end_face_set"] in assembly.sets.keys():
+                    left_surface_region = assembly.sets[record["left_end_face_set"]]
+                if record["right_end_surface"] in assembly.surfaces.keys():
+                    right_surface_region = assembly.surfaces[record["right_end_surface"]]
+                elif record["right_end_face_set"] in assembly.sets.keys():
+                    right_surface_region = assembly.sets[record["right_end_face_set"]]
+                if left_surface_region is None or right_surface_region is None:
+                    raise KeyError("end face regions were not available for coupling")
+
+                coupling_method = getattr(model, coupling_method_name)
+                coupling_method(
+                    name="SCLAS_LeftEnd_KinematicCoupling",
+                    controlPoint=assembly.sets[record["left_reference_point_set"]],
+                    surface=left_surface_region,
+                    influenceRadius=getattr(ac, "WHOLE_SURFACE"),
+                    couplingType=getattr(ac, "KINEMATIC"),
+                    localCsys=None,
+                    u1=ON,
+                    u2=ON,
+                    u3=ON,
+                    ur1=ON,
+                    ur2=ON,
+                    ur3=ON,
+                )
+                coupling_method(
+                    name="SCLAS_RightEnd_KinematicCoupling",
+                    controlPoint=assembly.sets[record["right_reference_point_set"]],
+                    surface=right_surface_region,
+                    influenceRadius=getattr(ac, "WHOLE_SURFACE"),
+                    couplingType=getattr(ac, "KINEMATIC"),
+                    localCsys=None,
+                    u1=ON,
+                    u2=ON,
+                    u3=ON,
+                    ur1=ON,
+                    ur2=ON,
+                    ur3=ON,
+                )
+                record["optional_created_regions"].append("end_couplings")
+                record["coupling_method"] = coupling_method_name
+                optional_created += 1
+            except Exception as exc:
+                record["optional_warnings"].append("end coupling pending: {0}".format(exc))
+        else:
+            record["notes"].append("Skipped end face coupling to use periodic boundary equations instead.")
 
         try:
             model.EncastreBC(
@@ -1592,6 +1620,245 @@ def build_abaqus_mesh_model(payload, job_dir):
         for i in range(0, len(labels), 16):
             lines.append(", ".join(labels[i : i + 16]))
         return lines
+
+    def inject_contact_interference_shrink(inp_path, contact_pair_records):
+        fallback = {
+            "status": "not_attempted",
+            "inp_file": os.path.basename(inp_path),
+            "injected_pairs": [],
+            "warnings": [],
+            "notes": [
+                "Injected *CONTACT INTERFERENCE, SHRINK for created contact pairs to enforce shrink-fit preload."
+            ]
+        }
+        if not os.path.exists(inp_path):
+            fallback["status"] = "failed"
+            fallback["warnings"].append("input file not found")
+            return fallback
+
+        try:
+            with open(inp_path, "r") as f:
+                lines = f.read().splitlines()
+
+            pairs_to_shrink = []
+            for i, line in enumerate(lines):
+                if line.strip().lower().startswith("*contact pair"):
+                    if i + 1 < len(lines):
+                        data_line = lines[i + 1].strip()
+                        if data_line and not data_line.startswith("*") and not data_line.startswith("**"):
+                            parts = [p.strip() for p in data_line.split(",")]
+                            if len(parts) >= 2:
+                                pairs_to_shrink.append((parts[0], parts[1]))
+
+            if not pairs_to_shrink:
+                fallback["status"] = "skipped"
+                fallback["warnings"].append("no contact pairs found in input deck to apply shrink")
+                return fallback
+
+            step_index = None
+            for i, line in enumerate(lines):
+                if line.strip().lower().startswith("*step"):
+                    step_index = i
+                    break
+
+            if step_index is None:
+                fallback["status"] = "failed"
+                fallback["warnings"].append("no *STEP block found in input deck")
+                return fallback
+
+            target_insert_index = step_index + 1
+            found_analysis_card = False
+            for j in range(step_index + 1, len(lines)):
+                l = lines[j].strip()
+                if not l or l.startswith("**"):
+                    continue
+                if l.startswith("*"):
+                    found_analysis_card = True
+                    continue
+                if found_analysis_card:
+                    target_insert_index = j + 1
+                    break
+
+            shrink_lines = ["**", "** SCLAS contact interference shrink preload injection"]
+            for slave, master in pairs_to_shrink:
+                shrink_lines.append("*CONTACT INTERFERENCE, SHRINK")
+                shrink_lines.append("{0}, {1}".format(slave, master))
+                fallback["injected_pairs"].append("{0} -> {1}".format(slave, master))
+
+            new_lines = lines[:target_insert_index] + shrink_lines + lines[target_insert_index:]
+
+            with open(inp_path, "w") as f:
+                f.write("\n".join(new_lines) + "\n")
+
+            fallback["status"] = "injected"
+            fallback["shrink_pair_count"] = len(pairs_to_shrink)
+
+        except Exception as exc:
+            fallback["status"] = "failed"
+            fallback["warnings"].append("shrink injection failed: {0}".format(exc))
+
+        return fallback
+
+    def inject_periodic_bc_equations(inp_path, end_coupling_node_specs, boundary_record):
+        import math
+        fallback = {
+            "status": "not_attempted",
+            "inp_file": os.path.basename(inp_path),
+            "equation_count": 0,
+            "warnings": [],
+            "notes": [
+                "Injected periodic boundary condition equations based on helical geometry lay angle matching."
+            ]
+        }
+        if not os.path.exists(inp_path):
+            fallback["status"] = "failed"
+            fallback["warnings"].append("input file not found")
+            return fallback
+
+        try:
+            armour = payload.get("armour", {})
+            inner_lay_angle_deg = float(armour.get("inner_lay_angle_deg", 0.0))
+            outer_lay_angle_deg = float(armour.get("outer_lay_angle_deg", 0.0))
+
+            geometry = payload.get("derived_geometry_mm", {})
+            if not geometry:
+                geometry = payload.get("geometry_mm", {})
+            inner_armour_center_radius_mm = float(geometry.get("inner_armour_center_radius_mm", 0.0))
+            outer_armour_center_radius_mm = float(geometry.get("outer_armour_center_radius_mm", 0.0))
+
+            assembly = model.rootAssembly
+            equation_lines = [
+                "**",
+                "** SCLAS periodic boundary condition equations",
+                "** Formulated as: u_right - u_left - u_RP_Right + u_RP_Left = 0",
+            ]
+
+            def angle_diff(a, b):
+                diff = a - b
+                while diff > math.pi:
+                    diff -= 2.0 * math.pi
+                while diff < -math.pi:
+                    diff += 2.0 * math.pi
+                return diff
+
+            matched_pairs_total = 0
+
+            for spec in end_coupling_node_specs:
+                component_name = spec.get("component", "solid")
+                inst_name = spec.get("assembly_instance")
+                left_labels = spec.get("left_node_labels", [])
+                right_labels = spec.get("right_node_labels", [])
+
+                if not left_labels or not right_labels:
+                    continue
+
+                left_labels_set = set(left_labels)
+                right_labels_set = set(right_labels)
+
+                inst = assembly.instances[inst_name]
+                left_coords = {}
+                right_coords = {}
+
+                for node in inst.nodes:
+                    lbl = int(node.label)
+                    if lbl in left_labels_set:
+                        left_coords[lbl] = tuple(node.coordinates)
+                    if lbl in right_labels_set:
+                        right_coords[lbl] = tuple(node.coordinates)
+
+                lay_angle_deg = 0.0
+                center_radius = 1.0
+                hand = 1.0
+                is_armour = False
+
+                if "innerarmour" in component_name.lower():
+                    lay_angle_deg = inner_lay_angle_deg
+                    center_radius = inner_armour_center_radius_mm
+                    hand = 1.0
+                    is_armour = True
+                elif "outerarmour" in component_name.lower():
+                    lay_angle_deg = outer_lay_angle_deg
+                    center_radius = outer_armour_center_radius_mm
+                    hand = -1.0
+                    is_armour = True
+
+                if is_armour and center_radius > 0.0:
+                    lay_angle_rad = math.radians(lay_angle_deg)
+                    expected_dtheta = hand * (length * math.tan(lay_angle_rad)) / center_radius
+                else:
+                    expected_dtheta = 0.0
+
+                matches = []
+                used_right = set()
+                for label_i in sorted(left_coords.keys()):
+                    coord_i = left_coords[label_i]
+                    x_i, y_i, z_i = coord_i
+                    r_i = math.sqrt(x_i**2 + y_i**2)
+                    theta_i = math.atan2(y_i, x_i)
+
+                    best_label_j = None
+                    min_error = float('inf')
+                    for label_j in sorted(right_coords.keys()):
+                        if label_j in used_right:
+                            continue
+                        coord_j = right_coords[label_j]
+                        x_j, y_j, z_j = coord_j
+                        r_j = math.sqrt(x_j**2 + y_j**2)
+                        theta_j = math.atan2(y_j, x_j)
+
+                        r_diff = abs(r_i - r_j)
+                        dtheta = angle_diff(theta_j - theta_i, expected_dtheta)
+                        arc_dist = center_radius * dtheta
+                        error = math.sqrt(r_diff**2 + arc_dist**2)
+
+                        if error < min_error:
+                            min_error = error
+                            best_label_j = label_j
+
+                    if best_label_j is not None and min_error < 10.0:
+                        matches.append((label_i, best_label_j))
+                        used_right.add(best_label_j)
+
+                dof_list = [1, 2, 3, 4, 5, 6] if is_armour else [1, 2, 3]
+                for label_i, label_j in matches:
+                    for dof in dof_list:
+                        equation_lines.append("*Equation")
+                        equation_lines.append("4")
+                        equation_lines.append("{0}.{1}, {2}, 1.0,  {0}.{3}, {2}, -1.0,  {4}, {2}, -1.0,  {5}, {2}, 1.0".format(
+                            inst_name, label_j, dof, label_i,
+                            boundary_record.get("right_reference_point_set", "SCLAS_RP_RightEnd"),
+                            boundary_record.get("left_reference_point_set", "SCLAS_RP_LeftEnd")
+                        ))
+                        matched_pairs_total += 1
+
+            with open(inp_path, "r") as f:
+                lines = f.read().splitlines()
+
+            end_assembly_index = None
+            for i, line in enumerate(lines):
+                if line.strip().lower().startswith("*end assembly"):
+                    end_assembly_index = i
+                    break
+
+            if end_assembly_index is None:
+                fallback["status"] = "failed"
+                fallback["warnings"].append("no *End Assembly found in input deck")
+                return fallback
+
+            new_lines = lines[:end_assembly_index] + equation_lines + lines[end_assembly_index:]
+
+            with open(inp_path, "w") as f:
+                f.write("\n".join(new_lines) + "\n")
+
+            fallback["status"] = "injected"
+            fallback["equation_count"] = matched_pairs_total
+            fallback["matched_nodes_count"] = matched_pairs_total / 6
+
+        except Exception as exc:
+            fallback["status"] = "failed"
+            fallback["warnings"].append("periodic BC injection failed: {0}".format(exc))
+
+        return fallback
 
     def inject_end_coupling_keyword_fallback(inp_path, boundary_record):
         fallback = {
@@ -2270,20 +2537,33 @@ def build_abaqus_mesh_model(payload, job_dir):
     try:
         mdb.Job(name=job_name, model=model_name, type=ANALYSIS, description="SCLAS GUI generated mesh scaffold")
         mdb.jobs[job_name].writeInput(consistencyChecking=OFF)
+        shrink_fallback = {"status": "skipped", "notes": ["Manual skip to preserve geometric overclosure CPRESS preload"]}
         contact_keyword_adjustment = adjust_beam_contact_pair_keywords(inp_path, contact_pairs)
         for contact_pair in contact_pairs:
             if contact_keyword_adjustment.get("status") == "adjusted" and contact_pair.get("status") == "created":
                 contact_pair["input_deck_contact_pair_type"] = contact_keyword_adjustment.get("target_type")
-        keyword_fallback = inject_end_coupling_keyword_fallback(inp_path, boundary_conditions)
-        boundary_conditions["keyword_coupling_fallback"] = keyword_fallback
-        if keyword_fallback.get("status") == "injected":
-            if "inp_keyword_coupling_fallback" not in boundary_conditions.get("optional_created_regions", []):
-                boundary_conditions.setdefault("optional_created_regions", []).append("inp_keyword_coupling_fallback")
-            boundary_conditions["status"] = "created_with_keyword_coupling_fallback"
+        mesh_cfg = payload.get("mesh", {})
+        model_strategy = mesh_cfg.get("model_strategy", "periodic_homogenized_cell")
+        use_periodic_bc = (model_strategy == "periodic_homogenized_cell")
+
+        if not use_periodic_bc:
+            keyword_fallback = inject_end_coupling_keyword_fallback(inp_path, boundary_conditions)
+            boundary_conditions["keyword_coupling_fallback"] = keyword_fallback
+            if keyword_fallback.get("status") == "injected":
+                if "inp_keyword_coupling_fallback" not in boundary_conditions.get("optional_created_regions", []):
+                    boundary_conditions.setdefault("optional_created_regions", []).append("inp_keyword_coupling_fallback")
+                boundary_conditions["status"] = "created_with_keyword_coupling_fallback"
+            else:
+                boundary_conditions.setdefault("optional_warnings", []).append(
+                    "inp keyword coupling fallback {0}".format(keyword_fallback.get("status", "unknown"))
+                )
         else:
-            boundary_conditions.setdefault("optional_warnings", []).append(
-                "inp keyword coupling fallback {0}".format(keyword_fallback.get("status", "unknown"))
-            )
+            periodic_bc_fallback = inject_periodic_bc_equations(inp_path, end_coupling_node_specs, boundary_conditions)
+            boundary_conditions["periodic_bc_fallback"] = periodic_bc_fallback
+            if periodic_bc_fallback.get("status") == "injected":
+                if "inp_periodic_bc_equations" not in boundary_conditions.get("optional_created_regions", []):
+                    boundary_conditions.setdefault("optional_created_regions", []).append("inp_periodic_bc_equations")
+                boundary_conditions["status"] = "created_with_periodic_bc_equations"
         output_keyword_fallback = inject_odb_output_keyword_fallback(inp_path, boundary_conditions)
         boundary_conditions["keyword_output_fallback"] = output_keyword_fallback
         if output_keyword_fallback.get("status") == "injected":

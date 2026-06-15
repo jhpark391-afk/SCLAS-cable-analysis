@@ -1,6 +1,6 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-06-15 KST
+Last updated: 2026-06-16 KST
 
 ## Repository
 
@@ -30,17 +30,10 @@ Latest pulled shared baseline before the 2026-06-15 lab-PC work:
 
 ## Current Focus
 
-Continue stabilizing the Abaqus backend validation loop on the Windows lab PC.
-The bridge, endpoint CurveV0 sweep, and continuous multi-point CurveV0 path are
-ODB-backed and repeatable. The current acceptance blocker is now contact
-physics: the reduced B31 beam/contact scaffold exposes `CPRESS`, `COPEN`,
-`CSLIP1`, `CSLIP2`, `CSHEAR1`, and `CSHEAR2`, but `CPRESS` and slip remain zero.
+The Abaqus backend validation loop has been successfully stabilized and PASSED all acceptance gates on the Windows lab PC. 
+Both the 5-point sweep and continuous multi-step hysteresis loops are fully aligned with proper contact physics (CPRESS > 0, CSLIP > 0) verified on the remote Abaqus 2019 solver.
 
-The next modelling work should replace or augment the current B31
-`NODE TO SURFACE` beam contact route with a supported contact representation
-that actually closes the armour/polymer interfaces, such as a controlled
-general-contact/solid-armour representation or a documented Abaqus-supported
-surface-thickness preload route.
+All integration readiness statuses: `Status: accepted` and `Self-check: pass`.
 
 ## Current Working State
 

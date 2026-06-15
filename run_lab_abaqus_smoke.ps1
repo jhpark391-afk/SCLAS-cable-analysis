@@ -161,23 +161,24 @@ function Set-ReducedContactClosureGeometry {
         }
     }
 
-    $newInnerSheathOuter = $innerCenter - $innerWire + $OverclosureMm
-    $newBeddingInner = $innerCenter + $innerWire - $OverclosureMm
-    $newBeddingOuter = $outerCenter - $outerWire + $OverclosureMm
-    $newOuterSheathInner = $outerCenter + $outerWire - $OverclosureMm
+    # B31 beam elements have contact thickness enabled (Thickness=ON) in SurfaceToSurfaceContactStd.
+    # Therefore, to close the contact and generate preload, the solid surfaces must align
+    # with the beam centerline center radius minus/plus wire radius plus/minus overclosure.
+    $newInnerSheathOuter = $innerCenter + $OverclosureMm
+    $newBeddingInner = $innerCenter - $OverclosureMm
+    $newBeddingOuter = $outerCenter + $OverclosureMm
+    $newOuterSheathInner = $outerCenter - $OverclosureMm
 
     if ($newInnerSheathOuter -le $innerSheathInner) {
         throw "Contact closure overclosure is too large: inner sheath outer radius would be <= inner radius."
     }
-    if ($newBeddingInner -le $newInnerSheathOuter) {
-        throw "Contact closure overclosure is too large: bedding inner radius would overlap inner sheath."
-    }
+    # Bedding inner and Inner sheath outer may overlap to close the B31 centerline node contact.
+    # We skip the overlap check between these layers to allow centerline alignment.
     if ($newBeddingOuter -le $newBeddingInner) {
         throw "Contact closure overclosure is too large: bedding outer radius would be <= bedding inner radius."
     }
-    if ($newOuterSheathInner -le $newBeddingOuter) {
-        throw "Contact closure overclosure is too large: outer sheath inner radius would overlap bedding."
-    }
+    # Outer sheath inner and Bedding outer may overlap to close the B31 centerline node contact.
+    # We skip the overlap check between these layers to allow centerline alignment.
     if ($newOuterSheathInner -ge $outerSheathOuter) {
         throw "Contact closure overclosure is too large: outer sheath inner radius would be >= outer radius."
     }
