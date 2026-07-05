@@ -60,6 +60,7 @@ def check_pyproj_references() -> None:
     required_compile = {
         "code\\sclas_remote_gui.py",
         "code\\sclas_backend_gui_bridge.py",
+        "code\\sclas_inp_mesh_preview.py",
         "code\\sclas_self_check.py",
         "code\\sclas_offline_diagnostics.py",
         "code\\abaqus_runner.py",
@@ -1789,10 +1790,57 @@ def check_research_report() -> None:
     print("[OK] Research report")
 
 
+def check_inp_mesh_preview_parser() -> None:
+    from sclas_inp_mesh_preview import build_inp_mesh_preview, format_inp_mesh_summary
+
+    job_dir = unique_self_check_dir("self_check_inp_mesh_preview")
+    job_dir.mkdir(parents=True, exist_ok=True)
+    inp_path = job_dir / "tiny_mesh.inp"
+    inp_path.write_text(
+        """*Heading
+** tiny mesh preview fixture
+*Part, name=Core
+*Node
+1, 1., 0., 0.
+2, 2., 0., 0.
+3, 2., 1., 0.
+4, 1., 1., 0.
+5, 1., 0., 1.
+6, 2., 0., 1.
+7, 2., 1., 1.
+8, 1., 1., 1.
+*Element, type=C3D8
+1, 1,2,3,4,5,6,7,8
+*End Part
+*Assembly, name=Assembly
+*Instance, name=Core-1, part=Core
+0., 0., 0.
+0., 0., 0., 0., 0., 1., 90.
+*End Instance
+*End Assembly
+""",
+        encoding="utf-8",
+    )
+    preview = build_inp_mesh_preview(inp_path)
+    if preview.preview_mode != "end_section":
+        fail("INP mesh preview parser did not default to end-section mode")
+    if len(preview.part_summaries) != 1:
+        fail("INP mesh preview parser did not find the synthetic part")
+    if len(preview.instance_summaries) != 1:
+        fail("INP mesh preview parser did not find the synthetic instance")
+    if not preview.segments_by_part.get("Core"):
+        fail("INP mesh preview parser did not produce preview segments")
+    summary = format_inp_mesh_summary(preview)
+    if "Abaqus INP mesh imported" not in summary or "Core" not in summary:
+        fail("INP mesh preview summary missing expected content")
+    print(f"[OK] INP mesh preview parser: {inp_path}")
+
+
 def main() -> int:
     checks = [
         check_pyproj_references,
         check_compile,
+        check_inp_mesh_preview_parser,
         check_backend_contract,
         check_geometry_scaling_contract,
         check_endpoint_sweep_diagnostics,

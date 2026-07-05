@@ -32,8 +32,8 @@ os.environ.setdefault("PYQTGRAPH_QT_LIB", "PyQt5")
 
 import numpy as np
 import psutil
-from PyQt5.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt5.QtGui import QColor, QDesktopServices, QFont, QIcon, QPixmap
+from PyQt5.QtCore import QEasingCurve, QPropertyAnimation, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt5.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -56,6 +56,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QSplitter,
+    QSplashScreen,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -75,6 +76,7 @@ from sclas_backend_gui_bridge import (
     backend_payload_gui_values,
     core_center_from_outer_radius,
 )
+from sclas_inp_mesh_preview import PART_COLORS, build_inp_mesh_preview, format_inp_mesh_summary
 from sclas_job_filters import candidate_job_dirs
 
 APP_VERSION = "12.0-abaqus-quality-summary"
@@ -486,7 +488,7 @@ class VariableFormLabel(QWidget):
         "α_core": ("α", "core"),
         "α_ia": ("α", "ia"),
         "α_oa": ("α", "oa"),
-        "g": ("g", ""),
+        "gap": ("gap", ""),
     }
 
     def __init__(self, text: str):
@@ -503,8 +505,9 @@ class VariableFormLabel(QWidget):
             self.add_plain_label(layout, text, "#17202a", 500)
             return
 
-        token_text, symbol, subscript = token
-        prefix, suffix = text.split(token_text, 1)
+        token_text, symbol, subscript, token_start, token_end = token
+        prefix = text[:token_start]
+        suffix = text[token_end:]
         if prefix.strip():
             self.add_plain_label(layout, prefix.strip(), "#17202a", 500)
         self.add_symbol_label(layout, symbol, subscript)
@@ -512,12 +515,25 @@ class VariableFormLabel(QWidget):
             self.add_plain_label(layout, suffix.strip(), "#64748b", 500)
 
     @classmethod
-    def match_token(cls, text: str) -> Optional[Tuple[str, str, str]]:
+    def match_token(cls, text: str) -> Optional[Tuple[str, str, str, int, int]]:
         for token in sorted(cls.TOKEN_MAP, key=len, reverse=True):
-            if token in text:
-                symbol, subscript = cls.TOKEN_MAP[token]
-                return token, symbol, subscript
+            start = 0
+            while True:
+                index = text.find(token, start)
+                if index < 0:
+                    break
+                end = index + len(token)
+                before_ok = index == 0 or not cls.is_token_char(text[index - 1])
+                after_ok = end == len(text) or not cls.is_token_char(text[end])
+                if before_ok and after_ok:
+                    symbol, subscript = cls.TOKEN_MAP[token]
+                    return token, symbol, subscript, index, end
+                start = index + 1
         return None
+
+    @staticmethod
+    def is_token_char(char: str) -> bool:
+        return char.isalnum() or char == "_"
 
     def add_plain_label(self, layout: QHBoxLayout, text: str, color: str, weight: int) -> None:
         label = QLabel(text)
@@ -546,6 +562,76 @@ class VariableFormLabel(QWidget):
                 "font-size: 11px; font-weight: 800; color: #0f5fc2; padding-top: 9px; }"
             )
             layout.addWidget(sub_label, 0, Qt.AlignBottom)
+
+
+def build_splash_pixmap() -> QPixmap:
+    pixmap = QPixmap(560, 340)
+    pixmap.fill(QColor("#f6f8fb"))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+
+    painter.setPen(QColor("#d7dee8"))
+    painter.setBrush(QColor("#ffffff"))
+    painter.drawRoundedRect(18, 18, 524, 304, 16, 16)
+
+    logo_path = TEAM_ICON_PATH if TEAM_ICON_PATH.exists() else TEAM_LOGO_PATH
+    logo = QPixmap(str(logo_path))
+    if not logo.isNull():
+        scaled_logo = logo.scaled(132, 132, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        painter.drawPixmap((560 - scaled_logo.width()) // 2, 58, scaled_logo)
+
+    painter.setPen(QColor("#111827"))
+    title_font = QFont("Segoe UI", 24)
+    title_font.setBold(True)
+    painter.setFont(title_font)
+    painter.drawText(0, 214, 560, 42, Qt.AlignCenter, "HELIX")
+
+    painter.setPen(QColor("#475569"))
+    subtitle_font = QFont("Segoe UI", 10)
+    painter.setFont(subtitle_font)
+    painter.drawText(
+        0,
+        252,
+        560,
+        26,
+        Qt.AlignCenter,
+        "Helical Element Localised Interaction eXamination",
+    )
+
+    painter.setPen(QColor("#1f6feb"))
+    status_font = QFont("Segoe UI", 9)
+    status_font.setBold(True)
+    painter.setFont(status_font)
+    painter.drawText(0, 286, 560, 26, Qt.AlignCenter, "Preparing GUI-Abaqus bridge")
+    painter.end()
+    return pixmap
+
+
+def show_startup_splash(app: QApplication) -> Optional[QSplashScreen]:
+    if os.environ.get("SCLAS_DISABLE_SPLASH", "").strip():
+        return None
+    if os.environ.get("QT_QPA_PLATFORM", "").strip().lower() == "offscreen":
+        return None
+    if os.environ.get("SCLAS_GUI_SMOKE_EXIT_MS", "").strip():
+        return None
+
+    splash = QSplashScreen(build_splash_pixmap(), Qt.WindowStaysOnTopHint)
+    splash.setWindowOpacity(0.0)
+    splash.show()
+
+    animation = QPropertyAnimation(splash, b"windowOpacity", splash)
+    animation.setDuration(650)
+    animation.setStartValue(0.0)
+    animation.setEndValue(1.0)
+    animation.setEasingCurve(QEasingCurve.OutCubic)
+    animation.start()
+
+    start = time.time()
+    while time.time() - start < 0.85:
+        app.processEvents()
+        time.sleep(0.02)
+    splash._startup_animation = animation
+    return splash
 
 
 class SCLASRemoteGUI(QMainWindow):
@@ -1099,35 +1185,35 @@ class SCLASRemoteGUI(QMainWindow):
             (
                 "Core Package",
                 [
-                    ("Conductor r_cond (mm)", "r_cond"),
-                    ("Insulation r_ins (mm)", "r_insu"),
-                    ("Core radius R_core (mm)", "roc"),
-                    ("Core pitch R_c (auto, mm)", "coc"),
+                    ("Conductor radius r_cond (mm)", "r_cond"),
+                    ("Insulation radius r_ins (mm)", "r_insu"),
+                    ("Core outer radius R_core (mm)", "roc"),
+                    ("Core center radius R_c (auto, mm)", "coc"),
                 ],
             ),
             (
                 "Sheath / Bedding",
                 [
                     ("Inner sheath t_is (mm)", "tis"),
-                    ("Clearance g (mm)", "gap"),
+                    ("Clearance gap (mm)", "gap"),
                     ("Outer sheath t_os (mm)", "tos"),
                 ],
             ),
             (
                 "Armour Wires",
                 [
-                    ("Inner armour r_ia (mm)", "r_ia"),
-                    ("Inner armour n_ia", "no_ia"),
-                    ("Outer armour r_oa (mm)", "r_oa"),
-                    ("Outer armour n_oa", "no_oa"),
+                    ("Inner armour wire radius r_ia (mm)", "r_ia"),
+                    ("Inner armour wire number n_ia", "no_ia"),
+                    ("Outer armour wire radius r_oa (mm)", "r_oa"),
+                    ("Outer armour wire number n_oa", "no_oa"),
                 ],
             ),
             (
                 "Helix Lay",
                 [
-                    ("Core lay α_core (deg)", "core_lay_angle"),
-                    ("Inner armour α_ia (deg)", "inner_lay_angle"),
-                    ("Outer armour α_oa (deg)", "outer_lay_angle"),
+                    ("Core lay angle α_core (deg)", "core_lay_angle"),
+                    ("Inner armour lay angle α_ia (deg)", "inner_lay_angle"),
+                    ("Outer armour lay angle α_oa (deg)", "outer_lay_angle"),
                 ],
             ),
         ]
@@ -1138,6 +1224,7 @@ class SCLASRemoteGUI(QMainWindow):
             section_form.setHorizontalSpacing(16)
             section_form.setLabelAlignment(Qt.AlignRight)
             section_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+            section_form.setRowWrapPolicy(QFormLayout.WrapLongRows)
             for label, key in section_rows:
                 self.inputs[key].setMinimumWidth(112)
                 self.inputs[key].setToolTip(f"Edit {label}. The digital twin preview updates automatically.")
@@ -1175,7 +1262,7 @@ class SCLASRemoteGUI(QMainWindow):
             layer_layout.addWidget(check, 3 + idx // 2, idx % 2)
         left.addWidget(layer_box)
         left.addStretch()
-        input_scroll = self.scroll_panel(panel_inputs, min_width=360)
+        input_scroll = self.scroll_panel(panel_inputs, min_width=460)
 
         panel_mat = QFrame(); panel_mat.setObjectName("Card")
         panel_mat.setMinimumWidth(360)
@@ -1227,7 +1314,7 @@ class SCLASRemoteGUI(QMainWindow):
         workspace_layout.addWidget(panel_mat, 2)
         workspace_scroll = self.scroll_panel(workspace)
 
-        layout.addWidget(self.panel_splitter(workspace_scroll, input_scroll, [980, 420]), 1)
+        layout.addWidget(self.panel_splitter(workspace_scroll, input_scroll, [900, 520]), 1)
         self.add_page(tab)
 
         for w in self.inputs.values():
@@ -1282,7 +1369,16 @@ class SCLASRemoteGUI(QMainWindow):
         }
         self.mesh_inputs["contact_beta"].setVisible(False)
         for key in ["elem_type", "model_strategy", "armour_model"]:
-            self.mesh_inputs[key].setMinimumWidth(250)
+            self.mesh_inputs[key].setMinimumWidth(230)
+        for key in [
+            "z_elem",
+            "c_elem_core",
+            "c_elem_armour",
+            "r_elem_inner_sheath",
+            "r_elem_bedding",
+            "r_elem_outer_sheath",
+        ]:
+            self.mesh_inputs[key].setMinimumWidth(150)
         for key, tip in mesh_tips.items():
             self.mesh_inputs[key].setToolTip(tip)
         form = QFormLayout()
@@ -1306,9 +1402,20 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_mesh.setToolTip("Build a visual mesh preview from the current geometry and mesh request.")
         self.btn_mesh.clicked.connect(self.generate_mesh_preview)
         left.addWidget(self.btn_mesh)
+        self.btn_import_inp_mesh = QPushButton("Import Abaqus INP")
+        self.btn_import_inp_mesh.setFixedHeight(42)
+        self.btn_import_inp_mesh.setToolTip("Read an Abaqus .inp file and render a part-colored end-section mesh preview.")
+        self.btn_import_inp_mesh.clicked.connect(self.import_inp_mesh_dialog)
+        left.addWidget(self.btn_import_inp_mesh)
         note = QLabel("Visual request only. Abaqus backend owns actual mesh generation.")
         note.setWordWrap(True)
         left.addWidget(note)
+        self.inp_mesh_summary = QTextEdit()
+        self.inp_mesh_summary.setObjectName("SummaryText")
+        self.inp_mesh_summary.setReadOnly(True)
+        self.inp_mesh_summary.setMaximumHeight(112)
+        self.inp_mesh_summary.setPlainText("Import an Abaqus .inp file to inspect the actual generated mesh.")
+        left.addWidget(self.inp_mesh_summary)
         mesh_ready_box = QGroupBox("Mesh Readiness")
         mesh_ready_layout = QGridLayout(mesh_ready_box)
         self.lbl_mesh_ready = self.metric_box("Ready state", "Not generated")
@@ -1342,16 +1449,37 @@ class SCLASRemoteGUI(QMainWindow):
         mesh_header.addWidget(self.btn_mesh_iso)
         mesh_header.addWidget(self.btn_mesh_reset)
         right.addLayout(mesh_header)
+        self.mesh_guide_label = QLabel()
+        self.mesh_guide_label.setObjectName("MeshGuide")
+        self.mesh_guide_label.setFixedHeight(260)
+        self.mesh_guide_label.setMinimumWidth(0)
+        self.mesh_guide_label.setAlignment(Qt.AlignCenter)
+        self.mesh_guide_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        right.addWidget(self.mesh_guide_label)
         self.view_wire = gl.GLViewWidget()
         self.view_wire.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.view_wire.setMinimumHeight(360)
+        self.view_wire.setMinimumHeight(300)
         self.view_wire.setBackgroundColor("#1e1e1e")
         self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
         right.addWidget(self.view_wire, 1)
+        self.inp_mesh_legend = QLabel("")
+        self.inp_mesh_legend.setObjectName("MeshLegend")
+        self.inp_mesh_legend.setTextFormat(Qt.RichText)
+        self.inp_mesh_legend.setWordWrap(True)
+        self.inp_mesh_legend.setVisible(False)
+        right.addWidget(self.inp_mesh_legend)
         viewer_scroll = self.scroll_panel(viewer)
-        mesh_scroll = self.scroll_panel(panel, min_width=360)
-        layout.addWidget(self.panel_splitter(viewer_scroll, mesh_scroll, [980, 420]), 1)
+        mesh_scroll = self.scroll_panel(panel, min_width=440)
+        layout.addWidget(self.panel_splitter(viewer_scroll, mesh_scroll, [1020, 440]), 1)
         self.add_page(tab)
+        for widget in self.mesh_inputs.values():
+            if isinstance(widget, QSpinBox):
+                widget.valueChanged.connect(self.update_mesh_guide)
+            elif isinstance(widget, QComboBox):
+                widget.currentIndexChanged.connect(self.update_mesh_guide)
+            elif isinstance(widget, QLineEdit):
+                widget.textChanged.connect(self.update_mesh_guide)
+        self.update_mesh_guide()
 
     def build_analysis_tab(self) -> None:
         tab = QWidget()
@@ -1645,21 +1773,28 @@ class SCLASRemoteGUI(QMainWindow):
         history_layout.addWidget(self.btn_refresh_jobs, 1, 0)
         history_layout.addWidget(self.btn_load_job, 1, 1)
         history_layout.addWidget(self.btn_diagnose_job, 1, 2)
-        history_layout.addWidget(self.btn_compare_curve_v0, 2, 0)
-        history_layout.addWidget(self.btn_project_status, 2, 1)
-        history_layout.addWidget(self.btn_open_job_folder, 2, 2)
-        history_layout.addWidget(self.btn_job_index, 3, 0)
-        history_layout.addWidget(self.btn_load_best_job, 3, 1)
-        history_layout.addWidget(self.btn_progress_timeline, 3, 2)
-        history_layout.addWidget(self.btn_result_intake, 4, 0)
-        history_layout.addWidget(self.btn_acceptance_gate, 4, 1)
-        history_layout.addWidget(self.btn_handoff_snapshot, 4, 2)
-        history_layout.addWidget(self.btn_session_brief, 5, 0)
-        history_layout.addWidget(self.btn_research_report, 5, 1)
-        history_layout.addWidget(self.btn_validate_all, 5, 2)
-        history_layout.addWidget(self.external_job_preset_combo, 6, 0, 1, 2)
-        history_layout.addWidget(self.btn_inspect_job_preset, 6, 2)
-        history_layout.addWidget(self.btn_inspect_job_folder, 7, 0, 1, 3)
+        history_layout.addWidget(self.btn_open_job_folder, 2, 0, 1, 3)
+
+        advanced_jobs_box = QFrame()
+        advanced_jobs_layout = QGridLayout(advanced_jobs_box)
+        advanced_jobs_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_jobs_layout.setHorizontalSpacing(8)
+        advanced_jobs_layout.setVerticalSpacing(8)
+        advanced_jobs_layout.addWidget(self.btn_compare_curve_v0, 0, 0)
+        advanced_jobs_layout.addWidget(self.btn_project_status, 0, 1)
+        advanced_jobs_layout.addWidget(self.btn_job_index, 0, 2)
+        advanced_jobs_layout.addWidget(self.btn_load_best_job, 1, 0)
+        advanced_jobs_layout.addWidget(self.btn_progress_timeline, 1, 1)
+        advanced_jobs_layout.addWidget(self.btn_result_intake, 1, 2)
+        advanced_jobs_layout.addWidget(self.btn_acceptance_gate, 2, 0)
+        advanced_jobs_layout.addWidget(self.btn_handoff_snapshot, 2, 1)
+        advanced_jobs_layout.addWidget(self.btn_session_brief, 2, 2)
+        advanced_jobs_layout.addWidget(self.btn_research_report, 3, 0)
+        advanced_jobs_layout.addWidget(self.btn_validate_all, 3, 1, 1, 2)
+        advanced_jobs_layout.addWidget(self.external_job_preset_combo, 4, 0, 1, 2)
+        advanced_jobs_layout.addWidget(self.btn_inspect_job_preset, 4, 2)
+        advanced_jobs_layout.addWidget(self.btn_inspect_job_folder, 5, 0, 1, 3)
+        history_layout.addWidget(self.collapsible_section("Advanced Diagnostics", advanced_jobs_box, expanded=False), 3, 0, 1, 3)
         right.addWidget(self.history_box)
 
         left_scroll = self.scroll_panel(left_panel, min_width=360)
@@ -3533,6 +3668,179 @@ class SCLASRemoteGUI(QMainWindow):
         self.lbl_mesh_elements.value_label.setText(f"{estimated:,}")
         self.lbl_mesh_contacts.value_label.setText("5")
 
+    def update_mesh_guide(self) -> None:
+        if not hasattr(self, "mesh_guide_label"):
+            return
+        target_width = self.mesh_guide_label.contentsRect().width()
+        pixmap = self.build_mesh_guide_pixmap(width=target_width)
+        self.mesh_guide_label.setPixmap(pixmap)
+
+    def build_mesh_guide_pixmap(self, width: Optional[int] = None) -> QPixmap:
+        width = int(width or 820)
+        width = max(420, min(width, 1100))
+        height = 260
+        pixmap = QPixmap(width, height)
+        pixmap.fill(QColor("#f8fafc"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        z_div = int(self.mesh_inputs["z_elem"].value()) if hasattr(self, "mesh_inputs") else 40
+        core_div = int(self.mesh_inputs["c_elem_core"].value()) if hasattr(self, "mesh_inputs") else 24
+        armour_div = int(self.mesh_inputs["c_elem_armour"].value()) if hasattr(self, "mesh_inputs") else 8
+        r_inner = int(self.mesh_inputs["r_elem_inner_sheath"].value()) if hasattr(self, "mesh_inputs") else 3
+        r_bedding = int(self.mesh_inputs["r_elem_bedding"].value()) if hasattr(self, "mesh_inputs") else 1
+        r_outer = int(self.mesh_inputs["r_elem_outer_sheath"].value()) if hasattr(self, "mesh_inputs") else 3
+        try:
+            dg = self.parse_geometry()
+        except Exception:
+            dg = dict(getattr(self, "derived_geom", {}))
+
+        painter.setPen(QColor("#d8e0ea"))
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawRoundedRect(1, 1, width - 2, height - 2, 12, 12)
+
+        title_font = QFont("Segoe UI", 12)
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        painter.setPen(QColor("#17202a"))
+        painter.drawText(22, 30, "Mesh sizing guide")
+
+        label_font = QFont("Segoe UI", 9)
+        painter.setFont(label_font)
+        painter.setPen(QColor("#64748b"))
+        painter.drawText(22, 50, "Draft guide for axial, circumferential, and radial division settings")
+
+        # Axial guide: side-view cable with division lines from the length setting.
+        x0, y0, side_w, side_h = 30, 102, min(300, width // 2 - 92), 54
+        painter.setPen(QColor("#94a3b8"))
+        painter.setBrush(QColor("#eaf2ff"))
+        painter.drawRoundedRect(x0, y0, side_w, side_h, 26, 26)
+        painter.setBrush(QColor("#dbeafe"))
+        painter.drawEllipse(x0 - 18, y0, 36, side_h)
+        painter.drawEllipse(x0 + side_w - 18, y0, 36, side_h)
+        line_count = min(z_div, 32)
+        painter.setPen(QColor("#2f80ed"))
+        for i in range(1, line_count):
+            x = x0 + int(side_w * i / line_count)
+            painter.drawLine(x, y0 + 6, x, y0 + side_h - 6)
+        painter.setPen(QColor("#0f3f7a"))
+        painter.drawText(x0 + 6, y0 - 12, f"length direction: {z_div} divisions")
+        painter.drawText(x0 + 8, y0 + side_h + 24, "smaller length size = more axial divisions")
+
+        # Geometry-based section guide. This is generated from GUI values only,
+        # not from an Abaqus .inp file.
+        if dg:
+            cx = int(width * 0.66)
+            cy = 134
+            max_r = max(float(dg.get("outer_sheath_outer_radius_mm", 60.0)), 1.0)
+            scale = min((width - cx - 54) / max_r, 102.0 / max_r)
+
+            def sx(x: float) -> int:
+                return int(round(cx + x * scale))
+
+            def sy(y: float) -> int:
+                return int(round(cy - y * scale))
+
+            def draw_circle(radius_mm: float, color: str, pen_width: float = 1.0) -> None:
+                rr = int(round(radius_mm * scale))
+                painter.setPen(QPen(QColor(color), pen_width))
+                painter.drawEllipse(cx - rr, cy - rr, rr * 2, rr * 2)
+
+            def draw_ring_mesh(inner_r: float, outer_r: float, radial_count: int, theta_count: int, color: str) -> None:
+                radial_count = max(1, radial_count)
+                theta_count = max(6, min(theta_count, 72))
+                painter.setPen(QPen(QColor(color), 1.0))
+                for j in range(radial_count + 1):
+                    draw_circle(inner_r + (outer_r - inner_r) * j / radial_count, color)
+                for i in range(theta_count):
+                    angle = 2.0 * math.pi * i / theta_count
+                    painter.drawLine(
+                        sx(inner_r * math.cos(angle)),
+                        sy(inner_r * math.sin(angle)),
+                        sx(outer_r * math.cos(angle)),
+                        sy(outer_r * math.sin(angle)),
+                    )
+
+            def draw_wire_ring(center_r: float, wire_r: float, count: int, color: str) -> None:
+                count = max(1, min(count, 96))
+                spoke_count = max(4, min(armour_div, 16))
+                painter.setPen(QPen(QColor(color), 1.0))
+                for i in range(count):
+                    angle = 2.0 * math.pi * i / count
+                    wx = center_r * math.cos(angle)
+                    wy = center_r * math.sin(angle)
+                    wr = int(round(wire_r * scale))
+                    painter.drawEllipse(sx(wx) - wr, sy(wy) - wr, wr * 2, wr * 2)
+                    for j in range(spoke_count):
+                        theta = 2.0 * math.pi * j / spoke_count
+                        painter.drawLine(
+                            sx(wx),
+                            sy(wy),
+                            sx(wx + wire_r * math.cos(theta)),
+                            sy(wy + wire_r * math.sin(theta)),
+                        )
+
+            draw_ring_mesh(
+                float(dg["outer_sheath_inner_radius_mm"]),
+                float(dg["outer_sheath_outer_radius_mm"]),
+                r_outer,
+                core_div,
+                "#2f80ed",
+            )
+            draw_wire_ring(
+                float(dg["outer_armour_center_radius_mm"]),
+                float(dg["outer_armour_wire_radius_mm"]),
+                int(dg["outer_armour_wire_count"]),
+                "#f06292",
+            )
+            draw_ring_mesh(
+                float(dg["inner_armour_outer_radius_mm"]),
+                float(dg["bedding_outer_radius_mm"]),
+                r_bedding,
+                core_div,
+                "#89bf68",
+            )
+            draw_wire_ring(
+                float(dg["inner_armour_center_radius_mm"]),
+                float(dg["inner_armour_wire_radius_mm"]),
+                int(dg["inner_armour_wire_count"]),
+                "#c084fc",
+            )
+            draw_ring_mesh(
+                float(dg["inner_sheath_inner_radius_mm"]),
+                float(dg["inner_sheath_outer_radius_mm"]),
+                r_inner,
+                core_div,
+                "#5fd4d4",
+            )
+            draw_circle(float(dg["filler_outer_radius_mm"]), "#fbbf24", 1.2)
+
+            core_theta = max(8, min(core_div, 48))
+            for i in range(3):
+                angle = 2.0 * math.pi * i / 3.0 - math.pi / 2.0
+                core_x = float(dg["core_center_radius_mm"]) * math.cos(angle)
+                core_y = float(dg["core_center_radius_mm"]) * math.sin(angle)
+                painter.setPen(QPen(QColor("#ff8a2a"), 1.0))
+                for radius_key in ["core_outer_radius_mm", "insulation_radius_mm", "conductor_radius_mm"]:
+                    rr = int(round(float(dg[radius_key]) * scale))
+                    painter.drawEllipse(sx(core_x) - rr, sy(core_y) - rr, rr * 2, rr * 2)
+                for j in range(core_theta):
+                    theta = 2.0 * math.pi * j / core_theta
+                    painter.drawLine(
+                        sx(core_x),
+                        sy(core_y),
+                        sx(core_x + float(dg["core_outer_radius_mm"]) * math.cos(theta)),
+                        sy(core_y + float(dg["core_outer_radius_mm"]) * math.sin(theta)),
+                    )
+
+            painter.setPen(QColor("#17202a"))
+            painter.drawText(cx - 132, 34, "GUI-value mesh request preview")
+            painter.setPen(QColor("#475569"))
+            painter.drawText(cx - 132, height - 28, f"core C={core_div} | armour C={armour_div} | R={r_inner}/{r_bedding}/{r_outer}")
+
+        painter.end()
+        return pixmap
+
     def generate_mesh_preview(self) -> None:
         for item in self.mesh_cache_wire:
             try:
@@ -3542,23 +3850,218 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_cache_wire.clear()
         try:
             dg = self.parse_geometry()
-            def add_wire(r, cx, cy, rows, cols, edge_color):
-                md = gl.MeshData.cylinder(rows=rows, cols=cols, radius=[r, r], length=80.0)
-                item = gl.GLMeshItem(meshdata=md, drawEdges=True, edgeColor=edge_color, color=(0, 0, 0, 0), smooth=False, shader=None)
-                item.translate(cx, cy, -40.0)
+            def add_segments(segments, edge_color, width=1.1):
+                if not segments:
+                    return
+                points = []
+                for start, end in segments:
+                    points.append([start[0], start[1], 0.0])
+                    points.append([end[0], end[1], 0.0])
+                item = gl.GLLinePlotItem(
+                    pos=np.array(points, dtype=float),
+                    color=edge_color,
+                    width=width,
+                    mode="lines",
+                    antialias=True,
+                )
                 self.view_wire.addItem(item)
                 self.mesh_cache_wire.append(item)
-            add_wire(dg["outer_sheath_outer_radius_mm"], 0, 0, self.mesh_inputs["z_elem"].value(), self.mesh_inputs["c_elem_core"].value(), (0.54, 0.70, 1.0, 0.62))
-            for i in range(dg["inner_armour_wire_count"]):
-                a = 2 * np.pi * i / dg["inner_armour_wire_count"]
-                add_wire(dg["inner_armour_wire_radius_mm"], dg["inner_armour_center_radius_mm"] * np.cos(a), dg["inner_armour_center_radius_mm"] * np.sin(a), self.mesh_inputs["z_elem"].value(), self.mesh_inputs["c_elem_armour"].value(), (0.82, 0.82, 0.84, 0.86))
-            for i in range(dg["outer_armour_wire_count"]):
-                a = 2 * np.pi * i / dg["outer_armour_wire_count"]
-                add_wire(dg["outer_armour_wire_radius_mm"], dg["outer_armour_center_radius_mm"] * np.cos(a), dg["outer_armour_center_radius_mm"] * np.sin(a), self.mesh_inputs["z_elem"].value(), self.mesh_inputs["c_elem_armour"].value(), (0.63, 0.72, 0.92, 0.86))
-            self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
+
+            def circle_segments(cx, cy, radius, divisions):
+                divisions = max(8, min(int(divisions), 96))
+                points = []
+                for i in range(divisions):
+                    a0 = 2.0 * np.pi * i / divisions
+                    a1 = 2.0 * np.pi * (i + 1) / divisions
+                    points.append((
+                        (cx + radius * np.cos(a0), cy + radius * np.sin(a0)),
+                        (cx + radius * np.cos(a1), cy + radius * np.sin(a1)),
+                    ))
+                return points
+
+            def add_ring_mesh(inner_radius, outer_radius, radial_divisions, theta_divisions, edge_color):
+                theta_divisions = max(8, min(int(theta_divisions), 96))
+                radial_divisions = max(1, int(radial_divisions))
+                segments = []
+                for j in range(radial_divisions + 1):
+                    radius = inner_radius + (outer_radius - inner_radius) * j / radial_divisions
+                    segments.extend(circle_segments(0.0, 0.0, radius, theta_divisions))
+                for i in range(theta_divisions):
+                    angle = 2.0 * np.pi * i / theta_divisions
+                    segments.append((
+                        (inner_radius * np.cos(angle), inner_radius * np.sin(angle)),
+                        (outer_radius * np.cos(angle), outer_radius * np.sin(angle)),
+                    ))
+                add_segments(segments, edge_color)
+
+            def add_wire_mesh(center_radius, wire_radius, count, circumferential_divisions, edge_color):
+                count = max(1, min(int(count), 128))
+                circumferential_divisions = max(6, min(int(circumferential_divisions), 32))
+                segments = []
+                for i in range(count):
+                    angle = 2.0 * np.pi * i / count
+                    cx = center_radius * np.cos(angle)
+                    cy = center_radius * np.sin(angle)
+                    segments.extend(circle_segments(cx, cy, wire_radius, circumferential_divisions))
+                    for j in range(circumferential_divisions):
+                        theta = 2.0 * np.pi * j / circumferential_divisions
+                        segments.append((
+                            (cx, cy),
+                            (cx + wire_radius * np.cos(theta), cy + wire_radius * np.sin(theta)),
+                        ))
+                add_segments(segments, edge_color)
+
+            def add_core_mesh(cx, cy, outer_radius, insulation_radius, conductor_radius, divisions, edge_color):
+                divisions = max(8, min(int(divisions), 64))
+                segments = []
+                for radius in [outer_radius, insulation_radius, conductor_radius]:
+                    segments.extend(circle_segments(cx, cy, radius, divisions))
+                for j in range(divisions):
+                    theta = 2.0 * np.pi * j / divisions
+                    segments.append((
+                        (cx, cy),
+                        (cx + outer_radius * np.cos(theta), cy + outer_radius * np.sin(theta)),
+                    ))
+                add_segments(segments, edge_color)
+
+            z_rows = self.mesh_inputs["z_elem"].value()
+            core_cols = self.mesh_inputs["c_elem_core"].value()
+            armour_cols = self.mesh_inputs["c_elem_armour"].value()
+            add_ring_mesh(
+                dg["outer_sheath_inner_radius_mm"],
+                dg["outer_sheath_outer_radius_mm"],
+                self.mesh_inputs["r_elem_outer_sheath"].value(),
+                core_cols,
+                (0.18, 0.50, 0.93, 0.72),
+            )
+            add_wire_mesh(
+                dg["outer_armour_center_radius_mm"],
+                dg["outer_armour_wire_radius_mm"],
+                dg["outer_armour_wire_count"],
+                armour_cols,
+                (0.94, 0.34, 0.52, 0.86),
+            )
+            add_ring_mesh(
+                dg["inner_armour_outer_radius_mm"],
+                dg["bedding_outer_radius_mm"],
+                self.mesh_inputs["r_elem_bedding"].value(),
+                core_cols,
+                (0.50, 0.75, 0.36, 0.68),
+            )
+            add_wire_mesh(
+                dg["inner_armour_center_radius_mm"],
+                dg["inner_armour_wire_radius_mm"],
+                dg["inner_armour_wire_count"],
+                armour_cols,
+                (0.72, 0.48, 0.92, 0.86),
+            )
+            add_ring_mesh(
+                dg["inner_sheath_inner_radius_mm"],
+                dg["inner_sheath_outer_radius_mm"],
+                self.mesh_inputs["r_elem_inner_sheath"].value(),
+                core_cols,
+                (0.34, 0.82, 0.82, 0.72),
+            )
+            add_segments(circle_segments(0.0, 0.0, dg["filler_outer_radius_mm"], core_cols), (0.96, 0.75, 0.16, 0.62))
+            for i in range(3):
+                a = 2 * np.pi * i / 3.0 - np.pi / 2.0
+                core_x = dg["core_center_radius_mm"] * np.cos(a)
+                core_y = dg["core_center_radius_mm"] * np.sin(a)
+                add_core_mesh(
+                    core_x,
+                    core_y,
+                    dg["core_outer_radius_mm"],
+                    dg["insulation_radius_mm"],
+                    dg["conductor_radius_mm"],
+                    core_cols,
+                    (1.0, 0.52, 0.16, 0.82),
+                )
+            span = max(float(dg["outer_sheath_outer_radius_mm"]) * 2.25, 1.0)
+            self.view_wire.setCameraPosition(distance=span, elevation=90, azimuth=0)
             self.update_mesh_readiness(dg)
+            self.update_mesh_guide()
+            if hasattr(self, "inp_mesh_summary"):
+                self.inp_mesh_summary.setPlainText(
+                    "Generated from GUI values only.\n"
+                    f"Axial divisions: {z_rows}\n"
+                    f"Core/Sheath circumferential divisions: {core_cols}\n"
+                    f"Armour wire divisions: {armour_cols}"
+                )
+            if hasattr(self, "inp_mesh_legend"):
+                self.inp_mesh_legend.setVisible(False)
         except Exception as exc:
             QMessageBox.critical(self, "Mesh preview error", str(exc))
+
+    def import_inp_mesh_dialog(self) -> None:
+        start_dir = str(Path("C:/Users/user/Desktop") if Path("C:/Users/user/Desktop").exists() else PROJECT_DIR)
+        path, _ = QFileDialog.getOpenFileName(self, "Open Abaqus input deck", start_dir, "Abaqus INP Files (*.inp);;All Files (*)")
+        if not path:
+            return
+        try:
+            self.render_inp_mesh_preview(Path(path))
+        except Exception as exc:
+            QMessageBox.critical(self, "INP mesh preview error", str(exc))
+
+    def render_inp_mesh_preview(self, path: Path) -> None:
+        for item in self.mesh_cache_wire:
+            try:
+                self.view_wire.removeItem(item)
+            except Exception:
+                pass
+        self.mesh_cache_wire.clear()
+
+        preview = build_inp_mesh_preview(path)
+        min_x, min_y, max_x, max_y = preview.bounds_xy
+        center_x = 0.5 * (min_x + max_x)
+        center_y = 0.5 * (min_y + max_y)
+        span = max(max_x - min_x, max_y - min_y, 1.0)
+
+        for part, segments in preview.segments_by_part.items():
+            if not segments:
+                continue
+            color = PART_COLORS.get(part, (0.72, 0.78, 0.88, 0.75))
+            points = []
+            for start, end in segments:
+                points.append([start[0] - center_x, start[1] - center_y, 0.0])
+                points.append([end[0] - center_x, end[1] - center_y, 0.0])
+            item = gl.GLLinePlotItem(
+                pos=np.array(points, dtype=float),
+                color=color,
+                width=1.4,
+                mode="lines",
+                antialias=True,
+            )
+            self.view_wire.addItem(item)
+            self.mesh_cache_wire.append(item)
+
+        self.view_wire.setCameraPosition(distance=span * 1.35, elevation=90, azimuth=0)
+        if hasattr(self, "lbl_mesh_ready"):
+            self.lbl_mesh_ready.value_label.setText("INP imported")
+            self.lbl_mesh_elements.value_label.setText(
+                f"{sum(part['elements'] for part in preview.part_summaries):,}"
+            )
+            self.lbl_mesh_contacts.value_label.setText(str(len(preview.part_summaries)))
+        if hasattr(self, "inp_mesh_summary"):
+            self.inp_mesh_summary.setPlainText(format_inp_mesh_summary(preview))
+        if hasattr(self, "inp_mesh_legend"):
+            self.inp_mesh_legend.setText(self.format_inp_mesh_legend(preview))
+            self.inp_mesh_legend.setVisible(True)
+        self.log(f"[INP] Mesh preview imported: {path}")
+
+    def format_inp_mesh_legend(self, preview) -> str:
+        items = []
+        for part in sorted(preview.segments_by_part):
+            color = PART_COLORS.get(part, (0.72, 0.78, 0.88, 0.75))
+            r, g, b = [max(0, min(255, int(round(channel * 255)))) for channel in color[:3]]
+            hex_color = f"#{r:02x}{g:02x}{b:02x}"
+            items.append(
+                "<span style='white-space:nowrap; margin-right:12px;'>"
+                f"<span style='background-color:{hex_color}; color:{hex_color};'>___</span> "
+                f"{part}</span>"
+            )
+        if not items:
+            return "No part-colored mesh segments found."
+        return "Part colors: " + " ".join(items)
 
     # ---------------- Misc ----------------
     def log(self, message: str) -> None:
@@ -3584,6 +4087,19 @@ class SCLASRemoteGUI(QMainWindow):
                 color: #243244;
                 font-family: "Segoe UI", "Malgun Gothic", Arial;
                 font-size: 13px;
+            }
+            QLabel#MeshLegend {
+                color: #d7dde8;
+                background-color: #252a32;
+                border: 1px solid #3a4351;
+                border-radius: 8px;
+                padding: 8px 10px;
+                font-size: 12px;
+            }
+            QLabel#MeshGuide {
+                background-color: #f8fafc;
+                border: 1px solid #d8e0ea;
+                border-radius: 10px;
             }
             QPushButton, QLineEdit, QSpinBox, QComboBox, QCheckBox, QRadioButton,
             QGroupBox, QTableWidget, QHeaderView::section {
@@ -3892,8 +4408,11 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setFont(QFont("Segoe UI", 10))
     pg.setConfigOptions(antialias=True)
+    splash = show_startup_splash(app)
     window = SCLASRemoteGUI()
     window.show()
+    if splash is not None:
+        splash.finish(window)
     smoke_ms = os.environ.get("SCLAS_GUI_SMOKE_EXIT_MS", "").strip()
     if smoke_ms:
         QTimer.singleShot(max(int(smoke_ms), 1), app.quit)
