@@ -103,7 +103,10 @@ function Write-Utf8NoBom {
 }
 
 $ProjectRoot = Resolve-ProjectRoot
-$RunSmokeScript = Join-Path $ProjectRoot "run_lab_abaqus_smoke.ps1"
+$RunSmokeScript = Join-Path $ProjectRoot "scripts\run_lab_abaqus_smoke.ps1"
+if (-not (Test-Path $RunSmokeScript)) {
+    $RunSmokeScript = Join-Path $ProjectRoot "run_lab_abaqus_smoke.ps1"
+}
 if (-not (Test-Path $RunSmokeScript)) {
     throw "run_lab_abaqus_smoke.ps1 was not found: $RunSmokeScript"
 }

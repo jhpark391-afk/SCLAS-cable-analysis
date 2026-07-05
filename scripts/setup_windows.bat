@@ -4,31 +4,53 @@ setlocal
 set "PROJECT_DIR=%~dp0..\"
 cd /d "%PROJECT_DIR%"
 set "VENV_PYTHON=.venv\Scripts\python.exe"
+set "CODEX_PYTHON=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+set "PYTHON_FOR_VENV="
+set "RECREATE_VENV=0"
 
 if exist "%VENV_PYTHON%" (
     "%VENV_PYTHON%" -c "import sys" >nul 2>nul
     if errorlevel 1 (
-        echo ERROR: Existing .venv Python could not start.
-        echo Rename or delete the .venv folder, install Python 3, then run setup_windows.bat again.
-        exit /b 1
-    )
-) else (
-    where py >nul 2>nul
-    if not errorlevel 1 (
-        py -3 -m venv .venv
+        echo Existing .venv Python could not start; it will be recreated.
+        set "RECREATE_VENV=1"
     ) else (
-        where python >nul 2>nul
-        if not errorlevel 1 (
-            python -m venv .venv
-        ) else (
-            echo ERROR: Python was not found.
-            echo Install Python 3 for Windows, or enable the Python workload in Visual Studio.
-            exit /b 1
-        )
+        goto :install_requirements
     )
-    if errorlevel 1 exit /b %ERRORLEVEL%
 )
 
+where py >nul 2>nul
+if not errorlevel 1 (
+    set "PYTHON_FOR_VENV=py -3"
+    goto :create_venv
+)
+
+where python >nul 2>nul
+if not errorlevel 1 (
+    set "PYTHON_FOR_VENV=python"
+    goto :create_venv
+)
+
+if exist "%CODEX_PYTHON%" (
+    "%CODEX_PYTHON%" -c "import sys" >nul 2>nul
+    if not errorlevel 1 (
+        set "PYTHON_FOR_VENV=%CODEX_PYTHON%"
+        goto :create_venv
+    )
+)
+
+echo ERROR: Python was not found.
+echo Install Python 3 for Windows, enable the Python workload in Visual Studio, or run from Codex with the bundled runtime available.
+exit /b 1
+
+:create_venv
+if "%RECREATE_VENV%"=="1" (
+    %PYTHON_FOR_VENV% -m venv --clear .venv
+) else (
+    %PYTHON_FOR_VENV% -m venv .venv
+)
+if errorlevel 1 exit /b %ERRORLEVEL%
+
+:install_requirements
 "%VENV_PYTHON%" -m pip install --upgrade pip
 if errorlevel 1 exit /b %ERRORLEVEL%
 "%VENV_PYTHON%" -m pip install -r requirements.txt

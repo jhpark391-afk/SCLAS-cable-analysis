@@ -10,6 +10,7 @@ import compileall
 import csv
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -22,6 +23,7 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 CODE_DIR = PROJECT_DIR / "code"
 JOBS_DIR = PROJECT_DIR / "jobs" / "SCLAS_jobs"
+BACKEND_FIXTURE_DIR = Path("C:/HELIX/Abaqus+_work/for_test")
 
 
 def fail(message: str) -> None:
@@ -46,12 +48,25 @@ def check_pyproj_references() -> None:
     root = ET.parse(pyproj).getroot()
     ns = {"msb": "http://schemas.microsoft.com/developer/msbuild/2003"}
     missing = []
+    compile_includes = set()
     for item in root.findall(".//msb:Compile", ns) + root.findall(".//msb:Content", ns):
         include = item.attrib.get("Include", "")
+        if item.tag.endswith("Compile"):
+            compile_includes.add(include)
         if include and not project_path(include).exists():
             missing.append(include)
     if missing:
         fail("Missing .pyproj references: " + ", ".join(missing))
+    required_compile = {
+        "code\\sclas_remote_gui.py",
+        "code\\sclas_backend_gui_bridge.py",
+        "code\\sclas_self_check.py",
+        "code\\sclas_offline_diagnostics.py",
+        "code\\abaqus_runner.py",
+    }
+    missing_compile = sorted(required_compile - compile_includes)
+    if missing_compile:
+        fail("Missing required .pyproj Compile entries: " + ", ".join(missing_compile))
     print("[OK] Visual Studio project references exist")
 
 
@@ -70,6 +85,15 @@ def rich_backend_payload() -> dict:
             "frontend_version": "self_check",
             "job_id": "self_check_contract",
             "team_name": "HELIX",
+        },
+        "geometry_mm": {
+            "conductor_radius_mm": 4.0,
+            "insulation_radius_mm": 11.3,
+            "core_outer_radius_mm": 15.3,
+            "core_center_radius_mm": 17.6673,
+            "inner_sheath_thickness_mm": 4.5,
+            "clearance_gap_mm": 0.5,
+            "outer_sheath_thickness_mm": 4.5,
         },
         "derived_geometry_mm": {
             "core_outer_radius_mm": 15.3,
@@ -90,31 +114,68 @@ def rich_backend_payload() -> dict:
             "outer_wire_radius_mm": 2.0,
             "inner_wire_count": 55,
             "outer_wire_count": 63,
+            "core_lay_angle_deg": 8.98,
             "inner_lay_angle_deg": 20.1,
             "outer_lay_angle_deg": 19.6,
+            "inner_armour_lay_angle_deg": 20.1,
+            "outer_armour_lay_angle_deg": 19.6,
             "lay_angle_deg": 19.85,
         },
         "mesh": {
             "requested_element_type": "C3D8R",
+            "solid_element_type": "C3D8R",
             "model_strategy": "periodic_homogenized_cell",
-            "armour_model": "beam_with_contact_surface",
+            "armour_model": "solid_wire",
             "axial_divisions": 40,
             "core_circumferential_divisions": 24,
             "armour_circumferential_divisions": 8,
+            "inner_sheath_radial_divisions": 3,
+            "bedding_radial_divisions": 1,
+            "outer_sheath_radial_divisions": 3,
             "contact_regularization_beta": 0.001,
         },
         "analysis_conditions": {
             "effective_length_mm": 234.2,
+            "external_pressure_mpa": 40.0,
             "hydrostatic_pressure_mpa": 40.0,
             "residual_contact_pressure_mpa": 0.3,
             "friction_coefficient": 0.22,
             "max_curvature_1_per_m": 0.08,
+            "curve_factors": [-0.1, -0.05, 0.0, 0.05, 0.1],
             "max_twist_rad_per_m": 0.05,
             "max_axial_strain": 0.002,
             "radial_compression_ratio": 0.015,
             "contact_regularization_beta": 0.001,
             "loading_cycles": 2,
             "solver_steps": 500,
+        },
+        "solver": {
+            "step_time": 1.0,
+            "initial_increment": 1.0e-5,
+            "minimum_increment": 1.0e-11,
+            "maximum_increment": 0.001,
+            "max_num_increments": 10000,
+            "nlgeom": False,
+            "stabilization_enabled": True,
+            "stabilization_factor": 0.0002,
+        },
+        "output_requests": {
+            "history": ["UR2", "RM2"],
+            "field": {
+                "U_UR": True,
+                "RF_RM": True,
+                "S": True,
+                "CPRESS": True,
+                "COPEN": True,
+                "CSLIP": True,
+                "CSHEAR": True,
+            },
+        },
+        "modeling": {
+            "model_type": "full_3d",
+            "model_label": "Full 3D",
+            "equivalent_model_level": 1,
+            "use_equivalent_properties": False,
         },
         "study_scope": {
             "enabled_assessments": {
@@ -255,6 +316,7 @@ def check_backend_contract() -> None:
         manifest,
         [
             "mesh_settings_from_gui",
+            "pitch_design",
             "contact_interface_defaults",
             "contact_binding_scaffold",
             "contact_property_scaffold",
@@ -272,6 +334,15 @@ def check_backend_contract() -> None:
     defaults = manifest["contact_interface_defaults"]
     if defaults.get("friction_coefficient") != 0.22 or defaults.get("regularization_beta") != 0.001:
         fail("contact interface defaults were not carried into the manifest")
+    pitch = manifest.get("pitch_design", {})
+    for key in ["core_pitch_mm", "inner_armour_pitch_mm", "outer_armour_pitch_mm"]:
+        if key not in pitch or abs(float(pitch[key])) <= 0.0:
+            fail(f"pitch_design missing a nonzero {key}")
+    mesh_settings = manifest.get("mesh_settings_from_gui", {})
+    if mesh_settings.get("armour_model") != "solid_wire":
+        fail("mesh armour_model should default to the currently implemented solid_wire backend")
+    if mesh_settings.get("inner_sheath_radial_divisions") != 3 or mesh_settings.get("outer_sheath_radial_divisions") != 3:
+        fail("sheath radial division controls were not carried into the manifest")
     bindings = manifest["contact_binding_scaffold"]
     if len(bindings) != 5:
         fail(f"Expected 5 contact binding scaffold records, found {len(bindings)}")
@@ -280,6 +351,7 @@ def check_backend_contract() -> None:
     component_names = {item.get("name") for item in manifest["components"]}
     for required in [
         "inner_sheath_equivalent_solid",
+        "filler_matrix_solids",
         "bedding_equivalent_solid",
         "outer_sheath_equivalent_solid",
         "inner_armour_helical_beams",
@@ -325,6 +397,50 @@ def check_backend_contract() -> None:
         fail("Offline diagnostics did not save offline_diagnostics_report.md")
 
     print(f"[OK] Backend contract smoke job: {job_dir}")
+
+
+def check_geometry_scaling_contract() -> None:
+    root = unique_self_check_dir("self_check_geometry_scaling")
+    root.mkdir(parents=True, exist_ok=True)
+    expected_user_counts = (55, 63)
+    for radius in [15.3, 20.0, 25.0]:
+        for use_auto_counts in [False, True]:
+            payload = rich_backend_payload()
+            payload["geometry_mm"]["core_outer_radius_mm"] = radius
+            payload["armour"]["inner_wire_count"] = 0 if use_auto_counts else expected_user_counts[0]
+            payload["armour"]["outer_wire_count"] = 0 if use_auto_counts else expected_user_counts[1]
+            job_dir = root / ("roc_{0:g}_{1}".format(radius, "auto" if use_auto_counts else "user"))
+            job_dir.mkdir(parents=True, exist_ok=True)
+            (job_dir / "input_data.json").write_text(json.dumps(payload, indent=4), encoding="utf-8")
+            shutil.copy2(CODE_DIR / "abaqus_runner.py", job_dir / "abaqus_runner.py")
+            proc = subprocess.run(
+                [sys.executable, "abaqus_runner.py", "input_data.json"],
+                cwd=str(job_dir),
+                text=True,
+                capture_output=True,
+            )
+            if proc.returncode != 0:
+                fail("geometry scaling backend run failed:\n" + proc.stdout + proc.stderr)
+            manifest = json.loads((job_dir / "abaqus_mesh_manifest.json").read_text(encoding="utf-8"))
+            transform = manifest.get("geometry_transform", {})
+            expected_coc = round(2.0 * math.sqrt(3.0) * radius / 3.0, 5)
+            if abs(float(transform.get("core_center_radius_mm", -1.0)) - expected_coc) > 1.0e-6:
+                fail(f"Core center conversion failed for radius {radius}: {transform}")
+            if abs(float(transform.get("filler_profile_scale", -1.0)) - radius / 15.3) > 1.0e-9:
+                fail(f"Filler profile scale failed for radius {radius}: {transform}")
+            inner_count = int(transform.get("inner_armour_wire_count", 0))
+            outer_count = int(transform.get("outer_armour_wire_count", 0))
+            if use_auto_counts:
+                if transform.get("inner_armour_wire_count_source") != "auto_from_wire_radius_and_center_radius":
+                    fail("Inner armour auto-count source not recorded")
+                if transform.get("outer_armour_wire_count_source") != "auto_from_wire_radius_and_center_radius":
+                    fail("Outer armour auto-count source not recorded")
+                if inner_count <= 0 or outer_count <= 0:
+                    fail(f"Auto armour count did not resolve positive counts: {transform}")
+            else:
+                if (inner_count, outer_count) != expected_user_counts:
+                    fail(f"User armour counts were not preserved: {transform}")
+    print(f"[OK] Geometry scaling contract: {root}")
 
 
 def check_endpoint_sweep_diagnostics() -> None:
@@ -763,6 +879,154 @@ def check_curve_v0_comparison() -> None:
         fail("Job summary did not prioritize saved CurveV0 comparison next action")
 
     print("[OK] CurveV0 endpoint/continuous comparison")
+
+
+def check_solver_blocking_error_priority() -> None:
+    job_dir = unique_self_check_dir("self_check_solver_blocking")
+    job_dir.mkdir(parents=True, exist_ok=True)
+    with (job_dir / "result_data.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(["curvature_1_per_m", "moment_kn_m"])
+        writer.writerow(["0", "0"])
+    manifest = {
+        "status": "abaqus_inp_created",
+        "files": ["Cable_Bending.inp"],
+        "job_name": "Cable_Bending",
+    }
+    (job_dir / "abaqus_mesh_manifest.json").write_text(json.dumps(manifest, indent=4), encoding="utf-8")
+    (job_dir / "Cable_Bending.inp").write_text(
+        "\n".join([
+            "*Heading",
+            "*Assembly, name=Assembly",
+            "*Coupling, constraint name=SCLAS_RIGHTEND_KEYWORDCOUPLING, ref node=1, surface=SCLAS_RIGHTEND_SURFACE",
+            "*Kinematic",
+            "*End Assembly",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    (job_dir / "Cable_Bending.dat").write_text(
+        "\n".join([
+            "***ERROR: DEGREE OF FREEDOM 2 DOES NOT EXIST FOR NODE 1 (ASSEMBLY). IT HAS",
+            "          ALREADY BEEN ELIMINATED BY ANOTHER EQUATION, MPC, RIGID BODY,",
+            "***ERROR: 1 nodes are missing degree of freedoms. The MPC/Equation/kinematic",
+            "          coupling constraints can not be formed.",
+            "          THE PROGRAM HAS DISCOVERED     2 FATAL ERRORS",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(CODE_DIR / "sclas_offline_diagnostics.py"),
+            str(job_dir),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode == 0:
+        fail("sclas_offline_diagnostics.py should return nonzero when solver blocking errors exist")
+    report = json.loads(proc.stdout)
+    first = report.get("diagnostic_summary", {}).get("first_blocking_issue", {})
+    if first.get("severity") != "error":
+        fail("Solver blocking diagnostics did not promote the first issue to error: " + json.dumps(first, indent=2))
+    if "DEGREE OF FREEDOM 2" not in str(first.get("detail", "")):
+        fail("Solver blocking diagnostics did not expose the first concrete Abaqus DOF error")
+    if report.get("solver_logs", {}).get("blocking_match_count", 0) < 2:
+        fail("Solver blocking diagnostics did not count the synthetic blocking log matches")
+    print(f"[OK] Solver blocking error priority: {job_dir}")
+
+
+def check_backend_json_gui_bridge_contract() -> None:
+    sys.path.insert(0, str(CODE_DIR))
+    from sclas_backend_gui_bridge import (
+        BACKEND_JOB_FOLDER_PRESETS,
+        BACKEND_JSON_PRESETS,
+        backend_payload_gui_values,
+        resolved_backend_geometry,
+    )
+
+    fixtures = [
+        ("RoC15", 15.3, 55, 63),
+        ("RoC20", 20.0, 60, 68),
+        ("RoC25", 25.0, 0, 0),
+    ]
+    preset_names = set(BACKEND_JSON_PRESETS)
+    for expected in ["RoC15 backend fixture", "RoC20 backend fixture", "RoC25 auto-count fixture"]:
+        if expected not in preset_names:
+            fail(f"Backend GUI preset registry missing {expected}")
+    preset_paths = {path.name for path in BACKEND_JSON_PRESETS.values()}
+    for expected_file in ["input_data_RoC15.json", "input_data_RoC20.json", "input_data_RoC25.json"]:
+        if expected_file not in preset_paths:
+            fail(f"Backend GUI preset registry missing {expected_file}")
+    job_preset_names = set(BACKEND_JOB_FOLDER_PRESETS)
+    for expected in ["Backend for_test job folder", "Backend run job folder", "Backend Final job folder"]:
+        if expected not in job_preset_names:
+            fail(f"Backend external job preset registry missing {expected}")
+
+    checked = []
+    for name, radius, inner_count, outer_count in fixtures:
+        path = BACKEND_FIXTURE_DIR / f"input_data_{name}.json"
+        if path.exists():
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        else:
+            payload = rich_backend_payload()
+            payload["metadata"]["job_id"] = f"synthetic_{name}"
+            payload["geometry_mm"]["core_outer_radius_mm"] = radius
+            payload["armour"]["inner_wire_count"] = inner_count
+            payload["armour"]["outer_wire_count"] = outer_count
+
+        values = backend_payload_gui_values(payload)
+        geometry = values["geometry"]
+        analysis = values["analysis_conditions"]
+        mesh = values["mesh"]
+        resolved = resolved_backend_geometry(payload)
+
+        if abs(float(geometry.get("roc")) - radius) > 1.0e-9:
+            fail(f"Backend GUI bridge did not map core radius for {name}: {geometry}")
+        if analysis.get("pressure") is None:
+            fail(f"Backend GUI bridge did not map external/hydrostatic pressure for {name}")
+        if mesh.get("z_elem") is None or mesh.get("c_elem_core") is None:
+            fail(f"Backend GUI bridge did not map mesh divisions for {name}: {mesh}")
+        if name == "RoC25":
+            if geometry.get("no_ia") != 0 or geometry.get("no_oa") != 0:
+                fail("RoC25 fixture should preserve zero armour counts as Auto in GUI mapping")
+            if resolved["inner_armour_wire_count_source"] != "auto_from_wire_radius_and_center_radius":
+                fail("RoC25 inner armour count did not resolve from auto source")
+            if resolved["outer_armour_wire_count_source"] != "auto_from_wire_radius_and_center_radius":
+                fail("RoC25 outer armour count did not resolve from auto source")
+            if resolved["inner_armour_wire_count"] <= 0 or resolved["outer_armour_wire_count"] <= 0:
+                fail("RoC25 auto armour counts did not resolve positive counts")
+        else:
+            if resolved["inner_armour_wire_count"] != inner_count or resolved["outer_armour_wire_count"] != outer_count:
+                fail(f"{name} user armour counts were not preserved: {resolved}")
+        checked.append(path if path.exists() else name)
+
+    print("[OK] Backend JSON GUI bridge contract: " + ", ".join(str(item) for item in checked))
+
+
+def check_external_backend_folder_diagnostics() -> None:
+    sys.path.insert(0, str(CODE_DIR))
+    from sclas_backend_gui_bridge import BACKEND_JOB_FOLDER_PRESETS
+    from sclas_offline_diagnostics import build_report
+
+    for_test_dir = BACKEND_JOB_FOLDER_PRESETS["Backend for_test job folder"]
+    if not for_test_dir.exists():
+        print("[OK] External backend folder diagnostics skipped: for_test folder not present")
+        return
+    report = build_report(for_test_dir)
+    logs = report.get("solver_logs", {})
+    first = report.get("diagnostic_summary", {}).get("first_blocking_issue", {})
+    if logs.get("blocking_match_count", 0) <= 0:
+        fail("External backend for_test diagnostics did not find the known solver blocking log match")
+    if first.get("severity") != "error":
+        fail("External backend for_test diagnostics did not promote solver blocking issue to error")
+    if "DEGREE OF FREEDOM 2" not in str(first.get("detail", "")):
+        fail("External backend for_test diagnostics did not expose the expected DOF blocking error")
+    print(f"[OK] External backend folder diagnostics: {for_test_dir}")
 
 
 def write_minimal_job(job_dir: Path, source: str) -> None:
@@ -1530,9 +1794,13 @@ def main() -> int:
         check_pyproj_references,
         check_compile,
         check_backend_contract,
+        check_geometry_scaling_contract,
         check_endpoint_sweep_diagnostics,
         check_continuous_curve_v0_diagnostics,
         check_curve_v0_comparison,
+        check_solver_blocking_error_priority,
+        check_backend_json_gui_bridge_contract,
+        check_external_backend_folder_diagnostics,
         check_latest_job_filtering,
         check_project_status,
         check_acceptance_gate,

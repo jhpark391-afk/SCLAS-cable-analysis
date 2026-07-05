@@ -1263,6 +1263,14 @@ def inspect_solver_logs(job_dir: Path, report: dict) -> None:
         section["matches"] = collect_matches(NOTABLE_LOG_PATTERNS, 40)
     if section["failed"]:
         add_issue(report, "error", "Abaqus solver exited with errors")
+    elif section["matches"] and section["match_priority"] == "blocking" and not section["completed"]:
+        first = section["matches"][0]
+        add_issue(
+            report,
+            "error",
+            "Solver log contains blocking Abaqus error",
+            "{0}:{1} {2}".format(first.get("file"), first.get("line"), first.get("text")),
+        )
     elif section["matches"] and not section["completed"]:
         add_issue(report, "warning", "Solver log contains notable Abaqus keywords/errors", len(section["matches"]))
 

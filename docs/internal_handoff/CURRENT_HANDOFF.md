@@ -1,6 +1,45 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-06-16 KST
+Last updated: 2026-07-05 KST
+
+## Latest Backend Status - 2026-07-05 KST
+
+- Backend worker reported that a reduced structural model containing inner/outer sheath, armour, and bedding only has converged for pressure and bending analysis.
+- Next planned backend attempt is the full cable model.
+- Expected 2026-07-15 submission scope is now the Full 3D Abaqus model path. Equivalent models (`armour_equivalent`, `armour_core_equivalent`) should remain a stretch goal for the final/main presentation rather than the 2026-07-15 submission package.
+- Current implementation direction remains: keep `modeling.model_type = full_3d` as the implemented path, keep `mesh.armour_model = solid_wire` for the current Abaqus backend, and preserve GUI/backend JSON keys for future equivalent-model expansion.
+- Next engineering priority: carry the reduced-model convergence settings into the full cable model, then verify pressure step, bending step, output requests, and ODB extraction before widening scope.
+- GUI/backend fixture integration added: the Design tab can import backend
+  `input_data.json` files such as
+  `C:\HELIX\Abaqus+_work\for_test\input_data_RoC15.json`,
+  `input_data_RoC20.json`, and `input_data_RoC25.json` into the live geometry,
+  material, mesh, and analysis fields. The Analysis tab can also inspect any
+  external Abaqus job folder with the existing offline diagnostics without
+  copying large generated artifacts into this repository.
+- Offline diagnostics now promotes incomplete-solver `***ERROR` / `FATAL`
+  log hits to an error-level first blocking issue. This was verified against
+  `C:\HELIX\Abaqus+_work\for_test`, where the first concrete blocker is
+  `Cable_Bending.dat:1269 DEGREE OF FREEDOM 2 DOES NOT EXIST...`.
+- The backend JSON -> GUI field mapping now lives in pure Python helper
+  `code/sclas_backend_gui_bridge.py`, so `code/sclas_self_check.py` can verify
+  RoC15/RoC20/RoC25 fixture import behavior even when PyQt is unavailable.
+  The Design tab also has a direct backend preset picker for these three
+  fixtures in addition to manual JSON file import.
+- The Analysis tab now has external backend job-folder presets for
+  `C:\HELIX\Abaqus+_work\for_test`, `run`, and `Final`, plus an `Inspect
+  preset` action. Self-check verifies the `for_test` folder diagnostics and
+  confirms the known first blocking solver error is promoted to error severity.
+- `code/sclas_backend_gui_bridge.py` is included in the Visual Studio
+  `.pyproj`, and self-check now verifies required Compile entries so future
+  GUI/backend bridge helpers are not accidentally left out of the Windows
+  project surface.
+- `scripts\run_self_check.bat` now falls back to the Codex bundled Python
+  runtime when the local `.venv` is broken, and was verified to pass. The local
+  `.venv` was then recreated through `scripts\setup_windows.bat`, PyQt/numpy
+  dependencies were installed successfully, and GUI import plus offscreen
+  widget smoke passed. The smoke confirmed the backend JSON preset combo has
+  three entries and the external backend job-folder preset combo has three
+  entries.
 
 ## Repository
 
