@@ -89,6 +89,10 @@ BACKEND_RUNNER_TEMPLATE = APP_DIR / "abaqus_runner.py"
 ODB_EXTRACTOR_TEMPLATE = APP_DIR / "sclas_odb_extractor.py"
 TEAM_LOGO_PATH = PROJECT_DIR / "assets" / "helix_logo.png"
 TEAM_ICON_PATH = PROJECT_DIR / "assets" / "helix_icon.png"
+APP_FONT_FAMILY = "Segoe UI"
+UI_FONT_QSS = "'Segoe UI', 'Malgun Gothic', 'Noto Sans', Arial"
+SYMBOL_FONT_QSS = "'Segoe UI Semibold', 'Segoe UI', 'Segoe UI Symbol', 'Malgun Gothic', 'Noto Sans', Arial"
+MONO_FONT_QSS = "'Cascadia Mono', Consolas, 'Malgun Gothic', monospace"
 
 
 def quote_command_path(path: str) -> str:
@@ -543,7 +547,7 @@ class VariableFormLabel(QWidget):
         label.setProperty("no_translate", True)
         label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         label.setStyleSheet(
-            "QLabel { font-family: 'Segoe UI', 'Malgun Gothic', Arial; "
+            f"QLabel {{ font-family: {UI_FONT_QSS}; "
             f"font-size: 13px; font-weight: {weight}; color: {color}; }}"
         )
         layout.addWidget(label, 0, Qt.AlignVCenter)
@@ -552,8 +556,8 @@ class VariableFormLabel(QWidget):
         symbol_label = QLabel(symbol)
         symbol_label.setProperty("no_translate", True)
         symbol_label.setStyleSheet(
-            "QLabel { font-family: 'Segoe UI Semibold', 'Segoe UI', 'Malgun Gothic', Arial; "
-            "font-size: 15px; font-weight: 800; color: #0f5fc2; }"
+            f"QLabel {{ font-family: {SYMBOL_FONT_QSS}; "
+            "font-size: 15px; font-weight: 800; color: #075985; letter-spacing: 0px; }"
         )
         layout.addWidget(symbol_label, 0, Qt.AlignVCenter)
 
@@ -561,8 +565,8 @@ class VariableFormLabel(QWidget):
             sub_label = QLabel(subscript)
             sub_label.setProperty("no_translate", True)
             sub_label.setStyleSheet(
-                "QLabel { font-family: 'Segoe UI Semibold', 'Segoe UI', 'Malgun Gothic', Arial; "
-                "font-size: 11px; font-weight: 800; color: #0f5fc2; padding-top: 9px; }"
+                f"QLabel {{ font-family: {SYMBOL_FONT_QSS}; "
+                "font-size: 12px; font-weight: 800; color: #075985; padding-top: 7px; letter-spacing: 0px; }"
             )
             layout.addWidget(sub_label, 0, Qt.AlignBottom)
 
@@ -1826,7 +1830,10 @@ class SCLASRemoteGUI(QMainWindow):
 
     def header(self, text: str) -> QLabel:
         label = QLabel(text)
-        label.setStyleSheet("font-size: 17px; font-weight: 700; color: #17202a; padding: 2px 0 8px 0;")
+        label.setStyleSheet(
+            f"font-family: {UI_FONT_QSS}; font-size: 17px; font-weight: 750; "
+            "color: #17202a; padding: 2px 0 8px 0; letter-spacing: 0px;"
+        )
         return label
 
     def form_label(self, text: str) -> QWidget:
@@ -1835,8 +1842,14 @@ class SCLASRemoteGUI(QMainWindow):
     def metric_box(self, title: str, value: str) -> QFrame:
         box = QFrame(); box.setObjectName("MetricBox")
         layout = QVBoxLayout(box)
-        title_label = QLabel(title); title_label.setStyleSheet("color: #5f6b7a; font-size: 13px;")
-        value_label = QLabel(value); value_label.setStyleSheet("color: #132033; font-size: 23px; font-weight: 750;")
+        title_label = QLabel(title)
+        title_label.setStyleSheet(
+            f"font-family: {UI_FONT_QSS}; color: #5f6b7a; font-size: 13px; font-weight: 600;"
+        )
+        value_label = QLabel(value)
+        value_label.setStyleSheet(
+            f"font-family: {UI_FONT_QSS}; color: #132033; font-size: 23px; font-weight: 750;"
+        )
         value_label.setProperty("no_translate", True)
         layout.addWidget(title_label); layout.addWidget(value_label)
         box.value_label = value_label
@@ -4165,7 +4178,28 @@ class SCLASRemoteGUI(QMainWindow):
             }
             QPushButton, QLineEdit, QSpinBox, QComboBox, QCheckBox, QRadioButton,
             QGroupBox, QTableWidget, QHeaderView::section {
-                font-family: "Segoe UI", "Malgun Gothic", Arial;
+                font-family: "Segoe UI", "Malgun Gothic", "Noto Sans", Arial;
+                letter-spacing: 0px;
+            }
+            QTabWidget::pane {
+                border: none;
+                background-color: transparent;
+            }
+            QTabBar::tab {
+                font-family: "Segoe UI", "Malgun Gothic", "Noto Sans", Arial;
+                font-size: 13px;
+                font-weight: 650;
+                color: #334155;
+                background-color: #ffffff;
+                border: 1px solid #d7dee8;
+                border-radius: 7px;
+                padding: 8px 13px;
+                margin-right: 6px;
+            }
+            QTabBar::tab:selected {
+                color: #0f3a72;
+                background-color: #dfeafb;
+                border-color: #b9cdea;
             }
             QFrame#Sidebar {
                 background-color: #f6f8fb;
@@ -4341,6 +4375,16 @@ class SCLASRemoteGUI(QMainWindow):
                 padding: 12px;
                 font-weight: 650;
             }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 10px;
+                padding: 0 5px;
+                font-family: "Segoe UI", "Malgun Gothic", "Noto Sans", Arial;
+                font-size: 13px;
+                font-weight: 750;
+                color: #111827;
+            }
             QLineEdit, QSpinBox, QComboBox {
                 background-color: #fbfcfe;
                 border: 1px solid #cbd5e1;
@@ -4396,7 +4440,7 @@ class SCLASRemoteGUI(QMainWindow):
                 background-color: #ffffff;
                 alternate-background-color: #f7f9fc;
                 color: #172033;
-                font-size: 12px;
+                font-size: 13px;
                 border: 1px solid #d7dee8;
                 border-radius: 8px;
                 gridline-color: #e5eaf1;
@@ -4411,6 +4455,7 @@ class SCLASRemoteGUI(QMainWindow):
                 border-right: 1px solid #d7dee8;
                 border-bottom: 1px solid #d7dee8;
                 padding: 7px;
+                font-size: 13px;
             }
             QTextEdit {
                 background-color: #0f172a;
@@ -4468,7 +4513,7 @@ class SCLASRemoteGUI(QMainWindow):
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setFont(QFont("Segoe UI", 10))
+    app.setFont(QFont(APP_FONT_FAMILY, 10))
     pg.setConfigOptions(antialias=True)
     splash = show_startup_splash(app)
     window = SCLASRemoteGUI()
