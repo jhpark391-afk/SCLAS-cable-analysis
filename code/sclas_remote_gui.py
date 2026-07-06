@@ -33,7 +33,7 @@ os.environ.setdefault("PYQTGRAPH_QT_LIB", "PyQt5")
 import numpy as np
 import psutil
 from PyQt5.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt5.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPen, QPixmap
+from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -89,10 +89,34 @@ BACKEND_RUNNER_TEMPLATE = APP_DIR / "abaqus_runner.py"
 ODB_EXTRACTOR_TEMPLATE = APP_DIR / "sclas_odb_extractor.py"
 TEAM_LOGO_PATH = PROJECT_DIR / "assets" / "helix_logo.png"
 TEAM_ICON_PATH = PROJECT_DIR / "assets" / "helix_icon.png"
-APP_FONT_FAMILY = "Segoe UI"
-UI_FONT_QSS = "'Segoe UI', 'Malgun Gothic', 'Noto Sans', Arial"
-SYMBOL_FONT_QSS = "'Segoe UI Semibold', 'Segoe UI', 'Segoe UI Symbol', 'Malgun Gothic', 'Noto Sans', Arial"
-MONO_FONT_QSS = "'Cascadia Mono', Consolas, 'Malgun Gothic', monospace"
+FONT_DIR = PROJECT_DIR / "assets" / "fonts"
+APP_FONT_FAMILY = "Noto Sans KR"
+UI_FONT_QSS = "'Noto Sans KR', 'Malgun Gothic', 'Segoe UI', Arial"
+SYMBOL_FONT_FAMILY = "Cambria Math"
+SYMBOL_FONT_QSS = "'Euclid', 'Euclid Symbol', 'Cambria Math', 'Segoe UI Symbol', 'Noto Sans KR', 'Malgun Gothic', 'Segoe UI', Arial"
+MONO_FONT_QSS = "'Cascadia Mono', Consolas, 'Noto Sans KR', 'Malgun Gothic', monospace"
+
+
+def qss_font_stack(*families: str) -> str:
+    return ", ".join(f"'{family}'" for family in families if family)
+
+
+def load_project_symbol_fonts() -> str:
+    """Load bundled math fonts from assets/fonts and return the preferred family."""
+    preferred = ""
+    if FONT_DIR.exists():
+        for pattern in ("*.ttf", "*.otf", "*.ttc"):
+            for font_path in sorted(FONT_DIR.glob(pattern)):
+                font_id = QFontDatabase.addApplicationFont(str(font_path))
+                if font_id < 0:
+                    continue
+                for family in QFontDatabase.applicationFontFamilies(font_id):
+                    lowered = family.lower()
+                    if not preferred or "euclid" in lowered:
+                        preferred = family
+                    if "euclid" in lowered:
+                        return preferred
+    return preferred or "Cambria Math"
 
 
 def quote_command_path(path: str) -> str:
@@ -502,9 +526,10 @@ class VariableFormLabel(QWidget):
         super().__init__()
         self.setProperty("no_translate", True)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.setMaximumHeight(24)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(3)
+        layout.setSpacing(1)
         layout.addStretch(1)
 
         token = self.match_token(text)
@@ -548,7 +573,7 @@ class VariableFormLabel(QWidget):
         label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         label.setStyleSheet(
             f"QLabel {{ font-family: {UI_FONT_QSS}; "
-            f"font-size: 13px; font-weight: {weight}; color: {color}; }}"
+            f"font-size: 13px; font-weight: {weight}; color: {color}; letter-spacing: 0px; padding: 0px; }}"
         )
         layout.addWidget(label, 0, Qt.AlignVCenter)
 
@@ -557,7 +582,7 @@ class VariableFormLabel(QWidget):
         symbol_label.setProperty("no_translate", True)
         symbol_label.setStyleSheet(
             f"QLabel {{ font-family: {SYMBOL_FONT_QSS}; "
-            "font-size: 15px; font-weight: 800; color: #075985; letter-spacing: 0px; }"
+            "font-size: 14px; font-weight: 750; color: #0b5cad; letter-spacing: 0px; padding: 0px; }"
         )
         layout.addWidget(symbol_label, 0, Qt.AlignVCenter)
 
@@ -566,7 +591,7 @@ class VariableFormLabel(QWidget):
             sub_label.setProperty("no_translate", True)
             sub_label.setStyleSheet(
                 f"QLabel {{ font-family: {SYMBOL_FONT_QSS}; "
-                "font-size: 12px; font-weight: 800; color: #075985; padding-top: 7px; letter-spacing: 0px; }"
+                "font-size: 10px; font-weight: 750; color: #0b5cad; padding-top: 6px; letter-spacing: 0px; }"
             )
             layout.addWidget(sub_label, 0, Qt.AlignBottom)
 
@@ -703,6 +728,8 @@ class SCLASRemoteGUI(QMainWindow):
             "Ready | Local session": "준비됨 | 로컬 세션",
             "Cable Geometry Inputs": "케이블 형상 입력",
             "Import key,value CSV": "key,value CSV 불러오기",
+            "Import backend JSON": "백엔드 JSON 불러오기",
+            "Load preset": "프리셋 불러오기",
             "Visible Layers": "표시 레이어",
             "Layer Presets": "레이어 프리셋",
             "All": "전체",
@@ -729,11 +756,29 @@ class SCLASRemoteGUI(QMainWindow):
             "Abaqus element type": "아바쿠스 요소 타입",
             "Strategy": "전략",
             "Armour model": "아머 모델",
+            "Periodic cell": "주기 셀",
+            "Periodic homogenized cell": "주기 균질화 셀",
+            "Full 3D segment": "전체 3D 세그먼트",
+            "Axisymmetric": "축대칭",
+            "Axisymmetric tension/torsion": "축대칭 인장/비틀림",
+            "Solid wire": "솔리드 와이어",
+            "Beam + contact": "빔 + 접촉",
+            "Beam + contact surface": "빔 + 접촉면",
+            "Analytical equiv.": "해석 등가",
+            "Analytical equivalent": "해석적 등가 모델",
             "Contact beta": "접촉 beta",
             "Axial divisions": "축방향 분할",
             "Core divisions": "코어 분할",
             "Armour divisions": "아머 분할",
+            "Axial z divisions": "축방향 z 분할",
+            "Core/Sheath θ divisions": "코어/시스 θ 분할",
+            "Armour wire θ divisions": "아머 와이어 θ 분할",
+            "Inner sheath r divisions": "내부 시스 r 분할",
+            "Bedding r divisions": "베딩 r 분할",
+            "Outer sheath r divisions": "외부 시스 r 분할",
+            "Filler z divisions": "필러 z 분할",
             "Generate mesh preview": "메시 프리뷰 생성",
+            "Import Abaqus INP": "Abaqus INP 불러오기",
             "Visual request only. Abaqus backend owns actual mesh generation.": "시각화 요청입니다. 실제 메시 생성은 Abaqus 백엔드가 담당합니다.",
             "Mesh Readiness": "메시 준비도",
             "Ready state": "준비 상태",
@@ -741,6 +786,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Contact pairs": "접촉 쌍",
             "Not generated": "생성 전",
             "Preview ready": "프리뷰 준비됨",
+            "INP imported": "INP 불러옴",
             "Preview Only": "프리뷰 전용",
             "Top": "상단",
             "Iso": "등각",
@@ -748,6 +794,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Analysis Conditions": "해석 조건",
             "Conditions": "조건",
             "Effective length (mm)": "유효 길이 (mm)",
+            "Cable external pressure (MPa)": "케이블 외압 (MPa)",
             "Hydrostatic pressure (MPa)": "정수압 (MPa)",
             "Residual contact pressure (MPa)": "잔류 접촉압 (MPa)",
             "Friction coefficient": "마찰 계수",
@@ -834,6 +881,33 @@ class SCLASRemoteGUI(QMainWindow):
             return self.translations().get(text, text)
         return text
 
+    def set_translated_metric_value(self, metric: QFrame, english_text: str) -> None:
+        value_label = getattr(metric, "value_label", None)
+        if value_label is None:
+            return
+        value_label.setProperty("metric_status_key", english_text)
+        value_label.setText(self.ui_text(english_text))
+
+    def refresh_translated_metric_values(self) -> None:
+        for metric_name in ("lbl_mesh_ready",):
+            metric = getattr(self, metric_name, None)
+            value_label = getattr(metric, "value_label", None)
+            if value_label is None:
+                continue
+            status_key = value_label.property("metric_status_key")
+            if status_key:
+                value_label.setText(self.ui_text(str(status_key)))
+
+    def update_language_button(self) -> None:
+        if not hasattr(self, "btn_language"):
+            return
+        if self.ui_language == "EN":
+            self.btn_language.setText("English")
+            self.btn_language.setToolTip("Current language: English. Click to switch to Korean.")
+        else:
+            self.btn_language.setText("한국어")
+            self.btn_language.setToolTip("현재 언어: 한국어. 클릭하면 영어로 전환합니다.")
+
     def toggle_language(self) -> None:
         self.ui_language = "KO" if self.ui_language == "EN" else "EN"
         self.apply_language()
@@ -860,12 +934,7 @@ class SCLASRemoteGUI(QMainWindow):
                 widget.setProperty("en_text", english)
             widget.setText(self.ui_text(str(english)))
 
-        if hasattr(self, "btn_language"):
-            self.btn_language.setText("EN" if self.ui_language == "KO" else "KO")
-            self.btn_language.setToolTip(
-                "Switch interface language to English." if self.ui_language == "KO"
-                else "인터페이스 언어를 한국어로 전환합니다."
-            )
+        self.update_language_button()
         if hasattr(self, "table"):
             self.table.setHorizontalHeaderLabels([
                 self.ui_text("Category"),
@@ -874,14 +943,46 @@ class SCLASRemoteGUI(QMainWindow):
                 "ν",
                 "ρ (kg/m³)",
             ])
+            self.style_material_headers()
         if hasattr(self, "plot_canvas"):
             self.plot_canvas.setLabel("left", self.ui_text("Bending Moment M"), units="kN.m")
             self.plot_canvas.setLabel("bottom", self.ui_text("Curvature kappa"), units="1/m")
+        if hasattr(self, "mesh_inputs"):
+            self.translate_combo_items(
+                self.mesh_inputs["model_strategy"],
+                [
+                    ("Periodic cell", "Periodic homogenized cell"),
+                    ("Full 3D segment", "Full 3D segment"),
+                    ("Axisymmetric", "Axisymmetric tension/torsion"),
+                ],
+            )
+            self.translate_combo_items(
+                self.mesh_inputs["armour_model"],
+                [
+                    ("Solid wire", "Solid wire"),
+                    ("Beam + contact", "Beam + contact surface"),
+                    ("Analytical equiv.", "Analytical equivalent"),
+                ],
+            )
         if hasattr(self, "summary_text"):
             if self.last_summary_data:
                 self.summary_text.setPlainText(self.format_summary(self.last_summary_data))
             else:
                 self.summary_text.setPlainText(self.summary_placeholder_text())
+        self.refresh_translated_metric_values()
+
+    def translate_combo_items(self, combo: QComboBox, english_items: List[object]) -> None:
+        current_index = combo.currentIndex()
+        combo.blockSignals(True)
+        combo.clear()
+        for item in english_items:
+            if isinstance(item, tuple):
+                label, value = item
+            else:
+                label, value = item, item
+            combo.addItem(self.ui_text(str(label)), value)
+        combo.setCurrentIndex(max(0, min(current_index, combo.count() - 1)))
+        combo.blockSignals(False)
 
     def summary_placeholder_text(self) -> str:
         if self.ui_language == "KO":
@@ -938,10 +1039,10 @@ class SCLASRemoteGUI(QMainWindow):
         self.lbl_result_status.setObjectName("TopbarMeta")
         session = QLabel("Local project")
         session.setObjectName("TopbarMeta")
-        self.btn_language = QPushButton("KO")
+        self.btn_language = QPushButton("English")
         self.btn_language.setObjectName("LangToggle")
-        self.btn_language.setFixedWidth(58)
-        self.btn_language.setToolTip("인터페이스 언어를 한국어로 전환합니다.")
+        self.btn_language.setFixedWidth(92)
+        self.btn_language.setToolTip("Current language: English. Click to switch to Korean.")
         self.btn_language.setProperty("no_translate", True)
         self.btn_language.clicked.connect(self.toggle_language)
         topbar.addWidget(self.lbl_model_status)
@@ -1282,14 +1383,18 @@ class SCLASRemoteGUI(QMainWindow):
 
         panel_mat = QFrame(); panel_mat.setObjectName("Card")
         panel_mat.setMinimumWidth(360)
+        panel_mat.setMinimumHeight(360)
         mid = QVBoxLayout(panel_mat)
-        mid.setContentsMargins(18, 16, 18, 16)
-        mid.addWidget(self.header("Material Table"))
+        mid.setContentsMargins(12, 10, 12, 12)
         self.table = QTableWidget(9, 5)
         self.table.setAlternatingRowColors(True)
         self.table.setHorizontalHeaderLabels(["Category", "Layer", "E (GPa)", "ν", "ρ (kg/m³)"])
+        self.style_material_headers()
         self.table.verticalHeader().setVisible(False)
-        self.table.setMinimumHeight(430)
+        self.table.verticalHeader().setDefaultSectionSize(25)
+        self.table.horizontalHeader().setMinimumHeight(30)
+        self.table.setMinimumHeight(324)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -1298,9 +1403,11 @@ class SCLASRemoteGUI(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.init_material_table()
         mid.addWidget(self.table)
+        material_section = self.collapsible_section("Material Table", panel_mat, expanded=False)
 
         panel_view = QFrame(); panel_view.setObjectName("Card")
         panel_view.setMinimumWidth(380)
+        panel_view.setMinimumHeight(300)
         right = QVBoxLayout(panel_view)
         right.setContentsMargins(18, 16, 18, 16)
         header = QHBoxLayout()
@@ -1316,7 +1423,7 @@ class SCLASRemoteGUI(QMainWindow):
         right.addLayout(header)
         self.view_solid = gl.GLViewWidget()
         self.view_solid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.view_solid.setMinimumHeight(360)
+        self.view_solid.setMinimumHeight(260)
         self.view_solid.setBackgroundColor("#f7f8fa")
         self.view_solid.setCameraPosition(distance=180, elevation=90, azimuth=0)
         right.addWidget(self.view_solid, 1)
@@ -1325,12 +1432,11 @@ class SCLASRemoteGUI(QMainWindow):
         workspace.setObjectName("WorkspaceFrame")
         workspace_layout = QVBoxLayout(workspace)
         workspace_layout.setContentsMargins(0, 0, 0, 0)
-        workspace_layout.setSpacing(14)
-        workspace_layout.addWidget(panel_view, 3)
-        workspace_layout.addWidget(panel_mat, 2)
-        workspace_scroll = self.scroll_panel(workspace)
+        workspace_layout.setSpacing(10)
+        workspace_layout.addWidget(panel_view, 1)
+        workspace_layout.addWidget(material_section, 0)
 
-        layout.addWidget(self.panel_splitter(workspace_scroll, input_scroll, [900, 520]), 1)
+        layout.addWidget(self.panel_splitter(workspace, input_scroll, [900, 520]), 1)
         self.add_page(tab)
 
         for w in self.inputs.values():
@@ -1364,8 +1470,12 @@ class SCLASRemoteGUI(QMainWindow):
             "filler_z_elem": QSpinBox(),
         }
         self.mesh_inputs["elem_type"].addItems(["C3D8R", "C3D4", "B31"])
-        self.mesh_inputs["model_strategy"].addItems(["Periodic homogenized cell", "Full 3D segment", "Axisymmetric tension/torsion"])
-        self.mesh_inputs["armour_model"].addItems(["Solid wire", "Beam + contact surface", "Analytical equivalent"])
+        self.mesh_inputs["model_strategy"].addItem("Periodic cell", "Periodic homogenized cell")
+        self.mesh_inputs["model_strategy"].addItem("Full 3D segment", "Full 3D segment")
+        self.mesh_inputs["model_strategy"].addItem("Axisymmetric", "Axisymmetric tension/torsion")
+        self.mesh_inputs["armour_model"].addItem("Solid wire", "Solid wire")
+        self.mesh_inputs["armour_model"].addItem("Beam + contact", "Beam + contact surface")
+        self.mesh_inputs["armour_model"].addItem("Analytical equiv.", "Analytical equivalent")
         self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(40)
         self.mesh_inputs["c_elem_core"].setRange(4, 160); self.mesh_inputs["c_elem_core"].setValue(24)
         self.mesh_inputs["c_elem_armour"].setRange(4, 64); self.mesh_inputs["c_elem_armour"].setValue(8)
@@ -1378,17 +1488,18 @@ class SCLASRemoteGUI(QMainWindow):
             "model_strategy": "Controls whether the backend should build a periodic cell, full segment, or axisymmetric study.",
             "armour_model": "Recommended representation for helical armour layers in Abaqus.",
             "contact_beta": "Tangential contact regularization value for stick-slip stability.",
-            "z_elem": "z direction divisions along the cable axis for core, sheath, bedding, and armour.",
-            "c_elem_core": "theta direction divisions for core, sheath, and bedding preview surfaces.",
-            "c_elem_armour": "theta direction divisions around each armour wire.",
+            "z_elem": "Axial z divisions along the cable length for core, sheath, bedding, and armour.",
+            "c_elem_core": "Circumferential θ divisions for core, sheath, and bedding preview surfaces.",
+            "c_elem_armour": "Circumferential θ divisions around each armour wire cross-section.",
             "r_elem_inner_sheath": "r direction divisions through the inner sheath thickness.",
             "r_elem_bedding": "r direction divisions through the bedding layer.",
             "r_elem_outer_sheath": "r direction divisions through the outer sheath thickness.",
-            "filler_z_elem": "z direction divisions for the special four-part filler profile.",
+            "filler_z_elem": "Axial z divisions for the special four-part filler profile.",
         }
         self.mesh_inputs["contact_beta"].setVisible(False)
         for key in ["elem_type", "model_strategy", "armour_model"]:
-            self.mesh_inputs[key].setMinimumWidth(230)
+            self.mesh_inputs[key].setMinimumWidth(140)
+            self.mesh_inputs[key].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for key in [
             "z_elem",
             "c_elem_core",
@@ -1398,7 +1509,8 @@ class SCLASRemoteGUI(QMainWindow):
             "r_elem_outer_sheath",
             "filler_z_elem",
         ]:
-            self.mesh_inputs[key].setMinimumWidth(150)
+            self.mesh_inputs[key].setMinimumWidth(112)
+            self.mesh_inputs[key].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for key, tip in mesh_tips.items():
             self.mesh_inputs[key].setToolTip(tip)
         form = QFormLayout()
@@ -1406,12 +1518,13 @@ class SCLASRemoteGUI(QMainWindow):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
         form.addRow("Abaqus element type", self.mesh_inputs["elem_type"])
         form.addRow("Strategy", self.mesh_inputs["model_strategy"])
         form.addRow("Armour model", self.mesh_inputs["armour_model"])
-        form.addRow("z direction divisions", self.mesh_inputs["z_elem"])
-        form.addRow("Core/Sheath theta divisions", self.mesh_inputs["c_elem_core"])
-        form.addRow("Armour theta divisions", self.mesh_inputs["c_elem_armour"])
+        form.addRow("Axial z divisions", self.mesh_inputs["z_elem"])
+        form.addRow("Core/Sheath θ divisions", self.mesh_inputs["c_elem_core"])
+        form.addRow("Armour wire θ divisions", self.mesh_inputs["c_elem_armour"])
         form.addRow("Inner sheath r divisions", self.mesh_inputs["r_elem_inner_sheath"])
         form.addRow("Bedding r divisions", self.mesh_inputs["r_elem_bedding"])
         form.addRow("Outer sheath r divisions", self.mesh_inputs["r_elem_outer_sheath"])
@@ -1440,6 +1553,7 @@ class SCLASRemoteGUI(QMainWindow):
         mesh_ready_box = QGroupBox("Mesh Readiness")
         mesh_ready_layout = QGridLayout(mesh_ready_box)
         self.lbl_mesh_ready = self.metric_box("Ready state", "Not generated")
+        self.set_translated_metric_value(self.lbl_mesh_ready, "Not generated")
         self.lbl_mesh_elements = self.metric_box("Est. elements", "-")
         self.lbl_mesh_contacts = self.metric_box("Contact pairs", "5")
         mesh_ready_layout.addWidget(self.lbl_mesh_ready, 0, 0)
@@ -1839,6 +1953,24 @@ class SCLASRemoteGUI(QMainWindow):
     def form_label(self, text: str) -> QWidget:
         return VariableFormLabel(text)
 
+    def style_material_headers(self) -> None:
+        if not hasattr(self, "table"):
+            return
+        default_font = QFont(APP_FONT_FAMILY, 9)
+        default_font.setWeight(QFont.DemiBold)
+        symbol_font = QFont(SYMBOL_FONT_FAMILY, 9)
+        symbol_font.setWeight(QFont.DemiBold)
+        for column in range(self.table.columnCount()):
+            item = self.table.horizontalHeaderItem(column)
+            if item is None:
+                continue
+            if column in (2, 3, 4):
+                item.setFont(symbol_font)
+                item.setForeground(QBrush(QColor("#0b5cad")))
+            else:
+                item.setFont(default_font)
+                item.setForeground(QBrush(QColor("#1f2937")))
+
     def metric_box(self, title: str, value: str) -> QFrame:
         box = QFrame(); box.setObjectName("MetricBox")
         layout = QVBoxLayout(box)
@@ -1961,7 +2093,8 @@ class SCLASRemoteGUI(QMainWindow):
                 "Analytical equivalent": "analytical_equivalent",
             },
         }
-        text = self.mesh_inputs[key].currentText()
+        combo = self.mesh_inputs[key]
+        text = combo.currentData() or combo.currentText()
         return maps.get(key, {}).get(text, text)
 
     def build_payload(self) -> dict:
@@ -3700,7 +3833,7 @@ class SCLASRemoteGUI(QMainWindow):
         if not hasattr(self, "lbl_mesh_ready"):
             return
         estimated = self.estimate_mesh_elements(dg)
-        self.lbl_mesh_ready.value_label.setText(self.ui_text("Preview ready"))
+        self.set_translated_metric_value(self.lbl_mesh_ready, "Preview ready")
         self.lbl_mesh_elements.value_label.setText(f"{estimated:,}")
         self.lbl_mesh_contacts.value_label.setText("5")
 
@@ -4059,8 +4192,8 @@ class SCLASRemoteGUI(QMainWindow):
                     "Generated from GUI values only.\n"
                     f"Axial divisions: {z_rows}\n"
                     f"Filler z divisions: {filler_z_rows}\n"
-                    f"Core/Sheath circumferential divisions: {core_cols}\n"
-                    f"Armour wire divisions: {armour_cols}"
+                    f"Core/Sheath θ divisions: {core_cols}\n"
+                    f"Armour wire θ divisions: {armour_cols}"
                 )
             if hasattr(self, "inp_mesh_legend"):
                 self.inp_mesh_legend.setVisible(False)
@@ -4111,7 +4244,7 @@ class SCLASRemoteGUI(QMainWindow):
 
         self.view_wire.setCameraPosition(distance=span * 1.35, elevation=90, azimuth=0)
         if hasattr(self, "lbl_mesh_ready"):
-            self.lbl_mesh_ready.value_label.setText("INP imported")
+            self.set_translated_metric_value(self.lbl_mesh_ready, "INP imported")
             self.lbl_mesh_elements.value_label.setText(
                 f"{sum(part['elements'] for part in preview.part_summaries):,}"
             )
@@ -4151,16 +4284,16 @@ class SCLASRemoteGUI(QMainWindow):
             QMainWindow {
                 background-color: #eef2f6;
                 color: #18212d;
-                font-family: "Segoe UI", "Malgun Gothic", Arial;
+                font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI", Arial;
             }
             QWidget {
                 color: #18212d;
-                font-family: "Segoe UI", "Malgun Gothic", Arial;
+                font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI", Arial;
                 font-size: 13px;
             }
             QLabel {
                 color: #243244;
-                font-family: "Segoe UI", "Malgun Gothic", Arial;
+                font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI", Arial;
                 font-size: 13px;
             }
             QLabel#MeshLegend {
@@ -4178,7 +4311,7 @@ class SCLASRemoteGUI(QMainWindow):
             }
             QPushButton, QLineEdit, QSpinBox, QComboBox, QCheckBox, QRadioButton,
             QGroupBox, QTableWidget, QHeaderView::section {
-                font-family: "Segoe UI", "Malgun Gothic", "Noto Sans", Arial;
+                font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI", Arial;
                 letter-spacing: 0px;
             }
             QTabWidget::pane {
@@ -4186,7 +4319,7 @@ class SCLASRemoteGUI(QMainWindow):
                 background-color: transparent;
             }
             QTabBar::tab {
-                font-family: "Segoe UI", "Malgun Gothic", "Noto Sans", Arial;
+                font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI", Arial;
                 font-size: 13px;
                 font-weight: 650;
                 color: #334155;
@@ -4380,7 +4513,7 @@ class SCLASRemoteGUI(QMainWindow):
                 subcontrol-position: top left;
                 left: 10px;
                 padding: 0 5px;
-                font-family: "Segoe UI", "Malgun Gothic", "Noto Sans", Arial;
+                font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI", Arial;
                 font-size: 13px;
                 font-weight: 750;
                 color: #111827;
@@ -4460,7 +4593,7 @@ class SCLASRemoteGUI(QMainWindow):
             QTextEdit {
                 background-color: #0f172a;
                 color: #dbeafe;
-                font-family: Consolas, "Cascadia Mono", monospace;
+                font-family: Consolas, "Cascadia Mono", "Noto Sans KR", monospace;
                 border: 1px solid #233148;
                 border-radius: 8px;
                 padding: 8px;
@@ -4469,7 +4602,7 @@ class SCLASRemoteGUI(QMainWindow):
             QTextEdit#SummaryText {
                 background-color: #fbfcfe;
                 color: #253247;
-                font-family: "Segoe UI", "Malgun Gothic", Arial;
+                font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI", Arial;
                 border: 1px solid #d7dee8;
                 border-radius: 8px;
                 padding: 10px;
@@ -4479,7 +4612,7 @@ class SCLASRemoteGUI(QMainWindow):
             QTextEdit#InputPreviewText {
                 background-color: #fbfcfe;
                 color: #1f2937;
-                font-family: "Cascadia Mono", Consolas, "Malgun Gothic", monospace;
+                font-family: "Cascadia Mono", Consolas, "Noto Sans KR", "Malgun Gothic", monospace;
                 border: 1px solid #d7dee8;
                 border-radius: 8px;
                 padding: 10px;
@@ -4512,7 +4645,21 @@ class SCLASRemoteGUI(QMainWindow):
         """)
 
 def main() -> int:
+    global SYMBOL_FONT_FAMILY, SYMBOL_FONT_QSS
     app = QApplication(sys.argv)
+    SYMBOL_FONT_FAMILY = load_project_symbol_fonts()
+    SYMBOL_FONT_QSS = qss_font_stack(
+        SYMBOL_FONT_FAMILY,
+        "Euclid",
+        "Euclid Symbol",
+        "Cambria Math",
+        "Segoe UI Symbol",
+        "Segoe UI Semibold",
+        "Segoe UI",
+        "Malgun Gothic",
+        "Noto Sans",
+        "Arial",
+    )
     app.setFont(QFont(APP_FONT_FAMILY, 10))
     pg.setConfigOptions(antialias=True)
     splash = show_startup_splash(app)
