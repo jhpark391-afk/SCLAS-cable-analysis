@@ -32,7 +32,7 @@ os.environ.setdefault("PYQTGRAPH_QT_LIB", "PyQt5")
 
 import numpy as np
 import psutil
-from PyQt5.QtCore import QEasingCurve, QPropertyAnimation, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt5.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt5.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -86,6 +86,7 @@ PROJECT_DIR = APP_DIR.parent
 DEFAULT_JOB_ROOT = PROJECT_DIR / "jobs" / "SCLAS_jobs"
 SETTINGS_PATH = PROJECT_DIR / "settings.json"
 BACKEND_RUNNER_TEMPLATE = APP_DIR / "abaqus_runner.py"
+ODB_EXTRACTOR_TEMPLATE = APP_DIR / "sclas_odb_extractor.py"
 TEAM_LOGO_PATH = PROJECT_DIR / "assets" / "helix_logo.png"
 TEAM_ICON_PATH = PROJECT_DIR / "assets" / "helix_icon.png"
 
@@ -372,6 +373,8 @@ def create_job_package(job_root: Path, payload: dict) -> Path:
     (job_dir / "BACKEND_CONTRACT.md").write_text(BACKEND_CONTRACT_TEXT, encoding="utf-8")
     if BACKEND_RUNNER_TEMPLATE.exists():
         shutil.copy2(BACKEND_RUNNER_TEMPLATE, job_dir / "abaqus_runner.py")
+    if ODB_EXTRACTOR_TEMPLATE.exists():
+        shutil.copy2(ODB_EXTRACTOR_TEMPLATE, job_dir / "sclas_odb_extractor.py")
     return job_dir
 
 
@@ -648,6 +651,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.compare_metrics: List[dict] = []
         self.job_history_paths: List[Path] = []
         self.ui_language = "EN"
+        self.active_mesh_key = ""
         self.last_summary_data: dict = {}
         self.last_job_dir = ""
         self.setWindowTitle("HELIX Cable Analysis")
@@ -887,6 +891,14 @@ class SCLASRemoteGUI(QMainWindow):
             "or manual result_data.csv load.\n\n"
             "Expected contract: result_data.csv plus optional result_summary.json."
         )
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.FocusIn and hasattr(self, "mesh_guide_label"):
+            key = obj.property("mesh_key") if hasattr(obj, "property") else None
+            if key:
+                self.active_mesh_key = str(key)
+                self.update_mesh_guide()
+        return super().eventFilter(obj, event)
 
     def init_ui(self) -> None:
         main = QWidget()
@@ -1345,6 +1357,7 @@ class SCLASRemoteGUI(QMainWindow):
             "r_elem_inner_sheath": QSpinBox(),
             "r_elem_bedding": QSpinBox(),
             "r_elem_outer_sheath": QSpinBox(),
+            "filler_z_elem": QSpinBox(),
         }
         self.mesh_inputs["elem_type"].addItems(["C3D8R", "C3D4", "B31"])
         self.mesh_inputs["model_strategy"].addItems(["Periodic homogenized cell", "Full 3D segment", "Axisymmetric tension/torsion"])
@@ -1355,17 +1368,19 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_inputs["r_elem_inner_sheath"].setRange(1, 50); self.mesh_inputs["r_elem_inner_sheath"].setValue(3)
         self.mesh_inputs["r_elem_bedding"].setRange(1, 50); self.mesh_inputs["r_elem_bedding"].setValue(1)
         self.mesh_inputs["r_elem_outer_sheath"].setRange(1, 50); self.mesh_inputs["r_elem_outer_sheath"].setValue(3)
+        self.mesh_inputs["filler_z_elem"].setRange(2, 500); self.mesh_inputs["filler_z_elem"].setValue(40)
         mesh_tips = {
             "elem_type": "Abaqus element family requested in input_data.json.",
             "model_strategy": "Controls whether the backend should build a periodic cell, full segment, or axisymmetric study.",
             "armour_model": "Recommended representation for helical armour layers in Abaqus.",
             "contact_beta": "Tangential contact regularization value for stick-slip stability.",
-            "z_elem": "Preview and backend-requested divisions along the cable axis.",
-            "c_elem_core": "Circumferential divisions for sheath/core preview surfaces.",
-            "c_elem_armour": "Circumferential divisions for armour wire preview surfaces.",
-            "r_elem_inner_sheath": "Radial divisions through the inner sheath thickness.",
-            "r_elem_bedding": "Radial divisions through the bedding layer.",
-            "r_elem_outer_sheath": "Radial divisions through the outer sheath thickness.",
+            "z_elem": "z direction divisions along the cable axis for core, sheath, bedding, and armour.",
+            "c_elem_core": "theta direction divisions for core, sheath, and bedding preview surfaces.",
+            "c_elem_armour": "theta direction divisions around each armour wire.",
+            "r_elem_inner_sheath": "r direction divisions through the inner sheath thickness.",
+            "r_elem_bedding": "r direction divisions through the bedding layer.",
+            "r_elem_outer_sheath": "r direction divisions through the outer sheath thickness.",
+            "filler_z_elem": "z direction divisions for the special four-part filler profile.",
         }
         self.mesh_inputs["contact_beta"].setVisible(False)
         for key in ["elem_type", "model_strategy", "armour_model"]:
@@ -1377,6 +1392,7 @@ class SCLASRemoteGUI(QMainWindow):
             "r_elem_inner_sheath",
             "r_elem_bedding",
             "r_elem_outer_sheath",
+            "filler_z_elem",
         ]:
             self.mesh_inputs[key].setMinimumWidth(150)
         for key, tip in mesh_tips.items():
@@ -1389,12 +1405,13 @@ class SCLASRemoteGUI(QMainWindow):
         form.addRow("Abaqus element type", self.mesh_inputs["elem_type"])
         form.addRow("Strategy", self.mesh_inputs["model_strategy"])
         form.addRow("Armour model", self.mesh_inputs["armour_model"])
-        form.addRow("Axial divisions", self.mesh_inputs["z_elem"])
-        form.addRow("Core divisions", self.mesh_inputs["c_elem_core"])
-        form.addRow("Armour divisions", self.mesh_inputs["c_elem_armour"])
-        form.addRow("Inner sheath R divisions", self.mesh_inputs["r_elem_inner_sheath"])
-        form.addRow("Bedding R divisions", self.mesh_inputs["r_elem_bedding"])
-        form.addRow("Outer sheath R divisions", self.mesh_inputs["r_elem_outer_sheath"])
+        form.addRow("z direction divisions", self.mesh_inputs["z_elem"])
+        form.addRow("Core/Sheath theta divisions", self.mesh_inputs["c_elem_core"])
+        form.addRow("Armour theta divisions", self.mesh_inputs["c_elem_armour"])
+        form.addRow("Inner sheath r divisions", self.mesh_inputs["r_elem_inner_sheath"])
+        form.addRow("Bedding r divisions", self.mesh_inputs["r_elem_bedding"])
+        form.addRow("Outer sheath r divisions", self.mesh_inputs["r_elem_outer_sheath"])
+        form.addRow("Filler z divisions", self.mesh_inputs["filler_z_elem"])
         left.addLayout(form)
         self.btn_mesh = QPushButton("Generate mesh preview")
         self.btn_mesh.setObjectName("RunBtn")
@@ -1472,13 +1489,15 @@ class SCLASRemoteGUI(QMainWindow):
         mesh_scroll = self.scroll_panel(panel, min_width=440)
         layout.addWidget(self.panel_splitter(viewer_scroll, mesh_scroll, [1020, 440]), 1)
         self.add_page(tab)
-        for widget in self.mesh_inputs.values():
+        for key, widget in self.mesh_inputs.items():
+            widget.setProperty("mesh_key", key)
+            widget.installEventFilter(self)
             if isinstance(widget, QSpinBox):
-                widget.valueChanged.connect(self.update_mesh_guide)
+                widget.valueChanged.connect(lambda _value, k=key: self.activate_mesh_key(k))
             elif isinstance(widget, QComboBox):
-                widget.currentIndexChanged.connect(self.update_mesh_guide)
+                widget.currentIndexChanged.connect(lambda _index, k=key: self.activate_mesh_key(k))
             elif isinstance(widget, QLineEdit):
-                widget.textChanged.connect(self.update_mesh_guide)
+                widget.textChanged.connect(lambda _text, k=key: self.activate_mesh_key(k))
         self.update_mesh_guide()
 
     def build_analysis_tab(self) -> None:
@@ -2001,6 +2020,8 @@ class SCLASRemoteGUI(QMainWindow):
                 "inner_sheath_radial_divisions": int(self.mesh_inputs["r_elem_inner_sheath"].value()),
                 "bedding_radial_divisions": int(self.mesh_inputs["r_elem_bedding"].value()),
                 "outer_sheath_radial_divisions": int(self.mesh_inputs["r_elem_outer_sheath"].value()),
+                "filler_divisions": int(self.mesh_inputs["filler_z_elem"].value()),
+                "filler_z_divisions": int(self.mesh_inputs["filler_z_elem"].value()),
                 "radial_divisions_per_layer": int(self.mesh_inputs["r_elem_bedding"].value()),
                 "global_seed_size_mm": None,
                 "local_refinement_factor": 1.0,
@@ -2044,7 +2065,7 @@ class SCLASRemoteGUI(QMainWindow):
                     "Filler": {
                         "r": {"mode": "special_profile"},
                         "theta": {"mode": "special_profile"},
-                        "z": {"mode": "count", "count": int(self.mesh_inputs["z_elem"].value()), "size_mm": None},
+                        "z": {"mode": "count", "count": int(self.mesh_inputs["filler_z_elem"].value()), "size_mm": None},
                     },
                 },
             },
@@ -2334,6 +2355,7 @@ class SCLASRemoteGUI(QMainWindow):
             f"inner_sheath_radial_divisions: {mesh['inner_sheath_radial_divisions']}",
             f"bedding_radial_divisions: {mesh['bedding_radial_divisions']}",
             f"outer_sheath_radial_divisions: {mesh['outer_sheath_radial_divisions']}",
+            f"filler_z_divisions: {mesh['filler_z_divisions']}",
             "",
             "[Analysis Conditions]",
             f"effective_length_mm: {analysis['effective_length_mm']:.5g}",
@@ -3650,10 +3672,11 @@ class SCLASRemoteGUI(QMainWindow):
 
     def estimate_mesh_elements(self, dg: dict) -> int:
         z_elem = int(self.mesh_inputs["z_elem"].value())
+        filler_z_elem = int(self.mesh_inputs["filler_z_elem"].value())
         core_div = int(self.mesh_inputs["c_elem_core"].value())
         armour_div = int(self.mesh_inputs["c_elem_armour"].value())
         core_solids = 3 * z_elem * core_div * 2
-        filler_solids = 3 * z_elem * core_div
+        filler_solids = 4 * filler_z_elem * core_div
         sheath_solids = z_elem * core_div * 3
         armour_beams = z_elem * armour_div * (
             int(dg["inner_armour_wire_count"]) + int(dg["outer_armour_wire_count"])
@@ -3667,6 +3690,10 @@ class SCLASRemoteGUI(QMainWindow):
         self.lbl_mesh_ready.value_label.setText(self.ui_text("Preview ready"))
         self.lbl_mesh_elements.value_label.setText(f"{estimated:,}")
         self.lbl_mesh_contacts.value_label.setText("5")
+
+    def activate_mesh_key(self, key: str) -> None:
+        self.active_mesh_key = key
+        self.update_mesh_guide()
 
     def update_mesh_guide(self) -> None:
         if not hasattr(self, "mesh_guide_label"):
@@ -3685,11 +3712,22 @@ class SCLASRemoteGUI(QMainWindow):
         painter.setRenderHint(QPainter.Antialiasing, True)
 
         z_div = int(self.mesh_inputs["z_elem"].value()) if hasattr(self, "mesh_inputs") else 40
+        filler_z_div = int(self.mesh_inputs["filler_z_elem"].value()) if hasattr(self, "mesh_inputs") else z_div
         core_div = int(self.mesh_inputs["c_elem_core"].value()) if hasattr(self, "mesh_inputs") else 24
         armour_div = int(self.mesh_inputs["c_elem_armour"].value()) if hasattr(self, "mesh_inputs") else 8
         r_inner = int(self.mesh_inputs["r_elem_inner_sheath"].value()) if hasattr(self, "mesh_inputs") else 3
         r_bedding = int(self.mesh_inputs["r_elem_bedding"].value()) if hasattr(self, "mesh_inputs") else 1
         r_outer = int(self.mesh_inputs["r_elem_outer_sheath"].value()) if hasattr(self, "mesh_inputs") else 3
+        active_key = getattr(self, "active_mesh_key", "")
+        active_z = active_key in {"z_elem", "filler_z_elem"}
+        active_core_theta = active_key == "c_elem_core"
+        active_armour_theta = active_key == "c_elem_armour"
+        active_filler = active_key == "filler_z_elem"
+        active_r_key = {
+            "r_elem_inner_sheath": "inner",
+            "r_elem_bedding": "bedding",
+            "r_elem_outer_sheath": "outer",
+        }.get(active_key, "")
         try:
             dg = self.parse_geometry()
         except Exception:
@@ -3718,13 +3756,15 @@ class SCLASRemoteGUI(QMainWindow):
         painter.setBrush(QColor("#dbeafe"))
         painter.drawEllipse(x0 - 18, y0, 36, side_h)
         painter.drawEllipse(x0 + side_w - 18, y0, 36, side_h)
-        line_count = min(z_div, 32)
-        painter.setPen(QColor("#2f80ed"))
+        displayed_z_div = filler_z_div if active_filler else z_div
+        line_count = min(displayed_z_div, 32)
+        painter.setPen(QPen(QColor("#1d4ed8" if active_z else "#2f80ed"), 2.4 if active_z else 1.0))
         for i in range(1, line_count):
             x = x0 + int(side_w * i / line_count)
             painter.drawLine(x, y0 + 6, x, y0 + side_h - 6)
         painter.setPen(QColor("#0f3f7a"))
-        painter.drawText(x0 + 6, y0 - 12, f"length direction: {z_div} divisions")
+        z_label = "filler z direction" if active_filler else "z direction"
+        painter.drawText(x0 + 6, y0 - 12, f"{z_label}: {displayed_z_div} divisions")
         painter.drawText(x0 + 8, y0 + side_h + 24, "smaller length size = more axial divisions")
 
         # Geometry-based section guide. This is generated from GUI values only,
@@ -3746,12 +3786,24 @@ class SCLASRemoteGUI(QMainWindow):
                 painter.setPen(QPen(QColor(color), pen_width))
                 painter.drawEllipse(cx - rr, cy - rr, rr * 2, rr * 2)
 
-            def draw_ring_mesh(inner_r: float, outer_r: float, radial_count: int, theta_count: int, color: str) -> None:
+            def draw_ring_mesh(
+                inner_r: float,
+                outer_r: float,
+                radial_count: int,
+                theta_count: int,
+                color: str,
+                radial_highlight: bool = False,
+                theta_highlight: bool = False,
+            ) -> None:
                 radial_count = max(1, radial_count)
                 theta_count = max(6, min(theta_count, 72))
-                painter.setPen(QPen(QColor(color), 1.0))
                 for j in range(radial_count + 1):
-                    draw_circle(inner_r + (outer_r - inner_r) * j / radial_count, color)
+                    draw_circle(
+                        inner_r + (outer_r - inner_r) * j / radial_count,
+                        color,
+                        2.5 if radial_highlight else 1.0,
+                    )
+                painter.setPen(QPen(QColor(color), 2.2 if theta_highlight else 1.0))
                 for i in range(theta_count):
                     angle = 2.0 * math.pi * i / theta_count
                     painter.drawLine(
@@ -3761,10 +3813,10 @@ class SCLASRemoteGUI(QMainWindow):
                         sy(outer_r * math.sin(angle)),
                     )
 
-            def draw_wire_ring(center_r: float, wire_r: float, count: int, color: str) -> None:
+            def draw_wire_ring(center_r: float, wire_r: float, count: int, color: str, theta_highlight: bool = False) -> None:
                 count = max(1, min(count, 96))
                 spoke_count = max(4, min(armour_div, 16))
-                painter.setPen(QPen(QColor(color), 1.0))
+                painter.setPen(QPen(QColor(color), 2.0 if theta_highlight else 1.0))
                 for i in range(count):
                     angle = 2.0 * math.pi * i / count
                     wx = center_r * math.cos(angle)
@@ -3786,12 +3838,15 @@ class SCLASRemoteGUI(QMainWindow):
                 r_outer,
                 core_div,
                 "#2f80ed",
+                radial_highlight=active_r_key == "outer",
+                theta_highlight=active_core_theta,
             )
             draw_wire_ring(
                 float(dg["outer_armour_center_radius_mm"]),
                 float(dg["outer_armour_wire_radius_mm"]),
                 int(dg["outer_armour_wire_count"]),
                 "#f06292",
+                theta_highlight=active_armour_theta,
             )
             draw_ring_mesh(
                 float(dg["inner_armour_outer_radius_mm"]),
@@ -3799,12 +3854,15 @@ class SCLASRemoteGUI(QMainWindow):
                 r_bedding,
                 core_div,
                 "#89bf68",
+                radial_highlight=active_r_key == "bedding",
+                theta_highlight=active_core_theta,
             )
             draw_wire_ring(
                 float(dg["inner_armour_center_radius_mm"]),
                 float(dg["inner_armour_wire_radius_mm"]),
                 int(dg["inner_armour_wire_count"]),
                 "#c084fc",
+                theta_highlight=active_armour_theta,
             )
             draw_ring_mesh(
                 float(dg["inner_sheath_inner_radius_mm"]),
@@ -3812,15 +3870,17 @@ class SCLASRemoteGUI(QMainWindow):
                 r_inner,
                 core_div,
                 "#5fd4d4",
+                radial_highlight=active_r_key == "inner",
+                theta_highlight=active_core_theta,
             )
-            draw_circle(float(dg["filler_outer_radius_mm"]), "#fbbf24", 1.2)
+            draw_circle(float(dg["filler_outer_radius_mm"]), "#fbbf24", 2.6 if active_filler else 1.2)
 
             core_theta = max(8, min(core_div, 48))
             for i in range(3):
                 angle = 2.0 * math.pi * i / 3.0 - math.pi / 2.0
                 core_x = float(dg["core_center_radius_mm"]) * math.cos(angle)
                 core_y = float(dg["core_center_radius_mm"]) * math.sin(angle)
-                painter.setPen(QPen(QColor("#ff8a2a"), 1.0))
+                painter.setPen(QPen(QColor("#ff8a2a"), 2.0 if active_core_theta else 1.0))
                 for radius_key in ["core_outer_radius_mm", "insulation_radius_mm", "conductor_radius_mm"]:
                     rr = int(round(float(dg[radius_key]) * scale))
                     painter.drawEllipse(sx(core_x) - rr, sy(core_y) - rr, rr * 2, rr * 2)
@@ -3925,6 +3985,7 @@ class SCLASRemoteGUI(QMainWindow):
                 add_segments(segments, edge_color)
 
             z_rows = self.mesh_inputs["z_elem"].value()
+            filler_z_rows = self.mesh_inputs["filler_z_elem"].value()
             core_cols = self.mesh_inputs["c_elem_core"].value()
             armour_cols = self.mesh_inputs["c_elem_armour"].value()
             add_ring_mesh(
@@ -3984,6 +4045,7 @@ class SCLASRemoteGUI(QMainWindow):
                 self.inp_mesh_summary.setPlainText(
                     "Generated from GUI values only.\n"
                     f"Axial divisions: {z_rows}\n"
+                    f"Filler z divisions: {filler_z_rows}\n"
                     f"Core/Sheath circumferential divisions: {core_cols}\n"
                     f"Armour wire divisions: {armour_cols}"
                 )

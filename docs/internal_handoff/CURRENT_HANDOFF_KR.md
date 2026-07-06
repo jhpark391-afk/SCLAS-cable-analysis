@@ -1,6 +1,23 @@
 # CURRENT_HANDOFF_KR (현재 인수인계 및 개발 현황)
 
-최종 갱신일: 2026-06-16 KST
+최종 갱신일: 2026-07-06 KST
+
+## 2026-07-06 Windows/Abaqus Lab PC 업데이트
+
+* **SmallSmoke bridge check 통과**:
+  * 최신 검증 폴더: `jobs\SCLAS_jobs\small_smoke_20260706_222907`
+  * `result_summary.json.source = SCLAS_ABAQUS_ODB_EXTRACTOR`
+  * `odb_extraction.status = extracted`, `rows_written = 25`
+* **CurveV0 endpoint sweep 통과**:
+  * 최신 parent 폴더: `jobs\SCLAS_jobs\curve_v0_sweep_20260706_223250`
+  * factor: `-0.1, -0.05, 0, 0.05, 0.1`
+  * parent `result_data.csv`에 5개 data row 생성
+  * parent `result_summary.json.source = SCLAS_CURVE_V0_ENDPOINT_SWEEP`
+  * `endpoint_sweep_validation.all_child_jobs_validated = true`
+  * 5개 child job 모두 `SCLAS_ABAQUS_ODB_EXTRACTOR`, `extracted`, `rows_written = 25`
+* **해석 의미 주의사항**:
+  * 이번 성공은 GUI-Abaqus bridge와 endpoint sweep 계약 검증이다.
+  * reduced smoke 설정은 최종 연구용 contact fidelity를 줄인 검증 모드이므로, 최종 보정 연구곡선으로 보고하지 않는다.
 
 ## 📌 1. 저장소 정보 (Repository)
 

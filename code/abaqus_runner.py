@@ -8,6 +8,16 @@ from decimal import Decimal
 from math import sqrt, asin, pi, tan
 
 try:
+    import importlib.util as importlib_util
+except Exception:
+    importlib_util = None
+
+try:
+    import imp as imp_loader
+except Exception:
+    imp_loader = None
+
+try:
     from part import *
     from material import *
     from section import *
@@ -57,6 +67,98 @@ def write_result_csv(path, curvature, moment_kn_m):
         writer.writerow(["curvature_1_per_m", "moment_kn_m"])
         for k, moment in zip(curvature, moment_kn_m):
             writer.writerow(["{0:.12g}".format(k), "{0:.12g}".format(moment)])
+
+
+def merge_odb_extraction_summary(job_dir, extraction_summary):
+    summary_path = os.path.join(path_text(job_dir), "result_summary.json")
+    summary = {}
+    if os.path.exists(summary_path):
+        try:
+            summary = load_payload(summary_path)
+        except Exception:
+            summary = {}
+    summary["odb_extraction"] = extraction_summary
+    if extraction_summary.get("status") != "extracted":
+        summary.setdefault("source", "SCLAS_ABAQUS_RUNNER_PLACEHOLDER")
+        summary["status"] = "odb_extraction_incomplete"
+        summary["note"] = "Abaqus runner did not produce an ODB-backed result_data.csv."
+    write_json(summary_path, summary)
+
+
+def load_python_module_from_path(module_name, module_path):
+    if importlib_util is not None:
+        spec = importlib_util.spec_from_file_location(module_name, module_path)
+        module = importlib_util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    if imp_loader is not None:
+        return imp_loader.load_source(module_name, module_path)
+    raise RuntimeError("No Python source module loader is available")
+
+
+def run_odb_extraction(job_dir, odb_path, input_path):
+    summary_path = os.path.join(path_text(job_dir), "odb_extraction_summary.json")
+    if not os.path.exists(path_text(odb_path)):
+        summary = {
+            "status": "missing_odb",
+            "reason": "Abaqus job completed but ODB file was not found.",
+            "odb_path": path_text(odb_path),
+            "created_at": timestamp_seconds(),
+        }
+        write_json(summary_path, summary)
+        merge_odb_extraction_summary(job_dir, summary)
+        return 1
+
+    try:
+        runner_path = __file__
+    except NameError:
+        runner_path = sys.argv[0] if sys.argv else os.getcwd()
+    here = os.path.dirname(os.path.abspath(runner_path))
+    candidates = [
+        os.path.join(path_text(job_dir), "sclas_odb_extractor.py"),
+        os.path.join(here, "sclas_odb_extractor.py"),
+    ]
+    extractor_path = None
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            extractor_path = candidate
+            break
+    if extractor_path is None:
+        summary = {
+            "status": "extractor_missing",
+            "reason": "sclas_odb_extractor.py was not found in the job folder or runner folder.",
+            "odb_path": path_text(odb_path),
+            "created_at": timestamp_seconds(),
+        }
+        write_json(summary_path, summary)
+        merge_odb_extraction_summary(job_dir, summary)
+        return 1
+
+    try:
+        module = load_python_module_from_path("sclas_odb_extractor_runtime", extractor_path)
+        return int(module.main([
+            "sclas_odb_extractor.py",
+            path_text(odb_path),
+            "--job-dir",
+            path_text(job_dir),
+            "--input-data",
+            path_text(input_path),
+        ]))
+    except Exception as exc:
+        summary = {
+            "status": "failed",
+            "reason": str(exc),
+            "traceback": traceback.format_exc(),
+            "odb_path": path_text(odb_path),
+            "created_at": timestamp_seconds(),
+        }
+        write_json(summary_path, summary)
+        merge_odb_extraction_summary(job_dir, summary)
+        return 1
+
+
+def latest_reference_point_key(assembly):
+    return sorted(assembly.referencePoints.keys())[-1]
 
 
 def parse_input_path(argv):
@@ -196,6 +298,8 @@ def normalize_payload(data):
     mesh.setdefault("inner_sheath_radial_divisions", mesh.get("radial_divisions_per_layer", 3))
     mesh.setdefault("bedding_radial_divisions", mesh.get("radial_divisions_per_layer", 1))
     mesh.setdefault("outer_sheath_radial_divisions", mesh.get("radial_divisions_per_layer", 3))
+    mesh.setdefault("filler_z_divisions", mesh.get("filler_divisions", mesh.get("axial_divisions", 40)))
+    mesh.setdefault("filler_divisions", mesh.get("filler_z_divisions", 40))
     mesh.setdefault("requested_element_type", mesh.get("solid_element_type", "C3D8R"))
     mesh.setdefault("global_seed_size_mm", None)
     mesh.setdefault("contact_regularization_beta", 0.001)
@@ -210,6 +314,10 @@ def normalize_payload(data):
     ac.setdefault("friction_coefficient", 0.22)
     ac.setdefault("max_curvature_1_per_m", 0.08)
     ac.setdefault("curve_factors", [-0.1, -0.05, 0.0, 0.05, 0.1])
+    curve_factors = ac.get("curve_factors", [-0.1, -0.05, 0.0, 0.05, 0.1])
+    if not isinstance(curve_factors, (list, tuple)):
+        curve_factors = [curve_factors]
+    ac["curve_factors"] = [as_float(factor, 0.0) for factor in curve_factors]
     ac.setdefault("loading_cycles", 1)
     ac.setdefault("solver_steps", 500)
     ac.setdefault("contact_regularization_beta", mesh.get("contact_regularization_beta", 0.001))
@@ -434,6 +542,7 @@ def build_abaqus_model(data, job_dir):
 
     field_output   = out['field']
     history_output = out['history']
+    simple_bending_smoke = bool(msh.get('lab_smoke_reduced_mesh', False))
 
     L         = Decimal(str(depth))
     coef_dof2 = float(L * L / 2)
@@ -747,10 +856,10 @@ def build_abaqus_model(data, job_dir):
     m.parts['Filler'].Surface(name='FO', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#8 ]', ), ))
     m.parts['Filler'].Surface(name='FL', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#20 ]', ), ))
     m.parts['Filler'].Surface(name='FR', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#2 ]', ), ))
-    m.parts['InnerArmour'].Surface(name='IAS', side1Faces=m.parts['InnerArmour'].faces.getSequenceFromMask(('[#1 ]', ), ))
+    m.parts['InnerArmour'].Surface(name='IAS', side1Faces=m.parts['InnerArmour'].faces[:])
     m.parts['InnerSheath'].Surface(name='ISO', side1Faces=m.parts['InnerSheath'].faces.getSequenceFromMask(('[#12088 ]', ), ))
     m.parts['InnerSheath'].Surface(name='IAI', side1Faces=m.parts['InnerSheath'].faces.getSequenceFromMask(('[#28110 ]', ), ))
-    m.parts['OuterArmour'].Surface(name='OAS', side1Faces=m.parts['OuterArmour'].faces.getSequenceFromMask(('[#1 ]', ), ))
+    m.parts['OuterArmour'].Surface(name='OAS', side1Faces=m.parts['OuterArmour'].faces[:])
     m.parts['OuterSheath'].Surface(name='OSI', side1Faces=m.parts['OuterSheath'].faces.getSequenceFromMask(('[#28110 ]', ), ))
     ra.regenerate()
 
@@ -771,33 +880,52 @@ def build_abaqus_model(data, job_dir):
     m.StdInitialization(name='CInit-1')
     m.ContactStd(createStepName='Initial', name='Int-1')
 
-    contact_pairs = []
-    for i in range(1, 4):
-        next1 = i % 3 + 1
-        next2 = (i + 1) % 3 + 1
-        contact_pairs.append((ra.instances['Core-%d' % i].surfaces['CO'],
-                               ra.instances['Filler-%d' % next1].surfaces['FR']))
-        contact_pairs.append((ra.instances['Core-%d' % i].surfaces['CO'],
-                               ra.instances['Filler-%d' % next2].surfaces['FL']))
-    for i in range(1, 4):
-        contact_pairs.append((ra.instances['InnerSheath'].surfaces['IAI'],
-                               ra.instances['Core-%d' % i].surfaces['CO']))
-        contact_pairs.append((ra.instances['InnerSheath'].surfaces['IAI'],
-                               ra.instances['Filler-%d' % i].surfaces['FO']))
-    for i in range(1, int(NoIA)+1):
-        contact_pairs.append((ra.instances['InnerSheath'].surfaces['ISO'],
-                               ra.instances['InnerArmour-%d' % i].surfaces['IAS']))
-        contact_pairs.append((ra.instances['Bedding'].surfaces['BeddingI'],
-                               ra.instances['InnerArmour-%d' % i].surfaces['IAS']))
-    for i in range(1, int(NoOA)+1):
-        contact_pairs.append((ra.instances['Bedding'].surfaces['BeddingO'],
-                               ra.instances['OuterArmour-%d' % i].surfaces['OAS']))
-        contact_pairs.append((ra.instances['OuterSheath'].surfaces['OSI'],
-                               ra.instances['OuterArmour-%d' % i].surfaces['OAS']))
+    def part_has_mesh(part_name):
+        try:
+            part = m.parts[part_name]
+            return len(part.elements) > 0 and len(part.faces) > 0
+        except Exception:
+            return False
 
-    m.interactions['Int-1'].includedPairs.setValuesInStep(
-        addPairs=tuple(contact_pairs), stepName='Initial')
-    ra.regenerate()
+    inner_armour_contact_available = part_has_mesh('InnerArmour')
+    outer_armour_contact_available = part_has_mesh('OuterArmour')
+    armour_contact_pair_status = 'included'
+    if not inner_armour_contact_available or not outer_armour_contact_available:
+        armour_contact_pair_status = 'skipped_empty_armour_surfaces'
+
+    contact_pair_status = 'included'
+    contact_pairs = []
+    if simple_bending_smoke:
+        contact_pair_status = 'skipped_reduced_smoke'
+    else:
+        for i in range(1, 4):
+            next1 = i % 3 + 1
+            next2 = (i + 1) % 3 + 1
+            contact_pairs.append((ra.instances['Core-%d' % i].surfaces['CO'],
+                                   ra.instances['Filler-%d' % next1].surfaces['FR']))
+            contact_pairs.append((ra.instances['Core-%d' % i].surfaces['CO'],
+                                   ra.instances['Filler-%d' % next2].surfaces['FL']))
+        for i in range(1, 4):
+            contact_pairs.append((ra.instances['InnerSheath'].surfaces['IAI'],
+                                   ra.instances['Core-%d' % i].surfaces['CO']))
+            contact_pairs.append((ra.instances['InnerSheath'].surfaces['IAI'],
+                                   ra.instances['Filler-%d' % i].surfaces['FO']))
+        if inner_armour_contact_available:
+            for i in range(1, int(NoIA)+1):
+                contact_pairs.append((ra.instances['InnerSheath'].surfaces['ISO'],
+                                       ra.instances['InnerArmour-%d' % i].surfaces['IAS']))
+                contact_pairs.append((ra.instances['Bedding'].surfaces['BeddingI'],
+                                       ra.instances['InnerArmour-%d' % i].surfaces['IAS']))
+        if outer_armour_contact_available:
+            for i in range(1, int(NoOA)+1):
+                contact_pairs.append((ra.instances['Bedding'].surfaces['BeddingO'],
+                                       ra.instances['OuterArmour-%d' % i].surfaces['OAS']))
+                contact_pairs.append((ra.instances['OuterSheath'].surfaces['OSI'],
+                                       ra.instances['OuterArmour-%d' % i].surfaces['OAS']))
+
+        m.interactions['Int-1'].includedPairs.setValuesInStep(
+            addPairs=tuple(contact_pairs), stepName='Initial')
+        ra.regenerate()
 
     front_seq = None
     back_seq = None
@@ -813,11 +941,11 @@ def build_abaqus_model(data, job_dir):
                 back_seq = single if back_seq is None else back_seq + single
 
     ra.ReferencePoint(point=(0.0, 0.0, 0.0))
-    rp2_key = ra.referencePoints.keys()[-1]
+    rp2_key = latest_reference_point_key(ra)
     ra.ReferencePoint(point=(0.0, 0.0, depth))
-    rp1_key = ra.referencePoints.keys()[-1]
+    rp1_key = latest_reference_point_key(ra)
     ra.ReferencePoint(point=(float(OROS) + 30.0, 0.0, 0.0))
-    rp3_key = ra.referencePoints.keys()[-1]
+    rp3_key = latest_reference_point_key(ra)
 
     ra.Set(name='m_Set-1', referencePoints=(ra.referencePoints[rp1_key], ))
     ra.Set(name='m_Set-2', referencePoints=(ra.referencePoints[rp2_key], ))
@@ -851,6 +979,16 @@ def build_abaqus_model(data, job_dir):
     m.constraints['DOF3'].suppress()
     m.constraints['DOF5'].suppress()
     m.constraints['DOF6'].suppress()
+    boundary_condition_mode = 'periodic_equation_external_rp'
+    if simple_bending_smoke:
+        m.constraints['DOF2'].suppress()
+        m.constraints['DOF4'].suppress()
+        boundary_condition_mode = 'reduced_smoke_direct_end_rotation'
+        m.DisplacementBC(amplitude=UNSET, createStepName='Initial',
+            distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
+            name='BC-Smoke-FixedFront', region=ra.sets['m_Set-2'],
+            u1=0.0, u2=0.0, u3=0.0, ur1=0.0, ur2=0.0, ur3=0.0)
+
 
     m.StaticStep(adaptiveDampingRatio=0.05,
         continueDampingFactors=False, initialInc=initialInc, maxInc=maxInc,
@@ -858,15 +996,19 @@ def build_abaqus_model(data, job_dir):
         stabilizationMagnitude=stabilization,
         stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
 
-    ra.Surface(name='Surf-3', side1Faces=
-        ra.instances['OuterSheath'].faces.getSequenceFromMask(('[#12088 ]', ), ))
+    pressure_load_status = 'skipped_zero_magnitude'
+    if abs(float(pressure)) > 1.0e-12:
+        ra.Surface(name='Surf-3', side1Faces=
+            ra.instances['OuterSheath'].faces.getSequenceFromMask(('[#12088 ]', ), ))
 
-    m.Pressure(amplitude=UNSET, createStepName='Pressure',
-        distributionType=UNIFORM, field='', magnitude=pressure, name='Load-1',
-        region=ra.surfaces['Surf-3'])
+        m.Pressure(amplitude=UNSET, createStepName='Pressure',
+            distributionType=UNIFORM, field='', magnitude=pressure, name='Load-1',
+            region=ra.surfaces['Surf-3'])
+        pressure_load_status = 'applied'
 
     prev_step = 'Pressure'
     step_count = 0
+    last_smoke_bc = None
     for factor in curve_factors:
         u1_val = max_curvature * float(factor) * float(depth) / 1000.0
         for cycle in range(int(loading_cycles)):
@@ -878,34 +1020,79 @@ def build_abaqus_model(data, job_dir):
                 maxNumInc=maxNumInc, name=pos_name, previous=prev_step,
                 stabilizationMagnitude=stabilization,
                 stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
-            m.DisplacementBC(amplitude=UNSET, createStepName=pos_name,
-                distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
-                name='BC-%s' % pos_name, region=ra.sets['RP'],
-                u1=u1_val, u2=UNSET, u3=UNSET, ur1=UNSET, ur2=UNSET, ur3=UNSET)
+            if simple_bending_smoke:
+                if last_smoke_bc is not None:
+                    m.boundaryConditions[last_smoke_bc].deactivate(pos_name)
+                m.DisplacementBC(amplitude=UNSET, createStepName=pos_name,
+                    distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
+                    name='BC-%s' % pos_name, region=ra.sets['m_Set-1'],
+                    u1=UNSET, u2=UNSET, u3=UNSET, ur1=UNSET, ur2=u1_val, ur3=UNSET)
+                last_smoke_bc = 'BC-%s' % pos_name
+            else:
+                m.DisplacementBC(amplitude=UNSET, createStepName=pos_name,
+                    distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
+                    name='BC-%s' % pos_name, region=ra.sets['RP'],
+                    u1=u1_val, u2=UNSET, u3=UNSET, ur1=UNSET, ur2=UNSET, ur3=UNSET)
 
             m.StaticStep(adaptiveDampingRatio=0.05,
                 continueDampingFactors=False, initialInc=initialInc, maxInc=maxInc,
                 maxNumInc=maxNumInc, name=neg_name, previous=pos_name,
                 stabilizationMagnitude=stabilization,
                 stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
-            m.DisplacementBC(amplitude=UNSET, createStepName=neg_name,
-                distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
-                name='BC-%s' % neg_name, region=ra.sets['RP'],
-                u1=-u1_val, u2=UNSET, u3=UNSET, ur1=UNSET, ur2=UNSET, ur3=UNSET)
+            if simple_bending_smoke:
+                if last_smoke_bc is not None:
+                    m.boundaryConditions[last_smoke_bc].deactivate(neg_name)
+                m.DisplacementBC(amplitude=UNSET, createStepName=neg_name,
+                    distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
+                    name='BC-%s' % neg_name, region=ra.sets['m_Set-1'],
+                    u1=UNSET, u2=UNSET, u3=UNSET, ur1=UNSET, ur2=-u1_val, ur3=UNSET)
+                last_smoke_bc = 'BC-%s' % neg_name
+            else:
+                m.DisplacementBC(amplitude=UNSET, createStepName=neg_name,
+                    distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
+                    name='BC-%s' % neg_name, region=ra.sets['RP'],
+                    u1=-u1_val, u2=UNSET, u3=UNSET, ur1=UNSET, ur2=UNSET, ur3=UNSET)
 
             prev_step = neg_name
         step_count += 1
 
+    contact_vars = ['CSTRESS', 'CDISP', 'CPRESS', 'COPEN', 'CSLIP1', 'CSLIP2', 'CSHEAR1', 'CSHEAR2']
+    field_vars = [str(v) for v in field_output if str(v) not in contact_vars]
+    contact_out_vars = [str(v) for v in field_output if str(v) in contact_vars]
+    contact_output_status = 'not_requested'
+
     m.fieldOutputRequests['F-Output-1'].setValues(
-        variables=tuple(str(v) for v in field_output))
+            variables=tuple(field_vars))
+
+    if contact_out_vars:
+        contact_output_status = 'requested'
+        try:
+            m.FieldOutputRequest(name='F-Output-Contact',
+                createStepName='Pressure',
+                variables=tuple(contact_out_vars),
+                contactOutputPosition=ELEMENT_FACE)
+            contact_output_status = 'requested_element_face'
+        except TypeError:
+            try:
+                m.FieldOutputRequest(name='F-Output-Contact',
+                    createStepName='Pressure',
+                    variables=tuple(contact_out_vars))
+                contact_output_status = 'requested_default_position'
+            except Exception as exc:
+                contact_output_status = 'skipped_invalid_variables: {0}'.format(exc)
+        except Exception as exc:
+            contact_output_status = 'skipped_invalid_variables: {0}'.format(exc)
+
+    history_region = ra.sets['m_Set-1'] if simple_bending_smoke else ra.sets['RP']
     m.HistoryOutputRequest(createStepName='Pressure', name='H-Output-1',
-        rebar=EXCLUDE, region=ra.sets['RP'], sectionPoints=DEFAULT,
+        rebar=EXCLUDE, region=history_region, sectionPoints=DEFAULT,
         variables=tuple(str(v) for v in history_output))
 
     old_cwd = os.getcwd()
     os.chdir(str(job_dir))
     inp_path = os.path.join(path_text(job_dir), job_name + '.inp')
     cae_path = os.path.join(path_text(job_dir), job_name + '.cae')
+    odb_path = os.path.join(path_text(job_dir), job_name + '.odb')
     try:
         mdb.Job(atTime=None, contactPrint=OFF, description='', echoPrint=OFF,
             explicitPrecision=SINGLE, getMemoryFromAnalysis=True, historyPrint=OFF,
@@ -914,14 +1101,24 @@ def build_abaqus_model(data, job_dir):
             numCpus=12, numDomains=12, numGPUs=0, queue=None, resultsFormat=ODB,
             scratch='', type=ANALYSIS, userSubroutine='', waitHours=0, waitMinutes=0)
         mdb.jobs[job_name].writeInput(consistencyChecking=OFF)
+        mdb.jobs[job_name].submit(consistencyChecking=OFF)
+        mdb.jobs[job_name].waitForCompletion()
         mdb.saveAs(pathName=str(cae_path))
     finally:
         os.chdir(old_cwd)
 
-    files = [os.path.basename(p) for p in [inp_path, cae_path] if os.path.exists(p)]
+    files = [os.path.basename(p) for p in [inp_path, cae_path, odb_path] if os.path.exists(p)]
     return {
-        'status': 'abaqus_inp_created',
+        'status': 'abaqus_analysis_complete' if os.path.exists(odb_path) else 'abaqus_analysis_finished_no_odb',
         'job_name': job_name,
+        'odb_path': odb_path,
+        'odb_exists': os.path.exists(odb_path),
+        'pressure_load_status': pressure_load_status,
+        'contact_output_status': contact_output_status,
+        'contact_output_variables': contact_out_vars,
+        'armour_contact_pair_status': armour_contact_pair_status,
+        'contact_pair_status': contact_pair_status,
+        'boundary_condition_mode': boundary_condition_mode,
         'files': files,
         'created_at': timestamp_seconds(),
     }
@@ -949,6 +1146,11 @@ def main(argv):
                 fallback_summary(data, result, [0.0], [0.0]),
             )
             print("Wrote placeholder result_data.csv")
+            extraction_status = run_odb_extraction(job_dir, result.get('odb_path', ''), input_path)
+            if extraction_status == 0:
+                print("Updated result_data.csv from Abaqus ODB")
+            else:
+                print("ODB extraction did not update result_data.csv")
         else:
             curvature, moment = fallback_result_curve(data)
             manifest = fallback_manifest(data)
@@ -963,14 +1165,20 @@ def main(argv):
 
     except Exception as exc:
         error_detail = "{0}\n{1}".format(str(exc), traceback.format_exc())
-        write_json(os.path.join(job_dir, 'abaqus_mesh_manifest.json'), {
+        failed_manifest = {
             'status': 'failed',
             'error': str(exc),
             'detail': error_detail,
             'created_at': timestamp_seconds(),
-        })
+        }
+        write_json(os.path.join(job_dir, 'abaqus_mesh_manifest.json'), failed_manifest)
         sys.stderr.write("Abaqus model build failed: {0}\n".format(exc))
         write_result_csv(result_csv, [0.0], [0.0])
+        failure_summary = fallback_summary(data, failed_manifest, [0.0], [0.0])
+        failure_summary["source"] = "SCLAS_ABAQUS_RUNNER_PLACEHOLDER"
+        failure_summary["status"] = "abaqus_model_build_failed"
+        failure_summary["error"] = str(exc)
+        write_json(os.path.join(job_dir, 'result_summary.json'), failure_summary)
         print("Wrote placeholder result_data.csv")
         return 1
 

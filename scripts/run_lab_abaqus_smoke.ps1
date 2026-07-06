@@ -74,6 +74,26 @@ function Show-ManifestSummary {
     }
 }
 
+function Test-OdbExtractedResult {
+    param([string]$ResolvedJobDir)
+    $summaryPath = Join-Path $ResolvedJobDir "result_summary.json"
+    if (-not (Test-Path $summaryPath)) {
+        return $false
+    }
+    try {
+        $summary = Get-Content $summaryPath -Raw | ConvertFrom-Json
+    } catch {
+        return $false
+    }
+    if ($summary.source -ne "SCLAS_ABAQUS_ODB_EXTRACTOR") {
+        return $false
+    }
+    if (-not $summary.odb_extraction -or $summary.odb_extraction.status -ne "extracted") {
+        return $false
+    }
+    return ([int]$summary.odb_extraction.rows_written -ge 2)
+}
+
 function Find-NormalPython {
     param([string]$ProjectRoot)
     $venvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
@@ -269,6 +289,7 @@ function New-SmallSmokeJob {
     if ($UseCurveV0) {
         Set-JsonObjectProperty $analysis "abaqus_curve_v0_endpoint" $true
         Set-JsonObjectProperty $analysis "abaqus_curve_v0_endpoint_factor" ([double]$CurveV0CurvatureScale)
+        Set-JsonObjectProperty $analysis "curve_factors" ([double[]]@([double]$CurveV0CurvatureScale))
     } else {
         Set-JsonObjectProperty $analysis "abaqus_curve_v0_endpoint" $false
     }
@@ -354,6 +375,11 @@ if (-not $SkipGeneration) {
     }
     Get-Content (Join-Path $JobDir "abaqus_stdout.txt") -Raw
     Show-ManifestSummary $JobDir
+    if ((-not $GenerateOnly) -and (Test-OdbExtractedResult $JobDir)) {
+        Write-Section "Solver and ODB extraction already completed"
+        Write-Host "The noGUI Abaqus runner produced an ODB-backed result_data.csv; skipping duplicate abaqus job submit."
+        exit 0
+    }
 }
 
 $inp = Get-ChildItem $JobDir -Filter "*.inp" |

@@ -118,15 +118,30 @@ def summarize_curve_rows(rows):
     return summary
 
 
-def build_result_quality(extraction_summary):
+def build_result_quality(extraction_summary, existing_summary=None):
     rows = int(extraction_summary.get("rows_written") or 0)
     status = extraction_summary.get("status")
+    existing_summary = existing_summary or {}
+    mesh_status = existing_summary.get("mesh_status")
+    if not isinstance(mesh_status, dict):
+        mesh_status = {}
+    is_reduced_smoke = (
+        mesh_status.get("contact_pair_status") == "skipped_reduced_smoke"
+        or mesh_status.get("boundary_condition_mode") == "reduced_smoke_direct_end_rotation"
+    )
     if status != "extracted":
         return {
             "curve_class": "odb_extraction_failed",
             "is_research_curve": False,
             "backend_readiness_status": "odb_extraction_failed",
             "next_step": "Fix ODB reference-point output extraction before using Abaqus results in the GUI.",
+        }
+    if is_reduced_smoke and rows >= 2:
+        return {
+            "curve_class": "multi_point_odb_smoke" if rows >= 5 else "two_point_odb_smoke",
+            "is_research_curve": False,
+            "backend_readiness_status": "abaqus_odb_bridge_smoke",
+            "next_step": "Use this as an Abaqus bridge and endpoint-sweep contract check; re-enable contact and periodic research boundary conditions for final validation.",
         }
     if rows >= 5:
         return {
@@ -160,7 +175,7 @@ def update_result_summary(job_dir, extraction_summary):
     curve_summary = extraction_summary.get("curve_summary")
     if isinstance(curve_summary, dict):
         summary["curve_summary"] = curve_summary
-    quality = build_result_quality(extraction_summary)
+    quality = build_result_quality(extraction_summary, summary)
     summary["abaqus_result_quality"] = quality
     if extraction_summary.get("status") == "extracted":
         summary["source"] = "SCLAS_ABAQUS_ODB_EXTRACTOR"
@@ -554,23 +569,33 @@ def extract_from_history(step, effective_length_m):
     candidates = preferred_regions + fallback_regions
     if not candidates:
         return [], None
-    region_name, region, ur_key, rm_key = candidates[0]
-    ur_data = list(region.historyOutputs[ur_key].data)
-    rm_data = list(region.historyOutputs[rm_key].data)
-    count = min(len(ur_data), len(rm_data))
-    rows = []
-    for i in range(count):
-        rotation = float(ur_data[i][1])
-        moment_n_mm = float(rm_data[i][1])
-        curvature = rotation / effective_length_m if effective_length_m else rotation
-        moment_kn_m = moment_n_mm * 1.0e-6
-        rows.append((curvature, moment_kn_m))
-    return rows, {
-        "method": "history",
-        "history_region": region_name,
-        "rotation_output": ur_key,
-        "moment_output": rm_key,
-    }
+    for region_name, region, ur_key, rm_key in candidates:
+        try:
+            ur_raw = region.historyOutputs[ur_key].data
+            rm_raw = region.historyOutputs[rm_key].data
+        except Exception:
+            continue
+        if ur_raw is None or rm_raw is None:
+            continue
+        ur_data = list(ur_raw)
+        rm_data = list(rm_raw)
+        count = min(len(ur_data), len(rm_data))
+        if count == 0:
+            continue
+        rows = []
+        for i in range(count):
+            rotation = float(ur_data[i][1])
+            moment_n_mm = float(rm_data[i][1])
+            curvature = rotation / effective_length_m if effective_length_m else rotation
+            moment_kn_m = moment_n_mm * 1.0e-6
+            rows.append((curvature, moment_kn_m))
+        return rows, {
+            "method": "history",
+            "history_region": region_name,
+            "rotation_output": ur_key,
+            "moment_output": rm_key,
+        }
+    return [], None
 
 
 def extract_from_fields(step, node_set, effective_length_m):

@@ -108,6 +108,7 @@ def backend_payload_gui_values(payload):
             "r_elem_inner_sheath": first_present(mesh, "inner_sheath_radial_divisions"),
             "r_elem_bedding": first_present(mesh, "bedding_radial_divisions", "radial_divisions_per_layer"),
             "r_elem_outer_sheath": first_present(mesh, "outer_sheath_radial_divisions"),
+            "filler_z_elem": first_present(mesh, "filler_z_divisions", "filler_divisions", "axial_divisions"),
         },
         "materials": payload.get("materials", []),
         "study_scope": enabled if isinstance(enabled, dict) else {},

@@ -1,6 +1,22 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-07-05 KST
+Last updated: 2026-07-06 KST
+
+## Lab PC Abaqus Bridge Update - 2026-07-06 KST
+
+- SmallSmoke bridge check passed on the Windows/Abaqus lab PC using reduced smoke settings.
+  Latest verified folder: `jobs\SCLAS_jobs\small_smoke_20260706_222907`.
+- CurveV0 endpoint sweep passed for factors `-0.1, -0.05, 0, 0.05, 0.1`.
+  Latest verified parent folder: `jobs\SCLAS_jobs\curve_v0_sweep_20260706_223250`.
+- The parent sweep wrote `result_data.csv` with 5 data rows and
+  `result_summary.json.source = SCLAS_CURVE_V0_ENDPOINT_SWEEP`.
+  `endpoint_sweep_validation.all_child_jobs_validated` was `true`.
+- All five child jobs wrote ODB-backed results through
+  `SCLAS_ABAQUS_ODB_EXTRACTOR`, each with `odb_extraction.status = extracted`
+  and `odb_extraction.rows_written = 25`.
+- Important interpretation note: this run is an Abaqus bridge and endpoint-sweep
+  contract validation. Reduced-smoke settings skip final contact-pair research
+  fidelity, so it should not be reported as the final calibrated research curve.
 
 ## Latest Backend Status - 2026-07-05 KST
 
