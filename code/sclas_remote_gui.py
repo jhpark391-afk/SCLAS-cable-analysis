@@ -515,18 +515,18 @@ class VariableFormLabel(QWidget):
         "r_oa": ("r", "oa"),
         "n_oa": ("n", "oa"),
         "t_bedding": ("t", "bedding"),
-        "alpha_core": ("alpha", "core"),
-        "alpha_ia": ("alpha", "ia"),
-        "alpha_oa": ("alpha", "oa"),
-        "α_core": ("alpha", "core"),
-        "α_ia": ("alpha", "ia"),
-        "α_oa": ("alpha", "oa"),
+        "alpha_core": ("\u03b1", "core"),
+        "alpha_ia": ("\u03b1", "ia"),
+        "alpha_oa": ("\u03b1", "oa"),
+        "\u03b1_core": ("\u03b1", "core"),
+        "\u03b1_ia": ("\u03b1", "ia"),
+        "\u03b1_oa": ("\u03b1", "oa"),
         "n_z": ("n", "z"),
-        "n_theta": ("n", "theta"),
+        "n_theta": ("n", "\u03b8"),
         "n_r": ("n", "r"),
-        "theta": ("theta", ""),
-        "mu": ("mu", ""),
-        "kappa": ("kappa", ""),
+        "theta": ("\u03b8", ""),
+        "mu": ("\u03bc", ""),
+        "kappa": ("\u03ba", ""),
     }
 
     def __init__(self, text: str):
@@ -534,7 +534,7 @@ class VariableFormLabel(QWidget):
         self.setProperty("no_translate", True)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setMinimumWidth(214)
-        self.setMaximumHeight(32)
+        self.setMaximumHeight(38)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -544,7 +544,7 @@ class VariableFormLabel(QWidget):
         label.setTextFormat(Qt.RichText)
         label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        label.setMinimumHeight(26)
+        label.setMinimumHeight(30)
         label.setText(self.rich_text(text))
         layout.addWidget(label, 1)
 
@@ -594,14 +594,14 @@ class VariableFormLabel(QWidget):
             )
         if subscript:
             parts.append(
-                f"<span style='font-size:14px; font-weight:750; "
+                f"<span style='font-size:15px; font-weight:750; "
                 f"color:{symbol_color};'>&nbsp;{symbol}</span>"
-                f"<sub style='font-size:9px; font-weight:750; "
+                f"<sub style='font-size:12px; font-weight:750; "
                 f"color:{symbol_color};'>{subscript}</sub>"
             )
         else:
             parts.append(
-                f"<span style='font-size:14px; font-weight:750; "
+                f"<span style='font-size:15px; font-weight:750; "
                 f"color:{symbol_color};'>&nbsp;{symbol}</span>"
             )
         if suffix:
@@ -627,8 +627,8 @@ class VariableFormLabel(QWidget):
         symbol_label.setTextFormat(Qt.RichText)
         if subscript:
             symbol_label.setText(
-                "<span style=\"font-family:{0}; font-size:14px; font-weight:750; color:#0b5cad;\">{1}</span>"
-                "<sub style=\"font-family:{0}; font-size:9px; font-weight:750; color:#0b5cad;\">{2}</sub>".format(
+                "<span style=\"font-family:{0}; font-size:15px; font-weight:750; color:#0b5cad;\">{1}</span>"
+                "<sub style=\"font-family:{0}; font-size:12px; font-weight:750; color:#0b5cad;\">{2}</sub>".format(
                     SYMBOL_FONT_QSS,
                     symbol,
                     subscript,
@@ -912,7 +912,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Result: stopped": "결과: 중단됨",
             "Result: error": "결과: 오류",
             "Bending Moment M": "굽힘 모멘트 M",
-            "Curvature kappa": "곡률 kappa",
+            "Curvature \u03ba": "곡률 \u03ba",
             "Layer": "레이어",
             "Density": "밀도",
             "Density (kg/m^3)": "밀도 (kg/m^3)",
@@ -981,7 +981,7 @@ class SCLASRemoteGUI(QMainWindow):
             self.style_material_headers()
         if hasattr(self, "plot_canvas"):
             self.plot_canvas.setLabel("left", self.ui_text("Bending Moment M"), units="kN.m")
-            self.plot_canvas.setLabel("bottom", self.ui_text("Curvature kappa"), units="1/m")
+            self.plot_canvas.setLabel("bottom", self.ui_text("Curvature \u03ba"), units="1/m")
         if hasattr(self, "mesh_inputs"):
             self.translate_combo_items(
                 self.mesh_inputs["model_strategy"],
@@ -1415,8 +1415,8 @@ class SCLASRemoteGUI(QMainWindow):
             "Layer",
             "Material",
             "Young's modulus\nE (GPa)",
-            "Poisson's ratio\nnu (-)",
-            "Density\nrho (kg/m^3)",
+            "Poisson's ratio\n\u03bd (-)",
+            "Density\n\u03c1 (kg/m^3)",
         ])
         self.style_material_headers()
         self.table.verticalHeader().setVisible(False)
@@ -1573,7 +1573,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_import_inp_mesh.setToolTip("Read an Abaqus .inp file and render a part-colored end-section mesh preview.")
         self.btn_import_inp_mesh.clicked.connect(self.import_inp_mesh_dialog)
         left.addWidget(self.btn_import_inp_mesh)
-        note = QLabel("Use this tab to set n_theta, n_r, and n_z division guidance. The actual Abaqus mesh is checked by importing the generated INP.")
+        note = QLabel("Use this tab to set n_\u03b8, n_r, and n_z division guidance. The actual Abaqus mesh is checked by importing the generated INP.")
         note.setWordWrap(True)
         left.addWidget(note)
         self.inp_mesh_summary = QTextEdit()
@@ -1800,7 +1800,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.plot_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.plot_canvas.showGrid(x=True, y=True, alpha=0.13)
         self.plot_canvas.setLabel("left", "Bending Moment M", units="kN.m")
-        self.plot_canvas.setLabel("bottom", "Curvature kappa", units="1/m")
+        self.plot_canvas.setLabel("bottom", "Curvature \u03ba", units="1/m")
         self.plot_canvas.getAxis("left").setTextPen("#a7a7a7")
         self.plot_canvas.getAxis("bottom").setTextPen("#a7a7a7")
         self.plot_canvas.getAxis("left").setPen("#555555")
@@ -2006,8 +2006,8 @@ class SCLASRemoteGUI(QMainWindow):
             "Layer",
             "Material",
             "Young's modulus\nE (GPa)",
-            "Poisson's ratio\nnu (-)",
-            "Density\nrho (kg/m^3)",
+            "Poisson's ratio\n\u03bd (-)",
+            "Density\n\u03c1 (kg/m^3)",
         ])
         default_font = QFont(APP_FONT_FAMILY, 9)
         default_font.setWeight(QFont.DemiBold)
@@ -3965,7 +3965,7 @@ class SCLASRemoteGUI(QMainWindow):
         painter.drawText(22, 30, "Analysis Structure / Mesh / Contact Guide")
         painter.setFont(body_font)
         painter.setPen(QColor("#64748b"))
-        painter.drawText(22, 52, "Set load, curvature, friction, and n_theta/n_r/n_z divisions before exporting the Abaqus request.")
+        painter.drawText(22, 52, "Set load, curvature, friction, and n_\u03b8/n_r/n_z divisions before exporting the Abaqus request.")
 
         margin = 22
         gap = 14
@@ -4019,7 +4019,7 @@ class SCLASRemoteGUI(QMainWindow):
         painter.setPen(QPen(QColor("#ef4444"), 2.5))
         painter.drawArc(cx - 82, cy - 2, 164, 164, 20 * 16, 105 * 16)
         painter.setPen(QColor("#991b1b"))
-        painter.drawText(x + 34, y + 330, "n_theta divisions: circumferential density")
+        painter.drawText(x + 34, y + 330, "n_\u03b8 divisions: circumferential density")
         painter.setPen(QPen(QColor("#2563eb"), 2.5))
         painter.drawLine(cx, cy + 80, cx + 58, cy + 80)
         painter.setPen(QColor("#1d4ed8"))
@@ -4048,8 +4048,8 @@ class SCLASRemoteGUI(QMainWindow):
         painter.drawArc(tube_x - 24, tube_y + 12, 62, 62, 40 * 16, 240 * 16)
         painter.drawArc(tube_x + tube_w - 38, tube_y + 42, 62, 62, 220 * 16, 240 * 16)
         painter.setPen(QColor("#991b1b"))
-        painter.drawText(x + 34, y + 286, "curvature kappa and endpoint rotation")
-        painter.drawText(x + 34, y + 310, f"kappa = {curvature_value} 1/m")
+        painter.drawText(x + 34, y + 286, "curvature \u03ba and endpoint rotation")
+        painter.drawText(x + 34, y + 310, f"\u03ba = {curvature_value} 1/m")
         painter.setPen(QColor("#475569"))
         painter.drawText(x + 34, y + 338, "These fields are part of the backend")
         painter.drawText(x + 34, y + 362, "analysis_conditions contract.")
@@ -4071,7 +4071,7 @@ class SCLASRemoteGUI(QMainWindow):
         painter.drawText(x + 34, y + 292, "surface-to-surface contact")
         painter.setPen(QColor("#374151"))
         painter.drawText(x + 34, y + 318, "armour wire to bedding / sheath")
-        painter.drawText(x + 34, y + 342, f"friction coefficient mu = {friction_value}")
+        painter.drawText(x + 34, y + 342, f"friction coefficient \u03bc = {friction_value}")
 
         painter.setFont(small_font)
         painter.setPen(QColor("#64748b"))

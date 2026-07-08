@@ -17,7 +17,7 @@ Last updated: 2026-07-08 KST
   center radius` and `clearance gap` controls remain removed; the backend still
   receives derived geometry values where needed.
 - The material table now has `Layer`, `Material`, `Young's modulus E (GPa)`,
-  `Poisson's ratio nu (-)`, and `Density rho (kg/m^3)` columns. The previous
+  `Poisson's ratio ν (-)`, and `Density ρ (kg/m^3)` columns. The previous
   category column was removed.
 - The material table now uses the paper-facing 8-row material set:
   Outer Sheath, Filler, Insulation, Conductor, Armour Wire, Inner Sheath, Core
@@ -38,13 +38,14 @@ Last updated: 2026-07-08 KST
   friction coefficient. These are the same widgets used by the backend
   `analysis_conditions` payload, while the Analysis tab keeps solver/result
   execution controls and the remaining advanced conditions.
-- Mesh setting labels now use visible `n_z`, `n_theta`, and `n_r` rich-text
+- Mesh setting labels now use visible `n_z`, `n_θ`, and `n_r` rich-text
   variable labels with close subscripts. The old `Top`/`Iso`/`Reset` INP preview
   camera buttons were removed from the guide header.
 - Variable form labels were consolidated into a single rich-text QLabel per row
   to keep Design and Mesh form labels consistently right-aligned and to restore
-  visible roman variable tokens such as `r_cond`, `alpha_core`, `n_theta`,
-  `n_r`, `kappa`, and `mu`.
+  visible variable tokens such as `r_cond`, `α_core`, `n_θ`, `n_r`, `κ`, and
+  `μ`. Subscripts were enlarged so `core`, `ia`, `oa`, `θ`, `z`, and `r` remain
+  readable on high-DPI Windows displays.
 - Verified with:
   `python -m py_compile code/sclas_remote_gui.py code/sclas_backend_gui_bridge.py code/abaqus_runner.py`,
   `python code/sclas_self_check.py`, and an offscreen `run_sclas.bat` GUI smoke.
