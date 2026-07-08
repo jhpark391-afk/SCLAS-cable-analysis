@@ -1,6 +1,53 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-07-06 KST
+Last updated: 2026-07-08 KST
+
+## GUI Design/Mesh Cleanup - 2026-07-08 KST
+
+- The Design tab was realigned to the latest meeting/handwritten feedback:
+  only `Import key,value CSV` remains in the top import area, the section view
+  is now a 2D-only `Section Preview`, and the old digital-twin/toggle wording
+  was removed.
+- Sidebar navigation was simplified to `Design`, `Finite Element Analysis
+  Setting`, and `Analysis Results`. The top-right `Model`, `Result`, and `Local
+  project` status badges were removed from the visible topbar; internal status
+  labels remain hidden so existing backend/result flows do not break.
+- Design geometry labels now use `Core Section`, `Helix Pitch Angle`, and a
+  direct `Bedding thickness` input between armour layers. User-facing `core
+  center radius` and `clearance gap` controls remain removed; the backend still
+  receives derived geometry values where needed.
+- The material table now has `Layer`, `Material`, `Young's modulus E (GPa)`,
+  `Poisson's ratio nu (-)`, and `Density rho (kg/m^3)` columns. The previous
+  category column was removed.
+- The material table now uses the paper-facing 8-row material set:
+  Outer Sheath, Filler, Insulation, Conductor, Armour Wire, Inner Sheath, Core
+  Shield, and Bedding. Inner/outer armour share the single Armour Wire material
+  row. The Abaqus runner now resolves materials by name/material alias rather
+  than fixed row index so this paper-order table does not break section
+  assignment.
+- The Design preview now includes a simple layer legend matching the cable
+  section picture labels: Conductor, Insulation, Core Shield, Filler, Inner
+  Sheath, Armour Wire, Bedding, and Outer Sheath.
+- The Mesh tab now keeps the backend fixed to full 3D segment + solid wire,
+  removes the old readiness/generate-preview workflow, and focuses on mesh
+  setting guidance. The guide figure now explains z/theta/r divisions, external
+  pressure/curvature endpoint loading, and contact/friction conditions. Actual
+  mesh inspection is still done through `Import Abaqus INP`.
+- The Finite Element Analysis Setting tab now also owns the visible analysis
+  structure setup fields for external pressure load, target curvature, and
+  friction coefficient. These are the same widgets used by the backend
+  `analysis_conditions` payload, while the Analysis tab keeps solver/result
+  execution controls and the remaining advanced conditions.
+- Mesh setting labels now use visible `n_z`, `n_theta`, and `n_r` rich-text
+  variable labels with close subscripts. The old `Top`/`Iso`/`Reset` INP preview
+  camera buttons were removed from the guide header.
+- Variable form labels were consolidated into a single rich-text QLabel per row
+  to keep Design and Mesh form labels consistently right-aligned and to restore
+  visible roman variable tokens such as `r_cond`, `alpha_core`, `n_theta`,
+  `n_r`, `kappa`, and `mu`.
+- Verified with:
+  `python -m py_compile code/sclas_remote_gui.py code/sclas_backend_gui_bridge.py code/abaqus_runner.py`,
+  `python code/sclas_self_check.py`, and an offscreen `run_sclas.bat` GUI smoke.
 
 ## Lab PC Abaqus Bridge Update - 2026-07-06 KST
 

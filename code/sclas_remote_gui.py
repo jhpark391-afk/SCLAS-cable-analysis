@@ -11,6 +11,7 @@ Remote execution uses macOS system ssh/scp and assumes SSH key login is already 
 """
 
 import csv
+import html
 import json
 import math
 import os
@@ -513,38 +514,39 @@ class VariableFormLabel(QWidget):
         "n_ia": ("n", "ia"),
         "r_oa": ("r", "oa"),
         "n_oa": ("n", "oa"),
-        "alpha_core": ("α", "core"),
-        "alpha_ia": ("α", "ia"),
-        "alpha_oa": ("α", "oa"),
-        "α_core": ("α", "core"),
-        "α_ia": ("α", "ia"),
-        "α_oa": ("α", "oa"),
-        "gap": ("gap", ""),
+        "t_bedding": ("t", "bedding"),
+        "alpha_core": ("alpha", "core"),
+        "alpha_ia": ("alpha", "ia"),
+        "alpha_oa": ("alpha", "oa"),
+        "α_core": ("alpha", "core"),
+        "α_ia": ("alpha", "ia"),
+        "α_oa": ("alpha", "oa"),
+        "n_z": ("n", "z"),
+        "n_theta": ("n", "theta"),
+        "n_r": ("n", "r"),
+        "theta": ("theta", ""),
+        "mu": ("mu", ""),
+        "kappa": ("kappa", ""),
     }
 
     def __init__(self, text: str):
         super().__init__()
         self.setProperty("no_translate", True)
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.setMaximumHeight(24)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMinimumWidth(214)
+        self.setMaximumHeight(32)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(1)
-        layout.addStretch(1)
+        layout.setSpacing(0)
 
-        token = self.match_token(text)
-        if token is None:
-            self.add_plain_label(layout, text, "#17202a", 500)
-            return
-
-        token_text, symbol, subscript, token_start, token_end = token
-        prefix = text[:token_start]
-        suffix = text[token_end:]
-        if prefix.strip():
-            self.add_plain_label(layout, prefix.strip(), "#17202a", 500)
-        self.add_symbol_label(layout, symbol, subscript)
-        if suffix.strip():
-            self.add_plain_label(layout, suffix.strip(), "#64748b", 500)
+        label = QLabel()
+        label.setProperty("no_translate", True)
+        label.setTextFormat(Qt.RichText)
+        label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        label.setMinimumHeight(26)
+        label.setText(self.rich_text(text))
+        layout.addWidget(label, 1)
 
     @classmethod
     def match_token(cls, text: str) -> Optional[Tuple[str, str, str, int, int]]:
@@ -567,6 +569,48 @@ class VariableFormLabel(QWidget):
     def is_token_char(char: str) -> bool:
         return char.isalnum() or char == "_"
 
+    @classmethod
+    def rich_text(cls, text: str) -> str:
+        token = cls.match_token(text)
+        body_color = "#17202a"
+        muted_color = "#64748b"
+        symbol_color = "#0b5cad"
+        if token is None:
+            return (
+                f"<span style='font-size:13px; font-weight:650; "
+                f"color:{body_color};'>{html.escape(text)}</span>"
+            )
+
+        _token_text, symbol, subscript, token_start, token_end = token
+        prefix = html.escape(text[:token_start].strip())
+        suffix = html.escape(text[token_end:].strip())
+        symbol = html.escape(symbol)
+        subscript = html.escape(subscript)
+        parts = []
+        if prefix:
+            parts.append(
+                f"<span style='font-size:13px; font-weight:650; "
+                f"color:{body_color};'>{prefix}</span>"
+            )
+        if subscript:
+            parts.append(
+                f"<span style='font-size:14px; font-weight:750; "
+                f"color:{symbol_color};'>&nbsp;{symbol}</span>"
+                f"<sub style='font-size:9px; font-weight:750; "
+                f"color:{symbol_color};'>{subscript}</sub>"
+            )
+        else:
+            parts.append(
+                f"<span style='font-size:14px; font-weight:750; "
+                f"color:{symbol_color};'>&nbsp;{symbol}</span>"
+            )
+        if suffix:
+            parts.append(
+                f"<span style='font-size:13px; font-weight:650; "
+                f"color:{muted_color};'>&nbsp;{suffix}</span>"
+            )
+        return "".join(parts)
+
     def add_plain_label(self, layout: QHBoxLayout, text: str, color: str, weight: int) -> None:
         label = QLabel(text)
         label.setProperty("no_translate", True)
@@ -578,22 +622,26 @@ class VariableFormLabel(QWidget):
         layout.addWidget(label, 0, Qt.AlignVCenter)
 
     def add_symbol_label(self, layout: QHBoxLayout, symbol: str, subscript: str) -> None:
-        symbol_label = QLabel(symbol)
+        symbol_label = QLabel()
         symbol_label.setProperty("no_translate", True)
-        symbol_label.setStyleSheet(
-            f"QLabel {{ font-family: {SYMBOL_FONT_QSS}; "
-            "font-size: 14px; font-weight: 750; color: #0b5cad; letter-spacing: 0px; padding: 0px; }"
-        )
-        layout.addWidget(symbol_label, 0, Qt.AlignVCenter)
-
+        symbol_label.setTextFormat(Qt.RichText)
         if subscript:
-            sub_label = QLabel(subscript)
-            sub_label.setProperty("no_translate", True)
-            sub_label.setStyleSheet(
-                f"QLabel {{ font-family: {SYMBOL_FONT_QSS}; "
-                "font-size: 10px; font-weight: 750; color: #0b5cad; padding-top: 6px; letter-spacing: 0px; }"
+            symbol_label.setText(
+                "<span style=\"font-family:{0}; font-size:14px; font-weight:750; color:#0b5cad;\">{1}</span>"
+                "<sub style=\"font-family:{0}; font-size:9px; font-weight:750; color:#0b5cad;\">{2}</sub>".format(
+                    SYMBOL_FONT_QSS,
+                    symbol,
+                    subscript,
+                )
             )
-            layout.addWidget(sub_label, 0, Qt.AlignBottom)
+        else:
+            symbol_label.setText(
+                "<span style=\"font-family:{0}; font-size:14px; font-weight:750; color:#0b5cad;\">{1}</span>".format(
+                    SYMBOL_FONT_QSS,
+                    symbol,
+                )
+            )
+        layout.addWidget(symbol_label, 0, Qt.AlignVCenter)
 
 
 def build_splash_pixmap() -> QPixmap:
@@ -722,14 +770,12 @@ class SCLASRemoteGUI(QMainWindow):
             "Submarine cable modelling | mesh bridge | nonlinear response": "해저 케이블 모델링 | 메시 연동 | 비선형 응답",
             "Local project": "로컬 프로젝트",
             "Workflow": "작업 흐름",
-            "Design\nGeometry inputs": "설계\n형상 입력",
-            "Mesh\nAbaqus bridge": "메시\n아바쿠스 연동",
+            "Design": "설계",
+            "Finite Element\nAnalysis Setting": "유한요소\n해석 설정",
             "Analysis\nResults": "해석\n결과",
             "Ready | Local session": "준비됨 | 로컬 세션",
             "Cable Geometry Inputs": "케이블 형상 입력",
             "Import key,value CSV": "key,value CSV 불러오기",
-            "Import backend JSON": "백엔드 JSON 불러오기",
-            "Load preset": "프리셋 불러오기",
             "Visible Layers": "표시 레이어",
             "Layer Presets": "레이어 프리셋",
             "All": "전체",
@@ -743,16 +789,17 @@ class SCLASRemoteGUI(QMainWindow):
             "Inner sheath": "내부 시스",
             "Three cores": "3상 코어",
             "Filler": "필러",
-            "Core Package": "코어 패키지",
+            "Core Section": "코어 단면",
             "Sheath / Bedding": "시스 / 베딩",
             "Armour Wires": "아머 와이어",
-            "Helix Lay": "헬릭스 권선",
-            "Material Table": "재료 표",
-            "Category": "카테고리",
-            "Digital Twin View": "디지털 트윈 뷰",
-            "Toggle 2D / 3D": "2D / 3D 전환",
+            "Helix Pitch Angle": "헬릭스 피치 각",
+            "Material Properties": "재료 물성",
+            "Material": "재료",
+            "Layer Legend": "레이어 범례",
+            "Section Preview": "단면 프리뷰",
+            "Bedding thickness": "베딩 두께",
             "Reset View": "뷰 초기화",
-            "Mesh Request for Backend": "백엔드 메시 요청",
+            "Mesh Setting Guide": "메시 설정 가이드",
             "Abaqus element type": "아바쿠스 요소 타입",
             "Strategy": "전략",
             "Armour model": "아머 모델",
@@ -771,25 +818,20 @@ class SCLASRemoteGUI(QMainWindow):
             "Core divisions": "코어 분할",
             "Armour divisions": "아머 분할",
             "Axial z divisions": "축방향 z 분할",
-            "Core/Sheath θ divisions": "코어/시스 θ 분할",
-            "Armour wire θ divisions": "아머 와이어 θ 분할",
-            "Inner sheath r divisions": "내부 시스 r 분할",
-            "Bedding r divisions": "베딩 r 분할",
-            "Outer sheath r divisions": "외부 시스 r 분할",
-            "Filler z divisions": "필러 z 분할",
-            "Generate mesh preview": "메시 프리뷰 생성",
+            "Core/Sheath n_theta divisions": "코어/시스 n_theta 분할",
+            "Armour wire n_theta divisions": "아머 와이어 n_theta 분할",
+            "Inner sheath n_r divisions": "내부 시스 n_r 분할",
+            "Bedding n_r divisions": "베딩 n_r 분할",
+            "Outer sheath n_r divisions": "외부 시스 n_r 분할",
+            "Filler n_z divisions": "필러 n_z 분할",
             "Import Abaqus INP": "Abaqus INP 불러오기",
-            "Visual request only. Abaqus backend owns actual mesh generation.": "시각화 요청입니다. 실제 메시 생성은 Abaqus 백엔드가 담당합니다.",
-            "Mesh Readiness": "메시 준비도",
             "Ready state": "준비 상태",
             "Est. elements": "예상 요소 수",
             "Contact pairs": "접촉 쌍",
-            "Not generated": "생성 전",
+            "Guide mode": "가이드 모드",
             "Preview ready": "프리뷰 준비됨",
             "INP imported": "INP 불러옴",
-            "Preview Only": "프리뷰 전용",
-            "Top": "상단",
-            "Iso": "등각",
+            "Mesh Guide / INP Preview": "메시 가이드 / INP 프리뷰",
             "Reset": "초기화",
             "Analysis Conditions": "해석 조건",
             "Conditions": "조건",
@@ -873,7 +915,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Curvature kappa": "곡률 kappa",
             "Layer": "레이어",
             "Density": "밀도",
-            "Density (kg/m³)": "밀도 (kg/m³)",
+            "Density (kg/m^3)": "밀도 (kg/m^3)",
         }
 
     def ui_text(self, text: str) -> str:
@@ -936,13 +978,6 @@ class SCLASRemoteGUI(QMainWindow):
 
         self.update_language_button()
         if hasattr(self, "table"):
-            self.table.setHorizontalHeaderLabels([
-                self.ui_text("Category"),
-                self.ui_text("Layer"),
-                "E (GPa)",
-                "ν",
-                "ρ (kg/m³)",
-            ])
             self.style_material_headers()
         if hasattr(self, "plot_canvas"):
             self.plot_canvas.setLabel("left", self.ui_text("Bending Moment M"), units="kN.m")
@@ -1035,19 +1070,16 @@ class SCLASRemoteGUI(QMainWindow):
         topbar.addStretch()
         self.lbl_model_status = QLabel("Model: pending")
         self.lbl_model_status.setObjectName("TopbarMeta")
+        self.lbl_model_status.setVisible(False)
         self.lbl_result_status = QLabel("Result: none")
         self.lbl_result_status.setObjectName("TopbarMeta")
-        session = QLabel("Local project")
-        session.setObjectName("TopbarMeta")
+        self.lbl_result_status.setVisible(False)
         self.btn_language = QPushButton("English")
         self.btn_language.setObjectName("LangToggle")
         self.btn_language.setFixedWidth(92)
         self.btn_language.setToolTip("Current language: English. Click to switch to Korean.")
         self.btn_language.setProperty("no_translate", True)
         self.btn_language.clicked.connect(self.toggle_language)
-        topbar.addWidget(self.lbl_model_status)
-        topbar.addWidget(self.lbl_result_status)
-        topbar.addWidget(session)
         topbar.addWidget(self.btn_language)
         content_layout.addLayout(topbar)
 
@@ -1092,9 +1124,9 @@ class SCLASRemoteGUI(QMainWindow):
         nav_label.setObjectName("SidebarSection")
         layout.addWidget(nav_label)
 
-        nav_items = [("Design", "Geometry inputs"), ("Mesh", "Abaqus bridge"), ("Analysis", "Results")]
-        for index, (title, subtitle) in enumerate(nav_items):
-            btn = QPushButton(f"{title}\n{subtitle}")
+        nav_items = ["Design", "Finite Element\nAnalysis Setting", "Analysis\nResults"]
+        for index, label in enumerate(nav_items):
+            btn = QPushButton(label)
             btn.setObjectName("NavButton")
             btn.setCheckable(True)
             btn.setFixedHeight(58)
@@ -1257,36 +1289,19 @@ class SCLASRemoteGUI(QMainWindow):
         left.setSpacing(10)
         left.addWidget(self.header("Cable Geometry Inputs"))
         self.btn_load_csv = QPushButton("Import key,value CSV")
-        self.btn_load_backend_json = QPushButton("Import backend JSON")
-        self.backend_preset_combo = QComboBox()
-        self.btn_load_backend_preset = QPushButton("Load preset")
         self.btn_load_csv.setFixedHeight(42)
-        self.btn_load_backend_json.setFixedHeight(42)
-        self.btn_load_backend_preset.setFixedHeight(42)
-        self.backend_preset_combo.addItems(list(BACKEND_JSON_PRESETS.keys()))
         self.btn_load_csv.setToolTip("Load the original SCLAS CSV-style key/value input table.")
-        self.btn_load_backend_json.setToolTip("Load an Abaqus backend input_data.json fixture into the GUI fields.")
-        self.backend_preset_combo.setToolTip("Choose a backend fixture shared by the Abaqus modelling workflow.")
-        self.btn_load_backend_preset.setToolTip("Load the selected RoC backend fixture into the GUI fields.")
         self.btn_load_csv.clicked.connect(self.load_csv)
-        self.btn_load_backend_json.clicked.connect(self.load_backend_json_dialog)
-        self.btn_load_backend_preset.clicked.connect(self.load_backend_preset)
-        import_buttons = QGridLayout()
-        import_buttons.addWidget(self.btn_load_csv, 0, 0)
-        import_buttons.addWidget(self.btn_load_backend_json, 0, 1)
-        import_buttons.addWidget(self.backend_preset_combo, 1, 0)
-        import_buttons.addWidget(self.btn_load_backend_preset, 1, 1)
-        left.addLayout(import_buttons)
+        left.addWidget(self.btn_load_csv)
 
         self.inputs = {
             "r_cond": QLineEdit("4.00"),
             "r_insu": QLineEdit("11.30"),
             "roc": QLineEdit("15.30"),
-            "coc": QLineEdit("17.66"),
             "tis": QLineEdit("4.50"),
             "r_ia": QLineEdit("2.00"),
             "no_ia": QSpinBox(),
-            "gap": QLineEdit("0.50"),
+            "bedding_thickness": QLineEdit("0.60"),
             "r_oa": QLineEdit("2.00"),
             "no_oa": QSpinBox(),
             "tos": QLineEdit("4.50"),
@@ -1296,23 +1311,21 @@ class SCLASRemoteGUI(QMainWindow):
         }
         self.inputs["no_ia"].setRange(0, 300); self.inputs["no_ia"].setValue(55); self.inputs["no_ia"].setSpecialValueText("Auto")
         self.inputs["no_oa"].setRange(0, 300); self.inputs["no_oa"].setValue(63); self.inputs["no_oa"].setSpecialValueText("Auto")
-        self.inputs["coc"].setReadOnly(True)
 
         geometry_sections = [
             (
-                "Core Package",
+                "Core Section",
                 [
                     ("Conductor radius r_cond (mm)", "r_cond"),
                     ("Insulation radius r_ins (mm)", "r_insu"),
                     ("Core outer radius R_core (mm)", "roc"),
-                    ("Core center radius R_c (auto, mm)", "coc"),
                 ],
             ),
             (
                 "Sheath / Bedding",
                 [
                     ("Inner sheath t_is (mm)", "tis"),
-                    ("Clearance gap (mm)", "gap"),
+                    ("Bedding thickness t_bedding (mm)", "bedding_thickness"),
                     ("Outer sheath t_os (mm)", "tos"),
                 ],
             ),
@@ -1326,7 +1339,7 @@ class SCLASRemoteGUI(QMainWindow):
                 ],
             ),
             (
-                "Helix Lay",
+                "Helix Pitch Angle",
                 [
                     ("Core lay angle α_core (deg)", "core_lay_angle"),
                     ("Inner armour lay angle α_ia (deg)", "inner_lay_angle"),
@@ -1334,6 +1347,16 @@ class SCLASRemoteGUI(QMainWindow):
                 ],
             ),
         ]
+        for idx, (section_title, _section_rows) in enumerate(geometry_sections):
+            if section_title == "Helix Pitch Angle":
+                geometry_sections[idx] = (
+                    section_title,
+                    [
+                        ("Core helix pitch angle alpha_core (deg)", "core_lay_angle"),
+                        ("Inner armour helix pitch angle alpha_ia (deg)", "inner_lay_angle"),
+                        ("Outer armour helix pitch angle alpha_oa (deg)", "outer_lay_angle"),
+                    ],
+                )
         for section_title, section_rows in geometry_sections:
             section_box = QGroupBox(section_title)
             section_form = QFormLayout(section_box)
@@ -1344,7 +1367,7 @@ class SCLASRemoteGUI(QMainWindow):
             section_form.setRowWrapPolicy(QFormLayout.WrapLongRows)
             for label, key in section_rows:
                 self.inputs[key].setMinimumWidth(112)
-                self.inputs[key].setToolTip(f"Edit {label}. The digital twin preview updates automatically.")
+                self.inputs[key].setToolTip(f"Edit {label}. The section preview updates automatically.")
                 section_form.addRow(self.form_label(label), self.inputs[key])
             left.addWidget(section_box)
 
@@ -1360,7 +1383,7 @@ class SCLASRemoteGUI(QMainWindow):
         for idx, (text, mode) in enumerate(preset_specs):
             btn = QPushButton(text)
             btn.setFixedHeight(32)
-            btn.setToolTip("Apply a quick visibility preset to the digital twin layers.")
+            btn.setToolTip("Apply a quick visibility preset to the section preview layers.")
             btn.clicked.connect(lambda checked=False, m=mode: self.apply_layer_preset(m))
             layer_layout.addWidget(btn, 1 + idx // 2, idx % 2)
         self.layer_checks = {
@@ -1374,7 +1397,7 @@ class SCLASRemoteGUI(QMainWindow):
         }
         for idx, check in enumerate(self.layer_checks.values()):
             check.setChecked(True)
-            check.setToolTip("Toggle this layer in the digital twin view.")
+            check.setToolTip("Toggle this layer in the section preview.")
             check.toggled.connect(self.trigger_rebuild)
             layer_layout.addWidget(check, 3 + idx // 2, idx % 2)
         left.addWidget(layer_box)
@@ -1386,24 +1409,30 @@ class SCLASRemoteGUI(QMainWindow):
         panel_mat.setMinimumHeight(360)
         mid = QVBoxLayout(panel_mat)
         mid.setContentsMargins(12, 10, 12, 12)
-        self.table = QTableWidget(9, 5)
+        self.table = QTableWidget(8, 5)
         self.table.setAlternatingRowColors(True)
-        self.table.setHorizontalHeaderLabels(["Category", "Layer", "E (GPa)", "ν", "ρ (kg/m³)"])
+        self.table.setHorizontalHeaderLabels([
+            "Layer",
+            "Material",
+            "Young's modulus\nE (GPa)",
+            "Poisson's ratio\nnu (-)",
+            "Density\nrho (kg/m^3)",
+        ])
         self.style_material_headers()
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(25)
-        self.table.horizontalHeader().setMinimumHeight(30)
-        self.table.setMinimumHeight(324)
+        self.table.horizontalHeader().setMinimumHeight(48)
+        self.table.setMinimumHeight(300)
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.init_material_table()
         mid.addWidget(self.table)
-        material_section = self.collapsible_section("Material Table", panel_mat, expanded=False)
+        material_section = self.collapsible_section("Material Properties", panel_mat, expanded=False)
 
         panel_view = QFrame(); panel_view.setObjectName("Card")
         panel_view.setMinimumWidth(380)
@@ -1411,14 +1440,10 @@ class SCLASRemoteGUI(QMainWindow):
         right = QVBoxLayout(panel_view)
         right.setContentsMargins(18, 16, 18, 16)
         header = QHBoxLayout()
-        header.addWidget(self.header("Digital Twin View"))
-        self.btn_toggle = QPushButton("Toggle 2D / 3D")
-        self.btn_toggle.setToolTip("Switch between top-down section view and tilted 3D inspection.")
-        self.btn_toggle.clicked.connect(self.toggle_view_mode)
+        header.addWidget(self.header("Section Preview"))
         self.btn_reset_solid = QPushButton("Reset View")
-        self.btn_reset_solid.setToolTip("Return the digital twin camera to the default engineering view.")
+        self.btn_reset_solid.setToolTip("Return the section preview camera to the default top view.")
         self.btn_reset_solid.clicked.connect(self.reset_solid_view)
-        header.addWidget(self.btn_toggle)
         header.addWidget(self.btn_reset_solid)
         right.addLayout(header)
         self.view_solid = gl.GLViewWidget()
@@ -1426,7 +1451,12 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_solid.setMinimumHeight(260)
         self.view_solid.setBackgroundColor("#f7f8fa")
         self.view_solid.setCameraPosition(distance=180, elevation=90, azimuth=0)
-        right.addWidget(self.view_solid, 1)
+        preview_body = QHBoxLayout()
+        preview_body.setContentsMargins(0, 0, 0, 0)
+        preview_body.setSpacing(14)
+        preview_body.addWidget(self.view_solid, 1)
+        preview_body.addWidget(self.build_layer_legend(), 0)
+        right.addLayout(preview_body, 1)
 
         workspace = QFrame()
         workspace.setObjectName("WorkspaceFrame")
@@ -1446,6 +1476,7 @@ class SCLASRemoteGUI(QMainWindow):
                 w.valueChanged.connect(self.trigger_rebuild)
 
     def build_mesh_tab(self) -> None:
+        self.ensure_analysis_condition_widgets()
         tab = QWidget()
         layout = QHBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1455,7 +1486,20 @@ class SCLASRemoteGUI(QMainWindow):
         left = QVBoxLayout(panel)
         left.setContentsMargins(18, 16, 18, 16)
         left.setSpacing(12)
-        left.addWidget(self.header("Mesh Request for Backend"))
+        left.addWidget(self.header("Finite Element Analysis Setting"))
+
+        setup_box = QGroupBox("Analysis Structure Setup")
+        setup_form = QFormLayout(setup_box)
+        setup_form.setLabelAlignment(Qt.AlignRight)
+        setup_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        setup_form.setHorizontalSpacing(12)
+        setup_form.setVerticalSpacing(9)
+        setup_form.addRow(self.form_label("External pressure load (MPa)"), self.cond["pressure"])
+        setup_form.addRow(self.form_label("Target curvature kappa (1/m)"), self.cond["curvature"])
+        setup_form.addRow(self.form_label("Friction coefficient mu"), self.cond["friction"])
+        left.addWidget(setup_box)
+
+        left.addWidget(self.header("Mesh Setting Guide"))
         self.mesh_inputs = {
             "elem_type": QComboBox(),
             "model_strategy": QComboBox(),
@@ -1470,12 +1514,8 @@ class SCLASRemoteGUI(QMainWindow):
             "filler_z_elem": QSpinBox(),
         }
         self.mesh_inputs["elem_type"].addItems(["C3D8R", "C3D4", "B31"])
-        self.mesh_inputs["model_strategy"].addItem("Periodic cell", "Periodic homogenized cell")
         self.mesh_inputs["model_strategy"].addItem("Full 3D segment", "Full 3D segment")
-        self.mesh_inputs["model_strategy"].addItem("Axisymmetric", "Axisymmetric tension/torsion")
         self.mesh_inputs["armour_model"].addItem("Solid wire", "Solid wire")
-        self.mesh_inputs["armour_model"].addItem("Beam + contact", "Beam + contact surface")
-        self.mesh_inputs["armour_model"].addItem("Analytical equiv.", "Analytical equivalent")
         self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(40)
         self.mesh_inputs["c_elem_core"].setRange(4, 160); self.mesh_inputs["c_elem_core"].setValue(24)
         self.mesh_inputs["c_elem_armour"].setRange(4, 64); self.mesh_inputs["c_elem_armour"].setValue(8)
@@ -1485,16 +1525,16 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_inputs["filler_z_elem"].setRange(2, 500); self.mesh_inputs["filler_z_elem"].setValue(40)
         mesh_tips = {
             "elem_type": "Abaqus element family requested in input_data.json.",
-            "model_strategy": "Controls whether the backend should build a periodic cell, full segment, or axisymmetric study.",
-            "armour_model": "Recommended representation for helical armour layers in Abaqus.",
+            "model_strategy": "Fixed backend strategy: full 3D segment.",
+            "armour_model": "Fixed armour representation: solid wire.",
             "contact_beta": "Tangential contact regularization value for stick-slip stability.",
-            "z_elem": "Axial z divisions along the cable length for core, sheath, bedding, and armour.",
-            "c_elem_core": "Circumferential θ divisions for core, sheath, and bedding preview surfaces.",
-            "c_elem_armour": "Circumferential θ divisions around each armour wire cross-section.",
-            "r_elem_inner_sheath": "r direction divisions through the inner sheath thickness.",
-            "r_elem_bedding": "r direction divisions through the bedding layer.",
-            "r_elem_outer_sheath": "r direction divisions through the outer sheath thickness.",
-            "filler_z_elem": "Axial z divisions for the special four-part filler profile.",
+            "z_elem": "Axial n_z divisions along the cable length for core, sheath, bedding, and armour.",
+            "c_elem_core": "Circumferential n_theta divisions for core, sheath, and bedding preview surfaces.",
+            "c_elem_armour": "Circumferential n_theta divisions around each armour wire cross-section.",
+            "r_elem_inner_sheath": "n_r divisions through the inner sheath thickness.",
+            "r_elem_bedding": "n_r divisions through the bedding layer.",
+            "r_elem_outer_sheath": "n_r divisions through the outer sheath thickness.",
+            "filler_z_elem": "Axial n_z divisions for the special four-part filler profile.",
         }
         self.mesh_inputs["contact_beta"].setVisible(False)
         for key in ["elem_type", "model_strategy", "armour_model"]:
@@ -1519,29 +1559,21 @@ class SCLASRemoteGUI(QMainWindow):
         form.setVerticalSpacing(10)
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         form.setRowWrapPolicy(QFormLayout.WrapLongRows)
-        form.addRow("Abaqus element type", self.mesh_inputs["elem_type"])
-        form.addRow("Strategy", self.mesh_inputs["model_strategy"])
-        form.addRow("Armour model", self.mesh_inputs["armour_model"])
-        form.addRow("Axial z divisions", self.mesh_inputs["z_elem"])
-        form.addRow("Core/Sheath θ divisions", self.mesh_inputs["c_elem_core"])
-        form.addRow("Armour wire θ divisions", self.mesh_inputs["c_elem_armour"])
-        form.addRow("Inner sheath r divisions", self.mesh_inputs["r_elem_inner_sheath"])
-        form.addRow("Bedding r divisions", self.mesh_inputs["r_elem_bedding"])
-        form.addRow("Outer sheath r divisions", self.mesh_inputs["r_elem_outer_sheath"])
-        form.addRow("Filler z divisions", self.mesh_inputs["filler_z_elem"])
+        form.addRow(self.form_label("Abaqus element type"), self.mesh_inputs["elem_type"])
+        form.addRow(self.form_label("Axial n_z divisions"), self.mesh_inputs["z_elem"])
+        form.addRow(self.form_label("Core/Sheath n_theta divisions"), self.mesh_inputs["c_elem_core"])
+        form.addRow(self.form_label("Armour wire n_theta divisions"), self.mesh_inputs["c_elem_armour"])
+        form.addRow(self.form_label("Inner sheath n_r divisions"), self.mesh_inputs["r_elem_inner_sheath"])
+        form.addRow(self.form_label("Bedding n_r divisions"), self.mesh_inputs["r_elem_bedding"])
+        form.addRow(self.form_label("Outer sheath n_r divisions"), self.mesh_inputs["r_elem_outer_sheath"])
+        form.addRow(self.form_label("Filler n_z divisions"), self.mesh_inputs["filler_z_elem"])
         left.addLayout(form)
-        self.btn_mesh = QPushButton("Generate mesh preview")
-        self.btn_mesh.setObjectName("RunBtn")
-        self.btn_mesh.setFixedHeight(50)
-        self.btn_mesh.setToolTip("Build a visual mesh preview from the current geometry and mesh request.")
-        self.btn_mesh.clicked.connect(self.generate_mesh_preview)
-        left.addWidget(self.btn_mesh)
         self.btn_import_inp_mesh = QPushButton("Import Abaqus INP")
         self.btn_import_inp_mesh.setFixedHeight(42)
         self.btn_import_inp_mesh.setToolTip("Read an Abaqus .inp file and render a part-colored end-section mesh preview.")
         self.btn_import_inp_mesh.clicked.connect(self.import_inp_mesh_dialog)
         left.addWidget(self.btn_import_inp_mesh)
-        note = QLabel("Visual request only. Abaqus backend owns actual mesh generation.")
+        note = QLabel("Use this tab to set n_theta, n_r, and n_z division guidance. The actual Abaqus mesh is checked by importing the generated INP.")
         note.setWordWrap(True)
         left.addWidget(note)
         self.inp_mesh_summary = QTextEdit()
@@ -1550,16 +1582,6 @@ class SCLASRemoteGUI(QMainWindow):
         self.inp_mesh_summary.setMaximumHeight(112)
         self.inp_mesh_summary.setPlainText("Import an Abaqus .inp file to inspect the actual generated mesh.")
         left.addWidget(self.inp_mesh_summary)
-        mesh_ready_box = QGroupBox("Mesh Readiness")
-        mesh_ready_layout = QGridLayout(mesh_ready_box)
-        self.lbl_mesh_ready = self.metric_box("Ready state", "Not generated")
-        self.set_translated_metric_value(self.lbl_mesh_ready, "Not generated")
-        self.lbl_mesh_elements = self.metric_box("Est. elements", "-")
-        self.lbl_mesh_contacts = self.metric_box("Contact pairs", "5")
-        mesh_ready_layout.addWidget(self.lbl_mesh_ready, 0, 0)
-        mesh_ready_layout.addWidget(self.lbl_mesh_elements, 1, 0)
-        mesh_ready_layout.addWidget(self.lbl_mesh_contacts, 2, 0)
-        left.addWidget(mesh_ready_box)
         left.addStretch()
 
         viewer = QFrame(); viewer.setObjectName("Card")
@@ -1567,26 +1589,12 @@ class SCLASRemoteGUI(QMainWindow):
         right.setContentsMargins(18, 18, 18, 18)
         right.setSpacing(10)
         mesh_header = QHBoxLayout()
-        mesh_header.addWidget(self.header("Preview Only"))
+        mesh_header.addWidget(self.header("Mesh Guide / INP Preview"))
         mesh_header.addStretch()
-        self.btn_mesh_top = QPushButton("Top")
-        self.btn_mesh_iso = QPushButton("Iso")
-        self.btn_mesh_reset = QPushButton("Reset")
-        for btn in [self.btn_mesh_top, self.btn_mesh_iso, self.btn_mesh_reset]:
-            btn.setFixedWidth(72)
-        self.btn_mesh_top.setToolTip("Set the mesh camera to top-down section view.")
-        self.btn_mesh_iso.setToolTip("Set the mesh camera to an isometric inspection view.")
-        self.btn_mesh_reset.setToolTip("Reset the mesh preview camera.")
-        self.btn_mesh_top.clicked.connect(self.reset_mesh_view)
-        self.btn_mesh_iso.clicked.connect(self.set_mesh_iso_view)
-        self.btn_mesh_reset.clicked.connect(self.reset_mesh_view)
-        mesh_header.addWidget(self.btn_mesh_top)
-        mesh_header.addWidget(self.btn_mesh_iso)
-        mesh_header.addWidget(self.btn_mesh_reset)
         right.addLayout(mesh_header)
         self.mesh_guide_label = QLabel()
         self.mesh_guide_label.setObjectName("MeshGuide")
-        self.mesh_guide_label.setFixedHeight(260)
+        self.mesh_guide_label.setFixedHeight(520)
         self.mesh_guide_label.setMinimumWidth(0)
         self.mesh_guide_label.setAlignment(Qt.AlignCenter)
         self.mesh_guide_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -1596,6 +1604,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_wire.setMinimumHeight(300)
         self.view_wire.setBackgroundColor("#1e1e1e")
         self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
+        self.view_wire.setVisible(False)
         right.addWidget(self.view_wire, 1)
         self.inp_mesh_legend = QLabel("")
         self.inp_mesh_legend.setObjectName("MeshLegend")
@@ -1616,17 +1625,13 @@ class SCLASRemoteGUI(QMainWindow):
                 widget.currentIndexChanged.connect(lambda _index, k=key: self.activate_mesh_key(k))
             elif isinstance(widget, QLineEdit):
                 widget.textChanged.connect(lambda _text, k=key: self.activate_mesh_key(k))
+        for key in ["pressure", "curvature", "friction"]:
+            self.cond[key].textChanged.connect(lambda _text: self.update_mesh_guide())
         self.update_mesh_guide()
 
-    def build_analysis_tab(self) -> None:
-        tab = QWidget()
-        layout = QHBoxLayout(tab)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-
-        left_panel = QFrame(); left_panel.setObjectName("Card"); left_panel.setMinimumWidth(360)
-        left = QVBoxLayout(left_panel)
-        left.setContentsMargins(18, 16, 18, 16)
+    def ensure_analysis_condition_widgets(self) -> None:
+        if hasattr(self, "cond"):
+            return
         self.cond = {
             "eff_length": QLineEdit("234.20"),
             "pressure": QLineEdit("40.00"),
@@ -1643,10 +1648,10 @@ class SCLASRemoteGUI(QMainWindow):
         self.cond["steps"].setRange(50, 10000); self.cond["steps"].setValue(500)
         analysis_tips = {
             "eff_length": "Effective cable length used for the periodic/homogenized bending request.",
-            "pressure": "Hydrostatic pressure term used by the GUI fallback and exported for Abaqus.",
+            "pressure": "External pressure load passed to the Abaqus analysis request.",
             "residual_contact_pressure": "Residual normal contact pressure for stick-slip/friction calibration.",
             "friction": "Coulomb friction coefficient for armour-to-sheath and armour-to-bedding contact.",
-            "curvature": "Maximum curvature for the moment-curvature loop.",
+            "curvature": "Target maximum curvature for the bending request and moment-curvature loop.",
             "twist": "Maximum twist requested for future coupled torsion studies.",
             "axial_strain": "Axial strain requested for tension-bending coupling studies.",
             "radial_compression": "Compression ratio used for bird-caging risk proxy.",
@@ -1654,9 +1659,19 @@ class SCLASRemoteGUI(QMainWindow):
             "steps": "Number of output samples in the result curve.",
         }
         self.cond["residual_contact_pressure"].setVisible(False)
-        self.cond["friction"].setVisible(False)
         for key, tip in analysis_tips.items():
             self.cond[key].setToolTip(tip)
+
+    def build_analysis_tab(self) -> None:
+        self.ensure_analysis_condition_widgets()
+        tab = QWidget()
+        layout = QHBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        left_panel = QFrame(); left_panel.setObjectName("Card"); left_panel.setMinimumWidth(360)
+        left = QVBoxLayout(left_panel)
+        left.setContentsMargins(18, 16, 18, 16)
         conditions_box = QFrame()
         form = QFormLayout(conditions_box)
         form.setLabelAlignment(Qt.AlignRight)
@@ -1664,8 +1679,6 @@ class SCLASRemoteGUI(QMainWindow):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(9)
         form.addRow("Effective length (mm)", self.cond["eff_length"])
-        form.addRow("Cable external pressure (MPa)", self.cond["pressure"])
-        form.addRow("Max curvature (1/m)", self.cond["curvature"])
         form.addRow("Max twist (rad/m)", self.cond["twist"])
         form.addRow("Max axial strain", self.cond["axial_strain"])
         form.addRow("Radial compression ratio", self.cond["radial_compression"])
@@ -1953,9 +1966,49 @@ class SCLASRemoteGUI(QMainWindow):
     def form_label(self, text: str) -> QWidget:
         return VariableFormLabel(text)
 
+    def build_layer_legend(self) -> QGroupBox:
+        legend = QGroupBox("Layer Legend")
+        legend.setMinimumWidth(210)
+        layout = QVBoxLayout(legend)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
+        entries = [
+            ("#1d3270", "Conductor"),
+            ("#dfcf75", "Insulation"),
+            ("#87949a", "Core Shield"),
+            ("#5f96a4", "Filler"),
+            ("#76868d", "Inner Sheath"),
+            ("#d39135", "Armour Wire"),
+            ("#26333a", "Bedding"),
+            ("#6b7d87", "Outer Sheath"),
+        ]
+        for color, text in entries:
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(8)
+            swatch = QLabel()
+            swatch.setFixedSize(14, 14)
+            swatch.setStyleSheet(
+                f"background-color: {color}; border: 1px solid #46515c; border-radius: 3px;"
+            )
+            label = QLabel(text)
+            label.setStyleSheet(f"font-family: {UI_FONT_QSS}; font-size: 12px; color: #17202a;")
+            row.addWidget(swatch)
+            row.addWidget(label, 1)
+            layout.addLayout(row)
+        layout.addStretch()
+        return legend
+
     def style_material_headers(self) -> None:
         if not hasattr(self, "table"):
             return
+        self.table.setHorizontalHeaderLabels([
+            "Layer",
+            "Material",
+            "Young's modulus\nE (GPa)",
+            "Poisson's ratio\nnu (-)",
+            "Density\nrho (kg/m^3)",
+        ])
         default_font = QFont(APP_FONT_FAMILY, 9)
         default_font.setWeight(QFont.DemiBold)
         symbol_font = QFont(SYMBOL_FONT_FAMILY, 9)
@@ -1989,22 +2042,20 @@ class SCLASRemoteGUI(QMainWindow):
 
     def init_material_table(self) -> None:
         materials = [
-            ("Core conductors", "Copper Core", 108.0, 0.33, 8960, QColor(217, 115, 38)),
-            ("Dielectric layers", "XLPE Insulation", 1.2, 0.46, 940, QColor(230, 230, 230)),
-            ("Metal sheath", "Lead Sheath", 16.0, 0.44, 11340, QColor(150, 150, 160)),
-            ("Polymer matrix", "Filler Matrix", 0.8, 0.48, 1200, QColor(60, 60, 65)),
-            ("Polymer matrix", "Inner Sheath", 1.5, 0.45, 1300, QColor(30, 30, 30)),
-            ("Armour wires", "Inner Armour", 210.0, 0.30, 7850, QColor(100, 120, 150)),
-            ("Polymer matrix", "Bedding", 0.5, 0.49, 1100, QColor(90, 70, 50)),
-            ("Armour wires", "Outer Armour", 210.0, 0.30, 7850, QColor(130, 150, 180)),
-            ("Outer protection", "Outer Sheath", 1.4, 0.45, 1300, QColor(40, 40, 45)),
+            ("Outer sheath layer", "Outer Sheath", 1.4, 0.45, 1300, QColor("#6b7d87")),
+            ("Filler region", "Filler", 0.8, 0.48, 1200, QColor("#5f96a4")),
+            ("Core insulation", "Insulation", 1.2, 0.46, 940, QColor("#dfcf75")),
+            ("Core conductor", "Conductor", 108.0, 0.33, 8960, QColor("#1d3270")),
+            ("Inner / outer armour", "Armour Wire", 210.0, 0.30, 7850, QColor("#d39135")),
+            ("Inner sheath layer", "Inner Sheath", 1.5, 0.45, 1300, QColor("#76868d")),
+            ("Core shield layer", "Core Shield", 16.0, 0.44, 11340, QColor("#87949a")),
+            ("Bedding layer", "Bedding", 0.5, 0.49, 1100, QColor("#26333a")),
         ]
-        for row, (category, name, e, nu, density, color) in enumerate(materials):
-            category_item = QTableWidgetItem(category)
+        for row, (name, material, e, nu, density, color) in enumerate(materials):
             layer_item = QTableWidgetItem(name)
             layer_item.setIcon(QIcon(self.color_icon(color)))
-            self.table.setItem(row, 0, category_item)
-            self.table.setItem(row, 1, layer_item)
+            self.table.setItem(row, 0, layer_item)
+            self.table.setItem(row, 1, QTableWidgetItem(material))
             self.table.setItem(row, 2, QTableWidgetItem(str(e)))
             self.table.setItem(row, 3, QTableWidgetItem(str(nu)))
             self.table.setItem(row, 4, QTableWidgetItem(str(density)))
@@ -2019,15 +2070,10 @@ class SCLASRemoteGUI(QMainWindow):
         rc = safe_float(self.inputs["r_cond"], 4.0, "Conductor radius")
         ri = safe_float(self.inputs["r_insu"], 11.3, "Insulation radius")
         roc = safe_float(self.inputs["roc"], 15.3, "Core outer radius")
-        coc_input = safe_float(self.inputs["coc"], 17.66, "Core center radius")
         coc = core_center_from_outer_radius(roc)
-        if abs(coc_input - coc) > 1.0e-5:
-            self.inputs["coc"].blockSignals(True)
-            self.inputs["coc"].setText(f"{coc:.5f}")
-            self.inputs["coc"].blockSignals(False)
         tis = safe_float(self.inputs["tis"], 4.5, "Inner sheath thickness")
         ria = safe_float(self.inputs["r_ia"], 2.0, "Inner armour wire radius")
-        gap = safe_float(self.inputs["gap"], 0.5, "Clearance gap")
+        bedding_thickness = safe_float(self.inputs["bedding_thickness"], 0.6, "Bedding thickness")
         roa = safe_float(self.inputs["r_oa"], 2.0, "Outer armour wire radius")
         tos = safe_float(self.inputs["tos"], 4.5, "Outer sheath thickness")
         nia_input = int(self.inputs["no_ia"].value())
@@ -2035,27 +2081,43 @@ class SCLASRemoteGUI(QMainWindow):
 
         if not (0 < rc < ri <= roc):
             raise ValueError("Geometry must satisfy 0 < conductor_radius < insulation_radius <= core_outer_radius.")
-        if min(coc, tis, ria, gap, roa, tos) < 0:
-            raise ValueError("Radii/thickness/gap values must be non-negative.")
+        if min(coc, tis, ria, bedding_thickness, roa, tos) < 0:
+            raise ValueError("Radii and thickness values must be non-negative.")
 
         iris = roc + coc
         oris = iris + tis
-        co_ia = oris + gap + ria
+        gap = 0.0
+        co_ia = oris + ria
         irb = co_ia + ria
-        bedding_thickness = 0.6
         orb = irb + bedding_thickness
-        co_oa = orb + gap + roa
+        co_oa = orb + roa
         iros = co_oa + roa
         oros = iros + tos
-        nia = nia_input if nia_input > 0 else auto_armour_count(ria, co_ia)
-        noa = noa_input if noa_input > 0 else auto_armour_count(roa, co_oa)
+        nia_limit = auto_armour_count(ria, co_ia)
+        noa_limit = auto_armour_count(roa, co_oa)
+        self.inputs["no_ia"].blockSignals(True)
+        self.inputs["no_oa"].blockSignals(True)
+        self.inputs["no_ia"].setMaximum(max(1, nia_limit))
+        self.inputs["no_oa"].setMaximum(max(1, noa_limit))
+        if nia_input > nia_limit:
+            self.inputs["no_ia"].setValue(nia_limit)
+            nia_input = nia_limit
+        if noa_input > noa_limit:
+            self.inputs["no_oa"].setValue(noa_limit)
+            noa_input = noa_limit
+        self.inputs["no_ia"].setToolTip(f"Default 55. Maximum {nia_limit} from n <= pi/asin(r_wire/R_center). Use Auto for the formula value.")
+        self.inputs["no_oa"].setToolTip(f"Default 63. Maximum {noa_limit} from n <= pi/asin(r_wire/R_center). Use Auto for the formula value.")
+        self.inputs["no_ia"].blockSignals(False)
+        self.inputs["no_oa"].blockSignals(False)
+        nia = nia_input if nia_input > 0 else nia_limit
+        noa = noa_input if noa_input > 0 else noa_limit
 
         self.derived_geom = {
             "conductor_radius_mm": rc,
             "insulation_radius_mm": ri,
             "core_outer_radius_mm": roc,
             "core_center_radius_mm": coc,
-            "core_center_radius_input_mm": coc_input,
+            "core_center_radius_input_mm": coc,
             "core_center_radius_source": "auto_2sqrt3_over_3_times_core_outer_radius",
             "inner_sheath_inner_radius_mm": iris,
             "inner_sheath_outer_radius_mm": oris,
@@ -2073,6 +2135,9 @@ class SCLASRemoteGUI(QMainWindow):
             "outer_armour_wire_count_input": noa_input,
             "inner_armour_wire_count_source": "user" if nia_input > 0 else "auto_from_wire_radius_and_center_radius",
             "outer_armour_wire_count_source": "user" if noa_input > 0 else "auto_from_wire_radius_and_center_radius",
+            "inner_armour_wire_count_limit": nia_limit,
+            "outer_armour_wire_count_limit": noa_limit,
+            "clearance_gap_mm": gap,
             "bedding_thickness_mm": bedding_thickness,
             "filler_count": 3,
             "filler_outer_radius_mm": iris,
@@ -2081,6 +2146,10 @@ class SCLASRemoteGUI(QMainWindow):
         return self.derived_geom
 
     def mesh_value(self, key: str) -> str:
+        if key == "model_strategy":
+            return "full_3d_segment"
+        if key == "armour_model":
+            return "solid_wire"
         maps = {
             "model_strategy": {
                 "Periodic homogenized cell": "periodic_homogenized_cell",
@@ -2122,7 +2191,7 @@ class SCLASRemoteGUI(QMainWindow):
                 "contact_regularization_beta": "dimensionless",
                 "elastic_modulus": "GPa in materials, Pa in equivalent_properties",
                 "density": "kg/m^3 in materials",
-                "poisson_ratio": "ν, dimensionless",
+                "poisson_ratio": "nu, dimensionless",
                 "moment_output_required": "kN.m",
             },
             "geometry_mm": {
@@ -2131,7 +2200,8 @@ class SCLASRemoteGUI(QMainWindow):
                 "core_outer_radius_mm": dg["core_outer_radius_mm"],
                 "core_center_radius_mm": dg["core_center_radius_mm"],
                 "inner_sheath_thickness_mm": safe_float(self.inputs["tis"], 4.5, "Inner sheath thickness"),
-                "clearance_gap_mm": safe_float(self.inputs["gap"], 0.5, "Clearance gap"),
+                "bedding_thickness_mm": safe_float(self.inputs["bedding_thickness"], 0.6, "Bedding thickness"),
+                "clearance_gap_mm": 0.0,
                 "outer_sheath_thickness_mm": safe_float(self.inputs["tos"], 4.5, "Outer sheath thickness"),
             },
             "derived_geometry_mm": dg,
@@ -2375,23 +2445,32 @@ class SCLASRemoteGUI(QMainWindow):
     def collect_materials(self) -> List[dict]:
         rows = []
         for row in range(self.table.rowCount()):
-            category_item = self.table.item(row, 0)
-            name_item = self.table.item(row, 1)
-            category = category_item.text().strip() if category_item else "Uncategorized"
+            name_item = self.table.item(row, 0)
+            material_item = self.table.item(row, 1)
             name = name_item.text().strip() if name_item else f"Layer {row + 1}"
+            material = material_item.text().strip() if material_item else ""
             rows.append({
                 "index": row + 1,
-                "category": category,
                 "name": name,
+                "material": material,
                 "elastic_modulus_GPa": table_float(self.table, row, 2, 1.0, f"{name} E"),
-                "poisson_ratio": table_float(self.table, row, 3, 0.3, f"{name} ν"),
+                "poisson_ratio": table_float(self.table, row, 3, 0.3, f"{name} nu"),
                 "density_kg_m3": table_float(self.table, row, 4, 0.0, f"{name} density"),
             })
         return rows
 
     def compute_equivalent_properties(self, materials: List[dict], dg: Dict[str, float]) -> dict:
         # GUI-side estimate only. Abaqus should compute final stiffness from the full model.
-        e_copper_pa = materials[0]["elastic_modulus_GPa"] * 1e9
+        conductor = next(
+            (
+                material
+                for material in materials
+                if "conductor" in str(material.get("material", "")).lower()
+                or "conductor" in str(material.get("name", "")).lower()
+            ),
+            materials[0],
+        )
+        e_copper_pa = conductor["elastic_modulus_GPa"] * 1e9
         r_cond_m = dg["conductor_radius_mm"] / 1000.0
         core_center_m = dg["core_center_radius_mm"] / 1000.0
         area_cond = math.pi * r_cond_m ** 2
@@ -2482,12 +2561,14 @@ class SCLASRemoteGUI(QMainWindow):
             "",
             "[Geometry]",
             f"core_outer_radius_mm: {payload['geometry_mm']['core_outer_radius_mm']:.5g}",
-            f"core_center_radius_mm: {payload['geometry_mm']['core_center_radius_mm']:.5g}",
+            f"bedding_thickness_mm: {payload['geometry_mm']['bedding_thickness_mm']:.5g}",
             f"outer_sheath_outer_radius_mm: {dg['outer_sheath_outer_radius_mm']:.5g}",
             "",
             "[Armour]",
             f"inner_wire_count: {armour['inner_wire_count_resolved']} ({armour['inner_wire_count_source']})",
             f"outer_wire_count: {armour['outer_wire_count_resolved']} ({armour['outer_wire_count_source']})",
+            f"inner_wire_count_limit: {dg['inner_armour_wire_count_limit']}",
+            f"outer_wire_count_limit: {dg['outer_armour_wire_count_limit']}",
             f"inner_wire_radius_mm: {armour['inner_wire_radius_mm']:.5g}",
             f"outer_wire_radius_mm: {armour['outer_wire_radius_mm']:.5g}",
             "",
@@ -3342,10 +3423,10 @@ class SCLASRemoteGUI(QMainWindow):
             row = int(material.get("index", 0)) - 1
             if row < 0 or row >= self.table.rowCount():
                 continue
-            if "category" in material:
-                self.table.setItem(row, 0, QTableWidgetItem(str(material["category"])))
             if "name" in material:
-                self.table.setItem(row, 1, QTableWidgetItem(str(material["name"])))
+                self.table.setItem(row, 0, QTableWidgetItem(str(material["name"])))
+            if "material" in material:
+                self.table.setItem(row, 1, QTableWidgetItem(str(material["material"])))
             if "elastic_modulus_GPa" in material:
                 self.table.setItem(row, 2, QTableWidgetItem(str(material["elastic_modulus_GPa"])))
             if "poisson_ratio" in material:
@@ -3365,11 +3446,11 @@ class SCLASRemoteGUI(QMainWindow):
             "Backend JSON Imported",
             f"job_id: {payload.get('metadata', {}).get('job_id', '-')}",
             f"core_outer_radius_mm: {self.derived_geom.get('core_outer_radius_mm', '-')}",
-            f"core_center_radius_mm: {self.derived_geom.get('core_center_radius_mm', '-')}",
+            f"bedding_thickness_mm: {self.derived_geom.get('bedding_thickness_mm', '-')}",
             f"inner_armour_wire_count: {self.derived_geom.get('inner_armour_wire_count', '-')} ({self.derived_geom.get('inner_armour_wire_count_source', '-')})",
             f"outer_armour_wire_count: {self.derived_geom.get('outer_armour_wire_count', '-')} ({self.derived_geom.get('outer_armour_wire_count_source', '-')})",
             f"pressure_mpa: {self.cond['pressure'].text()}",
-            f"armour_model: {self.mesh_inputs['armour_model'].currentText()}",
+            f"armour_model: {self.mesh_value('armour_model')}",
         ]
         self.last_summary_data = {}
         self.summary_text.setPlainText("\n".join(lines))
@@ -3392,6 +3473,13 @@ class SCLASRemoteGUI(QMainWindow):
             QMessageBox.critical(self, "Backend JSON load error", str(exc))
 
     def load_backend_preset(self) -> None:
+        if not hasattr(self, "backend_preset_combo"):
+            QMessageBox.information(
+                self,
+                "Backend preset",
+                "Backend preset loading was removed from the Design tab. Use Import key,value CSV or the Analysis backend controls.",
+            )
+            return
         label = self.backend_preset_combo.currentText()
         preset_path = BACKEND_JSON_PRESETS.get(label)
         if preset_path is None:
@@ -3422,6 +3510,9 @@ class SCLASRemoteGUI(QMainWindow):
                 "Centre of Core": "coc",
                 "Center of Core": "coc",
                 "Thickness of Inner Sheath": "tis",
+                "Bedding thickness": "bedding_thickness",
+                "Bedding Thickness": "bedding_thickness",
+                "Thickness of Bedding": "bedding_thickness",
                 "Number of Inner Armour": "no_ia",
                 "Radius of Inner Armour": "r_ia",
                 "Number of Outer Armour": "no_oa",
@@ -3772,7 +3863,7 @@ class SCLASRemoteGUI(QMainWindow):
         try:
             dg = self.parse_geometry()
             if self.layer_visible("outer_sheath"):
-                self.add_solid(dg["outer_sheath_outer_radius_mm"], 0, 0, 0.0, [0.15, 0.15, 0.15, 0.88])
+                self.add_solid(dg["outer_sheath_outer_radius_mm"], 0, 0, 0.0, [0.42, 0.49, 0.53, 0.92])
             if self.layer_visible("outer_armour"):
                 for i in range(dg["outer_armour_wire_count"]):
                     a = 2 * np.pi * i / dg["outer_armour_wire_count"]
@@ -3781,10 +3872,10 @@ class SCLASRemoteGUI(QMainWindow):
                         dg["outer_armour_center_radius_mm"] * np.cos(a),
                         dg["outer_armour_center_radius_mm"] * np.sin(a),
                         0.1,
-                        [0.5, 0.6, 0.7, 1.0],
+                        [0.83, 0.57, 0.21, 1.0],
                     )
             if self.layer_visible("bedding"):
-                self.add_solid(dg["bedding_outer_radius_mm"], 0, 0, 0.2, [0.4, 0.3, 0.2, 0.72])
+                self.add_solid(dg["bedding_outer_radius_mm"], 0, 0, 0.2, [0.15, 0.20, 0.23, 0.78])
             if self.layer_visible("inner_armour"):
                 for i in range(dg["inner_armour_wire_count"]):
                     a = 2 * np.pi * i / dg["inner_armour_wire_count"]
@@ -3793,21 +3884,21 @@ class SCLASRemoteGUI(QMainWindow):
                         dg["inner_armour_center_radius_mm"] * np.cos(a),
                         dg["inner_armour_center_radius_mm"] * np.sin(a),
                         0.3,
-                        [0.4, 0.5, 0.6, 1.0],
+                        [0.83, 0.57, 0.21, 1.0],
                     )
             if self.layer_visible("inner_sheath"):
-                self.add_solid(dg["inner_sheath_outer_radius_mm"], 0, 0, 0.4, [0.1, 0.1, 0.1, 0.82])
-                self.add_solid(dg["inner_sheath_inner_radius_mm"], 0, 0, 0.5, [0.25, 0.25, 0.28, 0.72])
+                self.add_solid(dg["inner_sheath_outer_radius_mm"], 0, 0, 0.4, [0.46, 0.53, 0.56, 0.88])
+                self.add_solid(dg["inner_sheath_inner_radius_mm"], 0, 0, 0.5, [0.52, 0.58, 0.60, 0.72])
             if self.layer_visible("filler"):
-                self.add_solid(dg["filler_outer_radius_mm"], 0, 0, 0.55, [0.24, 0.24, 0.27, 0.52])
+                self.add_solid(dg["filler_outer_radius_mm"], 0, 0, 0.55, [0.37, 0.59, 0.64, 0.72])
             if self.layer_visible("cores"):
                 for i in range(3):
                     a = np.radians(120 * i)
                     cx = dg["core_center_radius_mm"] * np.cos(a)
                     cy = dg["core_center_radius_mm"] * np.sin(a)
-                    self.add_solid(dg["core_outer_radius_mm"], cx, cy, 0.6, [0.6, 0.6, 0.65, 1.0])
-                    self.add_solid(dg["insulation_radius_mm"], cx, cy, 0.7, [0.9, 0.9, 0.9, 0.9])
-                    self.add_solid(dg["conductor_radius_mm"], cx, cy, 0.8, [0.85, 0.45, 0.15, 1.0])
+                    self.add_solid(dg["core_outer_radius_mm"], cx, cy, 0.6, [0.53, 0.58, 0.60, 1.0])
+                    self.add_solid(dg["insulation_radius_mm"], cx, cy, 0.7, [0.87, 0.80, 0.46, 0.95])
+                    self.add_solid(dg["conductor_radius_mm"], cx, cy, 0.8, [0.11, 0.20, 0.44, 1.0])
         except Exception as exc:
             self.log(f"[GEOMETRY] {exc}")
 
@@ -3845,8 +3936,148 @@ class SCLASRemoteGUI(QMainWindow):
         if not hasattr(self, "mesh_guide_label"):
             return
         target_width = self.mesh_guide_label.contentsRect().width()
-        pixmap = self.build_mesh_guide_pixmap(width=target_width)
+        pixmap = self.build_mesh_condition_guide_pixmap(width=target_width)
         self.mesh_guide_label.setPixmap(pixmap)
+
+    def build_mesh_condition_guide_pixmap(self, width: Optional[int] = None) -> QPixmap:
+        width = int(width or 980)
+        width = max(620, min(width, 1200))
+        height = 520
+        pixmap = QPixmap(width, height)
+        pixmap.fill(QColor("#f8fafc"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        painter.setPen(QPen(QColor("#d8e0ea"), 1))
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawRoundedRect(1, 1, width - 2, height - 2, 12, 12)
+
+        title_font = QFont("Segoe UI", 13)
+        title_font.setBold(True)
+        body_font = QFont("Segoe UI", 9)
+        small_font = QFont("Segoe UI", 8)
+        pressure_value = self.cond["pressure"].text() if hasattr(self, "cond") else "40.00"
+        curvature_value = self.cond["curvature"].text() if hasattr(self, "cond") else "0.08"
+        friction_value = self.cond["friction"].text() if hasattr(self, "cond") else "0.22"
+
+        painter.setFont(title_font)
+        painter.setPen(QColor("#17202a"))
+        painter.drawText(22, 30, "Analysis Structure / Mesh / Contact Guide")
+        painter.setFont(body_font)
+        painter.setPen(QColor("#64748b"))
+        painter.drawText(22, 52, "Set load, curvature, friction, and n_theta/n_r/n_z divisions before exporting the Abaqus request.")
+
+        margin = 22
+        gap = 14
+        panel_w = (width - margin * 2 - gap * 2) // 3
+        panel_h = 420
+        top = 74
+        panels = [
+            (margin, top, "Mesh setting"),
+            (margin + panel_w + gap, top, "Load condition"),
+            (margin + 2 * (panel_w + gap), top, "Contact condition"),
+        ]
+
+        for x, y, heading in panels:
+            painter.setPen(QPen(QColor("#dbe4ef"), 1))
+            painter.setBrush(QColor("#fbfdff"))
+            painter.drawRoundedRect(x, y, panel_w, panel_h, 10, 10)
+            painter.setFont(title_font)
+            painter.setPen(QColor("#17202a"))
+            painter.drawText(x + 14, y + 28, heading)
+            painter.setFont(body_font)
+
+        # Mesh setting panel: n_z, n_theta, and n_r directions.
+        x, y, _ = panels[0]
+        cx = x + panel_w // 2
+        cy = y + 155
+        painter.setPen(QPen(QColor("#93c5fd"), 2))
+        painter.setBrush(QColor("#e0f2fe"))
+        painter.drawRoundedRect(x + 28, y + 52, panel_w - 56, 58, 24, 24)
+        for i in range(10):
+            xx = x + 48 + i * max(1, (panel_w - 96) // 9)
+            painter.drawLine(xx, y + 58, xx, y + 104)
+        painter.setPen(QColor("#0f3f7a"))
+        painter.drawText(x + 34, y + 128, "n_z divisions: length-wise seed control")
+
+        painter.setPen(QPen(QColor("#334155"), 2))
+        painter.setBrush(QColor("#ecfeff"))
+        painter.drawEllipse(cx - 70, cy + 10, 140, 140)
+        painter.setBrush(QColor("#dbeafe"))
+        painter.drawEllipse(cx - 48, cy + 32, 96, 96)
+        painter.setBrush(QColor("#fef3c7"))
+        painter.drawEllipse(cx - 24, cy + 56, 48, 48)
+        painter.setPen(QPen(QColor("#f97316"), 1.5))
+        for i in range(18):
+            a = 2.0 * math.pi * i / 18
+            painter.drawLine(
+                int(cx),
+                int(cy + 80),
+                int(cx + 70 * math.cos(a)),
+                int(cy + 80 + 70 * math.sin(a)),
+            )
+        painter.setPen(QPen(QColor("#ef4444"), 2.5))
+        painter.drawArc(cx - 82, cy - 2, 164, 164, 20 * 16, 105 * 16)
+        painter.setPen(QColor("#991b1b"))
+        painter.drawText(x + 34, y + 330, "n_theta divisions: circumferential density")
+        painter.setPen(QPen(QColor("#2563eb"), 2.5))
+        painter.drawLine(cx, cy + 80, cx + 58, cy + 80)
+        painter.setPen(QColor("#1d4ed8"))
+        painter.drawText(x + 34, y + 354, "n_r divisions: layer-thickness density")
+
+        # Load condition panel: pressure, curvature, endpoint actions.
+        x, y, _ = panels[1]
+        tube_x = x + 40
+        tube_y = y + 120
+        tube_w = panel_w - 80
+        tube_h = 120
+        painter.setPen(QPen(QColor("#9a6a2f"), 2))
+        painter.setBrush(QColor("#d4a15f"))
+        painter.drawRoundedRect(tube_x, tube_y, tube_w, tube_h, 36, 36)
+        painter.setBrush(QColor("#f5d9a8"))
+        painter.drawEllipse(tube_x - 22, tube_y, 44, tube_h)
+        painter.setPen(QPen(QColor("#374151"), 1.6))
+        for i in range(5):
+            px = tube_x + 45 + i * max(1, (tube_w - 90) // 4)
+            painter.drawLine(px, tube_y - 34, px, tube_y - 7)
+            painter.drawLine(px, tube_y - 7, px - 5, tube_y - 16)
+            painter.drawLine(px, tube_y - 7, px + 5, tube_y - 16)
+        painter.drawText(tube_x + 8, tube_y - 44, "external pressure P")
+        painter.drawText(tube_x + 8, tube_y + tube_h + 24, f"P = {pressure_value} MPa")
+        painter.setPen(QPen(QColor("#ef4444"), 2.4))
+        painter.drawArc(tube_x - 24, tube_y + 12, 62, 62, 40 * 16, 240 * 16)
+        painter.drawArc(tube_x + tube_w - 38, tube_y + 42, 62, 62, 220 * 16, 240 * 16)
+        painter.setPen(QColor("#991b1b"))
+        painter.drawText(x + 34, y + 286, "curvature kappa and endpoint rotation")
+        painter.drawText(x + 34, y + 310, f"kappa = {curvature_value} 1/m")
+        painter.setPen(QColor("#475569"))
+        painter.drawText(x + 34, y + 338, "These fields are part of the backend")
+        painter.drawText(x + 34, y + 362, "analysis_conditions contract.")
+
+        # Contact condition panel: interface definitions.
+        x, y, _ = panels[2]
+        base_x = x + 44
+        base_y = y + 88
+        painter.setPen(QPen(QColor("#94a3b8"), 1.4))
+        layer_colors = ["#e5e7eb", "#d1d5db", "#fcd34d", "#d1d5db", "#e5e7eb"]
+        for i, color in enumerate(layer_colors):
+            painter.setBrush(QColor(color))
+            painter.drawPie(base_x + i * 14, base_y + i * 18, panel_w - 90 - i * 28, 260 - i * 36, 100 * 16, 94 * 16)
+        painter.setPen(QPen(QColor("#ef4444"), 3))
+        painter.drawArc(base_x + 16, base_y + 28, panel_w - 122, 204, 103 * 16, 88 * 16)
+        painter.drawArc(base_x + 44, base_y + 68, panel_w - 178, 132, 104 * 16, 84 * 16)
+        painter.setFont(body_font)
+        painter.setPen(QColor("#991b1b"))
+        painter.drawText(x + 34, y + 292, "surface-to-surface contact")
+        painter.setPen(QColor("#374151"))
+        painter.drawText(x + 34, y + 318, "armour wire to bedding / sheath")
+        painter.drawText(x + 34, y + 342, f"friction coefficient mu = {friction_value}")
+
+        painter.setFont(small_font)
+        painter.setPen(QColor("#64748b"))
+        painter.drawText(22, height - 20, "Guide only. Import a generated Abaqus INP to inspect the actual backend mesh.")
+        painter.end()
+        return pixmap
 
     def build_mesh_guide_pixmap(self, width: Optional[int] = None) -> QPixmap:
         width = int(width or 820)
@@ -4191,9 +4422,9 @@ class SCLASRemoteGUI(QMainWindow):
                 self.inp_mesh_summary.setPlainText(
                     "Generated from GUI values only.\n"
                     f"Axial divisions: {z_rows}\n"
-                    f"Filler z divisions: {filler_z_rows}\n"
-                    f"Core/Sheath θ divisions: {core_cols}\n"
-                    f"Armour wire θ divisions: {armour_cols}"
+                    f"Filler n_z divisions: {filler_z_rows}\n"
+                    f"Core/Sheath n_theta divisions: {core_cols}\n"
+                    f"Armour wire n_theta divisions: {armour_cols}"
                 )
             if hasattr(self, "inp_mesh_legend"):
                 self.inp_mesh_legend.setVisible(False)
@@ -4242,6 +4473,7 @@ class SCLASRemoteGUI(QMainWindow):
             self.view_wire.addItem(item)
             self.mesh_cache_wire.append(item)
 
+        self.view_wire.setVisible(True)
         self.view_wire.setCameraPosition(distance=span * 1.35, elevation=90, azimuth=0)
         if hasattr(self, "lbl_mesh_ready"):
             self.set_translated_metric_value(self.lbl_mesh_ready, "INP imported")

@@ -53,6 +53,7 @@ def auto_armour_count(wire_radius_mm, center_radius_mm):
 
 def backend_payload_gui_values(payload):
     geometry = payload.get("geometry_mm", {})
+    derived = payload.get("derived_geometry_mm", {})
     armour = payload.get("armour", {})
     mesh = payload.get("mesh", {})
     analysis = payload.get("analysis_conditions", {})
@@ -63,9 +64,8 @@ def backend_payload_gui_values(payload):
             "r_cond": first_present(geometry, "conductor_radius_mm"),
             "r_insu": first_present(geometry, "insulation_radius_mm"),
             "roc": first_present(geometry, "core_outer_radius_mm", "radius_of_core_mm"),
-            "coc": first_present(geometry, "core_center_radius_mm"),
             "tis": first_present(geometry, "inner_sheath_thickness_mm"),
-            "gap": first_present(geometry, "clearance_gap_mm"),
+            "bedding_thickness": first_present(geometry, "bedding_thickness_mm") or first_present(derived, "bedding_thickness_mm"),
             "tos": first_present(geometry, "outer_sheath_thickness_mm"),
             "r_ia": first_present(armour, "inner_wire_radius_mm", "inner_armour_wire_radius_mm"),
             "no_ia": first_present(armour, "inner_wire_count", "inner_armour_wire_count"),
@@ -121,14 +121,15 @@ def resolved_backend_geometry(payload):
     roc = float(geometry.get("roc") or 15.3)
     coc = core_center_from_outer_radius(roc)
     tis = float(geometry.get("tis") or 4.5)
-    gap = float(geometry.get("gap") or 0.5)
+    gap = 0.0
+    bedding = float(geometry.get("bedding_thickness") or 0.6)
     ria = float(geometry.get("r_ia") or 2.0)
     roa = float(geometry.get("r_oa") or 2.0)
     iris = roc + coc
     oris = iris + tis
     co_ia = oris + gap + ria
     irb = co_ia + ria
-    orb = irb + 0.6
+    orb = irb + bedding
     co_oa = orb + gap + roa
     nia_input = int(float(geometry.get("no_ia") or 0))
     noa_input = int(float(geometry.get("no_oa") or 0))

@@ -1,6 +1,32 @@
 # CURRENT_HANDOFF_KR (현재 인수인계 및 개발 현황)
 
-최종 갱신일: 2026-07-06 KST
+최종 갱신일: 2026-07-08 KST
+
+## 2026-07-08 GUI 설계/메시 탭 정리
+
+* **Design 탭 피드백 반영**:
+  * 상단 import 영역은 `Import key,value CSV`만 남기고 backend JSON/preset 버튼은 제거했습니다.
+  * 기존 `Digital Twin`/2D-3D toggle 표현을 제거하고, 2D 전용 `Section Preview`와 단순 `Layer Legend` 중심으로 정리했습니다.
+  * 사이드바 탭명은 `Design`, `Finite Element Analysis Setting`, `Analysis Results`로 단순화했습니다.
+  * 우측 상단 `Model`, `Result`, `Local project` 상태 표시는 화면에서 제거했습니다. 내부 상태 라벨은 기존 실행 흐름 보호를 위해 숨김 상태로 유지합니다.
+  * `Core Package`는 `Core Section`, `Helix Lay`는 `Helix Pitch Angle`로 변경했습니다.
+  * 사용자 입력에서 `core center radius`, `clearance gap`은 제거 상태를 유지하고, 아머-아머 사이 `Bedding thickness` 입력을 사용합니다.
+* **Material table 정리**:
+  * 컬럼은 `Layer`, `Material`, `Young's modulus E (GPa)`, `Poisson's ratio nu (-)`, `Density rho (kg/m^3)` 순서입니다.
+  * 기존 category 컬럼은 제거했습니다.
+  * material 행은 논문 기준 8행(`Outer Sheath`, `Filler`, `Insulation`, `Conductor`, `Armour Wire`, `Inner Sheath`, `Core Shield`, `Bedding`)으로 정리했습니다.
+  * inner/outer armour는 별도 material 행으로 쪼개지 않고 `Armour Wire` 한 행을 공유합니다. Abaqus runner도 고정 row index가 아니라 material 이름/alias로 물성을 찾도록 수정했습니다.
+* **Mesh 탭 방향 전환**:
+  * strategy/armour model은 화면에서 제거하고 backend 기본값을 full 3D segment + solid wire로 고정했습니다.
+  * 기존 mesh readiness / generate-preview 흐름은 제거했습니다.
+  * Mesh 탭은 z/theta/r division, 외압/곡률/endpoint loading, contact/friction 조건을 설명하는 guide 그림 중심으로 발전시켰습니다.
+  * `Finite Element Analysis Setting` 탭 상단에 `Analysis Structure Setup` 영역을 추가하여 외압 하중, 목표 곡률, 마찰계수 입력칸을 배치했습니다. 이 값들은 기존 backend `analysis_conditions` payload와 같은 위젯을 사용합니다.
+  * mesh setting label은 `n_z`, `n_theta`, `n_r` rich-text 아래첨자 표기로 복구했고, guide header의 `Top`/`Iso`/`Reset` 카메라 버튼은 제거했습니다.
+  * 실제 생성 mesh 검토는 `Import Abaqus INP`로 확인합니다.
+* **검증 완료**:
+  * `python -m py_compile code/sclas_remote_gui.py code/sclas_backend_gui_bridge.py code/abaqus_runner.py`
+  * `python code/sclas_self_check.py`
+  * offscreen `run_sclas.bat` GUI smoke
 
 ## 2026-07-06 Windows/Abaqus Lab PC 업데이트
 

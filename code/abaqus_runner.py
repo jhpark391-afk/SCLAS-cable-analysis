@@ -216,10 +216,10 @@ def normalized_geometry(data):
     r_insu = as_float(geo.get("insulation_radius_mm"), 11.3)
     tis = as_float(geo.get("inner_sheath_thickness_mm"), 4.5)
     tos = as_float(geo.get("outer_sheath_thickness_mm"), 4.5)
-    gap = as_float(geo.get("clearance_gap_mm"), 0.5)
+    gap = as_float(geo.get("clearance_gap_mm"), 0.0)
     ria = as_float(arm.get("inner_wire_radius_mm", dgeo.get("inner_armour_wire_radius_mm")), 2.0)
     roa = as_float(arm.get("outer_wire_radius_mm", dgeo.get("outer_armour_wire_radius_mm")), 2.0)
-    bedding = as_float(dgeo.get("bedding_thickness_mm"), 0.6)
+    bedding = as_float(geo.get("bedding_thickness_mm", dgeo.get("bedding_thickness_mm")), 0.6)
 
     iris = roc + coc
     oris = iris + tis
@@ -273,7 +273,8 @@ def normalize_payload(data):
     geo["core_center_radius_mm"] = geometry["core_center_radius_mm"]
     geo.setdefault("inner_sheath_thickness_mm", 4.5)
     geo.setdefault("outer_sheath_thickness_mm", 4.5)
-    geo.setdefault("clearance_gap_mm", 0.5)
+    geo.setdefault("bedding_thickness_mm", geometry["bedding_thickness_mm"])
+    geo.setdefault("clearance_gap_mm", 0.0)
     data["geometry_mm"] = geo
     merged_dgeo = dict(data.get("derived_geometry_mm", {}))
     merged_dgeo.update(geometry)
@@ -555,21 +556,36 @@ def build_abaqus_model(data, job_dir):
     ra = m.rootAssembly
 
     mat_data = data['materials']
-    mat_map = {
-        'Conductor':   1,
-        'Insulation':  2,
-        'CoreShield':  3,
-        'InnerSheath': 5,
-        'InnerArmour': 6,
-        'Bedding':     7,
-        'OuterArmour': 8,
-        'OuterSheath': 9,
-        'Filler':      4,
+    mat_aliases = {
+        'Conductor':   ['conductor'],
+        'Insulation':  ['insulation'],
+        'CoreShield':  ['core shield', 'coreshield'],
+        'InnerSheath': ['inner sheath', 'innersheath'],
+        'InnerArmour': ['armour wire', 'armor wire', 'inner armour', 'inner armor'],
+        'Bedding':     ['bedding'],
+        'OuterArmour': ['armour wire', 'armor wire', 'outer armour', 'outer armor'],
+        'OuterSheath': ['outer sheath', 'outersheath'],
+        'Filler':      ['filler'],
     }
 
+    def _mat_text(item):
+        parts = [
+            str(item.get('name', '')),
+            str(item.get('material', '')),
+        ]
+        return ' '.join(parts).replace('_', ' ').lower()
+
+    def _find_material(aliases):
+        for item in mat_data:
+            text = _mat_text(item)
+            for alias in aliases:
+                if alias in text:
+                    return item
+        raise KeyError('Required material not found: ' + ', '.join(aliases))
+
     materials = []
-    for name, idx in mat_map.items():
-        mat = next(i for i in mat_data if i['index'] == idx)
+    for name, aliases in mat_aliases.items():
+        mat = _find_material(aliases)
         E  = mat['elastic_modulus_GPa'] * 1000
         nu = mat['poisson_ratio']
         materials.append((name, E, nu))
