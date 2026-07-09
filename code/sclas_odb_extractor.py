@@ -78,6 +78,14 @@ def write_result_csv(path, rows):
             writer.writerow(["{0:.12g}".format(curvature), "{0:.12g}".format(moment)])
 
 
+def write_force_displacement_csv(path, rows):
+    with open(path_text(path), "w") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(["u1_mm", "rf1_n"])
+        for u1_mm, rf1_n in rows:
+            writer.writerow(["{0:.12g}".format(u1_mm), "{0:.12g}".format(rf1_n)])
+
+
 def summarize_curve_rows(rows):
     summary = {
         "row_count": len(rows),
@@ -118,6 +126,46 @@ def summarize_curve_rows(rows):
     return summary
 
 
+def summarize_force_displacement_rows(rows):
+    summary = {
+        "row_count": len(rows),
+        "min_u1_mm": None,
+        "max_u1_mm": None,
+        "max_abs_u1_mm": None,
+        "min_rf1_n": None,
+        "max_rf1_n": None,
+        "max_abs_rf1_n": None,
+        "loop_energy_proxy_n_mm": None,
+        "u1_span_mm": None,
+        "rf1_span_n": None,
+    }
+    if not rows:
+        return summary
+    displacements = [float(row[0]) for row in rows]
+    forces = [float(row[1]) for row in rows]
+    min_u1 = min(displacements)
+    max_u1 = max(displacements)
+    min_rf1 = min(forces)
+    max_rf1 = max(forces)
+    energy_proxy = 0.0
+    for idx in range(len(rows) - 1):
+        du = displacements[idx + 1] - displacements[idx]
+        avg_f = 0.5 * (forces[idx + 1] + forces[idx])
+        energy_proxy += avg_f * du
+    summary.update({
+        "min_u1_mm": min_u1,
+        "max_u1_mm": max_u1,
+        "max_abs_u1_mm": max(abs(value) for value in displacements),
+        "min_rf1_n": min_rf1,
+        "max_rf1_n": max_rf1,
+        "max_abs_rf1_n": max(abs(value) for value in forces),
+        "loop_energy_proxy_n_mm": energy_proxy,
+        "u1_span_mm": max_u1 - min_u1,
+        "rf1_span_n": max_rf1 - min_rf1,
+    })
+    return summary
+
+
 def build_result_quality(extraction_summary, existing_summary=None):
     rows = int(extraction_summary.get("rows_written") or 0)
     status = extraction_summary.get("status")
@@ -135,6 +183,13 @@ def build_result_quality(extraction_summary, existing_summary=None):
             "is_research_curve": False,
             "backend_readiness_status": "odb_extraction_failed",
             "next_step": "Fix ODB reference-point output extraction before using Abaqus results in the GUI.",
+        }
+    if extraction_summary.get("curve_mode") == "rp_u1_rf1_preview":
+        return {
+            "curve_class": "rp_force_displacement_preview",
+            "is_research_curve": False,
+            "backend_readiness_status": "abaqus_odb_force_displacement_preview",
+            "next_step": "Use this as a first Abaqus ODB visualization; add UR2/RM2 or calibrated moment-curvature output before claiming a research bending curve.",
         }
     if is_reduced_smoke and rows >= 2:
         return {
@@ -620,7 +675,131 @@ def extract_from_fields(step, node_set, effective_length_m):
     }
 
 
-def extract_odb(odb_path, job_dir, input_data_path):
+def extract_force_displacement_from_history(step):
+    preferred_regions = []
+    fallback_regions = []
+    for region_name, region in step.historyRegions.items():
+        outputs = region.historyOutputs
+        u1_key = find_history_key(outputs, ["U1", "Spatial displacement: U1"])
+        rf1_key = find_history_key(outputs, ["RF1", "Reaction force: RF1"])
+        if u1_key and rf1_key:
+            upper = region_name.upper()
+            if "RIGHT" in upper or "SCLAS_RP" in upper or "RP" in upper:
+                preferred_regions.append((region_name, region, u1_key, rf1_key))
+            else:
+                fallback_regions.append((region_name, region, u1_key, rf1_key))
+    candidates = preferred_regions + fallback_regions
+    if not candidates:
+        return [], None
+    for region_name, region, u1_key, rf1_key in candidates:
+        try:
+            u1_raw = region.historyOutputs[u1_key].data
+            rf1_raw = region.historyOutputs[rf1_key].data
+        except Exception:
+            continue
+        if u1_raw is None or rf1_raw is None:
+            continue
+        u1_data = list(u1_raw)
+        rf1_data = list(rf1_raw)
+        count = min(len(u1_data), len(rf1_data))
+        if count == 0:
+            continue
+        rows = []
+        for i in range(count):
+            u1_mm = float(u1_data[i][1])
+            rf1_n = float(rf1_data[i][1])
+            rows.append((u1_mm, rf1_n))
+        return rows, {
+            "method": "history_force_displacement",
+            "history_region": region_name,
+            "displacement_output": u1_key,
+            "reaction_force_output": rf1_key,
+        }
+    return [], None
+
+
+def extract_force_displacement_from_fields(step, node_set):
+    rows = []
+    frames_used = 0
+    for frame in step.frames:
+        u1_mm = field_value(frame, "U", node_set, 0)
+        rf1_n = field_value(frame, "RF", node_set, 0)
+        if u1_mm is None or rf1_n is None:
+            continue
+        rows.append((u1_mm, rf1_n))
+        frames_used += 1
+    if not rows:
+        return [], None
+    return rows, {
+        "method": "field_force_displacement",
+        "frames_used": frames_used,
+        "displacement_output": "U1",
+        "reaction_force_output": "RF1",
+    }
+
+
+def field_value_for_identity(frame, output_name, instance_name, node_label, component_index):
+    if output_name not in frame.fieldOutputs.keys():
+        return None
+    for value in frame.fieldOutputs[output_name].values:
+        value_instance = getattr(value, "instance", None)
+        value_instance_name = getattr(value_instance, "name", None) if value_instance is not None else None
+        if value_instance_name == instance_name and getattr(value, "nodeLabel", None) == node_label:
+            return scalar_component(value.data, component_index)
+    return None
+
+
+def find_reaction_force_candidate(step):
+    best_candidate = None
+    best_abs_rf1 = 0.0
+    for frame in reversed(step.frames):
+        if "RF" not in frame.fieldOutputs.keys():
+            continue
+        for value in frame.fieldOutputs["RF"].values:
+            rf1 = scalar_component(value.data, 0)
+            if rf1 is None:
+                continue
+            abs_rf1 = abs(rf1)
+            if abs_rf1 > best_abs_rf1:
+                value_instance = getattr(value, "instance", None)
+                instance_name = getattr(value_instance, "name", None) if value_instance is not None else None
+                best_abs_rf1 = abs_rf1
+                best_candidate = (instance_name, getattr(value, "nodeLabel", None), rf1)
+        if best_candidate and best_abs_rf1 > 0.0:
+            return best_candidate, best_abs_rf1
+    return best_candidate, best_abs_rf1
+
+
+def extract_force_displacement_from_auto_rp_fields(step):
+    candidate, max_abs_rf1 = find_reaction_force_candidate(step)
+    if not candidate:
+        return [], None
+    instance_name, node_label, sample_rf1 = candidate
+    rows = []
+    frames_used = 0
+    for frame in step.frames:
+        u1_mm = field_value_for_identity(frame, "U", instance_name, node_label, 0)
+        rf1_n = field_value_for_identity(frame, "RF", instance_name, node_label, 0)
+        if u1_mm is None or rf1_n is None:
+            continue
+        rows.append((u1_mm, rf1_n))
+        frames_used += 1
+    if not rows:
+        return [], None
+    return rows, {
+        "method": "field_force_displacement_auto_rp",
+        "frames_used": frames_used,
+        "rp_instance": instance_name,
+        "rp_node_label": node_label,
+        "rp_selection": "largest absolute RF1 field value because no named RP node set was found",
+        "sample_rf1_n": sample_rf1,
+        "max_abs_rf1_n": max_abs_rf1,
+        "displacement_output": "U1",
+        "reaction_force_output": "RF1",
+    }
+
+
+def extract_odb(odb_path, job_dir, input_data_path, skip_local_fields=False):
     try:
         from odbAccess import openOdb
     except Exception as exc:
@@ -645,11 +824,17 @@ def extract_odb(odb_path, job_dir, input_data_path):
                 "odb_file": os.path.basename(odb_path),
             }, []
 
-        local_field_summary = summarize_local_fields(steps)
+        local_field_summary = {} if skip_local_fields else summarize_local_fields(steps)
         history_rows = []
         field_rows = []
+        force_history_rows = []
+        force_field_rows = []
+        force_auto_field_rows = []
         history_info = None
         field_info = None
+        force_history_info = None
+        force_field_info = None
+        force_auto_field_info = None
         step_names = []
         node_set_name = None
         node_set_name, node_set = find_node_set(odb.rootAssembly, RIGHT_RP_TOKENS)
@@ -664,12 +849,38 @@ def extract_odb(odb_path, job_dir, input_data_path):
                 if step_field_info and field_info is None:
                     field_info = step_field_info
                 append_nonduplicate_rows(field_rows, step_field_rows)
+                step_force_field_rows, step_force_field_info = extract_force_displacement_from_fields(step, node_set)
+                if step_force_field_info and force_field_info is None:
+                    force_field_info = step_force_field_info
+                append_nonduplicate_rows(force_field_rows, step_force_field_rows)
+            else:
+                step_force_auto_rows, step_force_auto_info = extract_force_displacement_from_auto_rp_fields(step)
+                if step_force_auto_info and force_auto_field_info is None:
+                    force_auto_field_info = step_force_auto_info
+                append_nonduplicate_rows(force_auto_field_rows, step_force_auto_rows)
+            step_force_history_rows, step_force_history_info = extract_force_displacement_from_history(step)
+            if step_force_history_info and force_history_info is None:
+                force_history_info = step_force_history_info
+            append_nonduplicate_rows(force_history_rows, step_force_history_rows)
 
         rows = history_rows
         method_info = history_info
+        curve_mode = "moment_curvature"
         if field_rows and len(field_rows) > len(rows):
             rows = field_rows
             method_info = field_info
+        force_rows = force_history_rows
+        force_method_info = force_history_info
+        if force_field_rows and len(force_field_rows) > len(force_rows):
+            force_rows = force_field_rows
+            force_method_info = force_field_info
+        if force_auto_field_rows and len(force_auto_field_rows) > len(force_rows):
+            force_rows = force_auto_field_rows
+            force_method_info = force_auto_field_info
+        if len(rows) < 2 and len(force_rows) >= 2:
+            rows = force_rows
+            method_info = force_method_info
+            curve_mode = "rp_u1_rf1_preview"
 
         if len(rows) < 2:
             available_field_outputs = []
@@ -685,8 +896,11 @@ def extract_odb(odb_path, job_dir, input_data_path):
                 "local_field_summary": local_field_summary,
                 "history_rows_available": len(history_rows),
                 "field_rows_available": len(field_rows),
+                "force_history_rows_available": len(force_history_rows),
+                "force_field_rows_available": len(force_field_rows),
+                "force_auto_field_rows_available": len(force_auto_field_rows),
                 "history_region_count": len(steps[-1][1].historyRegions.keys()),
-                "next_step": "Regenerate the input deck with SCLAS_RP_FieldOutput/SCLAS_RightRP_HistoryOutput enabled and rerun the smoke solve.",
+                "next_step": "Regenerate the input deck with UR2/RM2 moment-curvature output or RP U1/RF1 force-displacement output enabled.",
             }, []
 
         summary = {
@@ -694,15 +908,32 @@ def extract_odb(odb_path, job_dir, input_data_path):
             "odb_file": os.path.basename(odb_path),
             "step": step_names[0],
             "steps": step_names,
+            "curve_mode": curve_mode,
             "effective_length_mm": effective_length_mm,
             "rows_written": len(rows),
             "history_rows_available": len(history_rows),
             "field_rows_available": len(field_rows),
-            "moment_units_assumed": "N-mm converted to kN-m",
-            "curvature_definition": "UR2 / effective_length_m",
-            "curve_summary": summarize_curve_rows(rows),
+            "force_history_rows_available": len(force_history_rows),
+            "force_field_rows_available": len(force_field_rows),
+            "force_auto_field_rows_available": len(force_auto_field_rows),
             "local_field_summary": local_field_summary,
         }
+        if curve_mode == "rp_u1_rf1_preview":
+            summary.update({
+                "axis_mapping": {
+                    "x": "RP U1 displacement (mm)",
+                    "y": "RP RF1 reaction force (N)",
+                    "result_data_csv_note": "result_data.csv keeps legacy GUI column names for display compatibility; use rp_u1_rf1_data.csv for physical axis labels.",
+                },
+                "curve_summary": summarize_curve_rows(rows),
+                "force_displacement_summary": summarize_force_displacement_rows(rows),
+            })
+        else:
+            summary.update({
+                "moment_units_assumed": "N-mm converted to kN-m",
+                "curvature_definition": "UR2 / effective_length_m",
+                "curve_summary": summarize_curve_rows(rows),
+            })
         if method_info:
             summary.update(method_info)
         if node_set_name:
@@ -719,6 +950,8 @@ def parse_args(argv):
     parser.add_argument("--input-data", default="input_data.json")
     parser.add_argument("--output-csv", default="result_data.csv")
     parser.add_argument("--summary", default="odb_extraction_summary.json")
+    parser.add_argument("--skip-local-fields", action="store_true",
+                        help="Skip heavy local field scans and extract only global RP curve outputs.")
     return parser.parse_args(argv)
 
 
@@ -737,9 +970,13 @@ def main(argv):
         summary_path = os.path.join(job_dir, summary_path)
 
     try:
-        summary, rows = extract_odb(odb_path, job_dir, input_data_path)
+        print("Opening ODB: {0}".format(odb_path))
+        sys.stdout.flush()
+        summary, rows = extract_odb(odb_path, job_dir, input_data_path, skip_local_fields=args.skip_local_fields)
         if summary.get("status") == "extracted":
             write_result_csv(output_csv, rows)
+            if summary.get("curve_mode") == "rp_u1_rf1_preview":
+                write_force_displacement_csv(os.path.join(job_dir, "rp_u1_rf1_data.csv"), rows)
         write_json(summary_path, summary)
         update_result_summary(job_dir, summary)
         print("ODB extraction status: {0}".format(summary.get("status")))

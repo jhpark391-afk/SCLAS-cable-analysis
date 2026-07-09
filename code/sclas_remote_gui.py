@@ -2008,6 +2008,7 @@ class SCLASRemoteGUI(QMainWindow):
         for check in self.study_checks.values():
             check.setToolTip("Enable this assessment in the exported backend contract.")
             scope_layout.addWidget(check)
+        self.study_scope_box = scope_box
 
         backend_box = QFrame()
         backend_layout = QVBoxLayout(backend_box)
