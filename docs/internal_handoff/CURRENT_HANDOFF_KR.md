@@ -1,4 +1,13 @@
-﻿# 2026-07-09 GUI-Backend 정보 교환 계약 확립
+﻿# 2026-07-09 GUI 변수 정리 / 코드 구조 지도 추가
+
+* 새 문서: `docs/guides/SCLAS_GUI_VARIABLE_CLEANUP_AND_CODE_MAP_KR.md`
+* 보광이 피드백 기준으로 GUI 값을 `User Input`, `Derived`, `Fixed / Backend Default`, `Output`으로 나누어 정리했습니다.
+* 각 입력값이 어느 탭/섹션에 있고, 코드 key와 JSON path가 무엇인지 회의용 표로 정리했습니다.
+* `code/sclas_remote_gui.py`, `code/sclas_backend_gui_bridge.py`, `code/abaqus_runner.py`의 주요 함수 위치와 값 흐름을 설명했습니다.
+* 다음 cleanup 후보는 `Abaqus element type` combo 축소/고정, future analysis 변수 숨김, Derived Pitch/Length 표시 방식 조정입니다.
+
+---
+# 2026-07-09 GUI-Backend 정보 교환 계약 확립
 
 * 새 계약 문서: `docs/guides/SCLAS_GUI_BACKEND_EXCHANGE_CONTRACT_KR.md`
 * 전체 흐름을 `GUI 입력 -> input_data.json -> Abaqus backend -> result_data.csv/result_summary.json/ODB -> GUI 표시`로 고정했습니다.
@@ -120,4 +129,5 @@ graph TD
 
 1. **복합 하중 구속 조건 자동화**: Torsion(비틀림) 및 인장력을 Cyclic Bending(반복 굽힘)과 다중 스텝으로 조합 적용하는 아바쿠스 제어 자동화.
 2. **국부 지표 ODB 세부 파싱**: CPRESS(접촉압력), COPEN(접촉이격), CSLIP(마찰슬립량) 등의 미세 국부 필드값을 ODB에서 자동으로 분리 후처리하여 시각화.
+
 

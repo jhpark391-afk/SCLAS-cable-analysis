@@ -7,6 +7,10 @@ Last updated: 2026-07-09 KST
 - Added `docs/guides/SCLAS_GUI_BACKEND_EXCHANGE_CONTRACT_KR.md` as the current
   team-facing contract for `GUI -> input_data.json -> Abaqus backend ->
   result_data.csv/result_summary.json/ODB -> GUI`.
+- Added `docs/guides/SCLAS_GUI_VARIABLE_CLEANUP_AND_CODE_MAP_KR.md` as the
+  practical variable cleanup/code-map note for Bogwang alignment. It separates
+  GUI values into user input, derived, fixed/backend default, and output values,
+  and maps major GUI widgets to their code locations and JSON paths.
 - The Design tab now exposes `core_count` with default `3`. The GUI computes
   `derived_geometry_mm.core_pitch_length_mm`,
   `derived_geometry_mm.inner_armour_pitch_length_mm`,
