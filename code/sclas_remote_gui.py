@@ -497,6 +497,31 @@ def make_metrics(k: np.ndarray, m_knm: np.ndarray, source: str) -> dict:
     }
 
 
+def result_curve_mode(summary: dict) -> str:
+    if not isinstance(summary, dict):
+        return ""
+    odb = summary.get("odb_extraction", {})
+    if not isinstance(odb, dict):
+        odb = {}
+    return str(summary.get("curve_mode") or odb.get("curve_mode") or "")
+
+
+def force_displacement_summary(summary: dict) -> dict:
+    if not isinstance(summary, dict):
+        return {}
+    direct = summary.get("force_displacement_summary")
+    if isinstance(direct, dict):
+        return direct
+    odb = summary.get("odb_extraction", {})
+    if isinstance(odb, dict) and isinstance(odb.get("force_displacement_summary"), dict):
+        return odb["force_displacement_summary"]
+    return {}
+
+
+def is_force_displacement_preview(summary: dict) -> bool:
+    return result_curve_mode(summary) == "rp_u1_rf1_preview"
+
+
 def create_job_package(job_root: Path, payload: dict) -> Path:
     job_id = payload["metadata"]["job_id"]
     job_dir = job_root / job_id
@@ -2085,7 +2110,8 @@ class SCLASRemoteGUI(QMainWindow):
         result_panel = QFrame(); result_panel.setObjectName("Card")
         right = QVBoxLayout(result_panel)
         result_header = QHBoxLayout()
-        result_header.addWidget(self.header("Moment-Curvature Result"))
+        self.result_title_label = self.header("Moment-Curvature Result")
+        result_header.addWidget(self.result_title_label)
         result_header.addStretch()
         self.btn_export_plot = QPushButton("Export PNG")
         self.btn_compare_csv = QPushButton("Compare CSV")
@@ -2347,6 +2373,7 @@ class SCLASRemoteGUI(QMainWindow):
         )
         value_label.setProperty("no_translate", True)
         layout.addWidget(title_label); layout.addWidget(value_label)
+        box.title_label = title_label
         box.value_label = value_label
         return box
 
@@ -3294,14 +3321,14 @@ class SCLASRemoteGUI(QMainWindow):
     def load_result_bundle(self, csv_path: Path, source: str = "RESULT_LOAD") -> None:
         k, m = read_result_csv(csv_path)
         metrics = make_metrics(k, m, source=source)
-        self.update_plot(k, m)
-        self.update_metrics(metrics)
         summary = read_json(csv_path.with_name("result_summary.json"), metrics)
         if isinstance(summary, dict):
             summary.setdefault("source", metrics.get("source", source))
             summary.setdefault("num_points", metrics["num_points"])
             summary.setdefault("max_abs_moment_kn_m", metrics["max_abs_moment_kn_m"])
             summary.setdefault("hysteresis_loss_kj_per_m_proxy", metrics["hysteresis_loss_kj_per_m_proxy"])
+        self.update_plot(k, m, summary)
+        self.update_metrics(metrics, summary)
         self.update_summary_panel(summary)
         self.set_badge(self.lbl_result_status, "Result: loaded", "good")
         self.log(f"[RESULT] Loaded {csv_path}")
@@ -4045,16 +4072,55 @@ class SCLASRemoteGUI(QMainWindow):
             QMessageBox.critical(self, "CSV load error", str(exc))
 
     # ---------------- Plot / geometry ----------------
-    def update_plot(self, k: np.ndarray, m: np.ndarray) -> None:
+    def update_plot(self, k: np.ndarray, m: np.ndarray, summary: dict = None) -> None:
         self.current_k = k
         self.current_m = m
-        self.curve.setData(k, m)
+        if is_force_displacement_preview(summary or {}):
+            if hasattr(self, "result_title_label"):
+                self.result_title_label.setText("RP Force-Displacement Result")
+            self.plot_canvas.setLabel("left", "RP Reaction Force RF1", units="N")
+            self.plot_canvas.setLabel("bottom", "RP Displacement U1 (micrometer)")
+            try:
+                self.plot_canvas.getAxis("bottom").enableAutoSIPrefix(False)
+            except Exception:
+                pass
+            try:
+                self.curve.setName("RP U1-RF1")
+            except Exception:
+                pass
+            plot_x = k * 1000.0
+        else:
+            if hasattr(self, "result_title_label"):
+                self.result_title_label.setText("Moment-Curvature Result")
+            self.plot_canvas.setLabel("left", "Bending Moment M", units="kN.m")
+            self.plot_canvas.setLabel("bottom", "Curvature \u03ba", units="1/m")
+            try:
+                self.plot_canvas.getAxis("bottom").enableAutoSIPrefix(True)
+            except Exception:
+                pass
+            try:
+                self.curve.setName("Primary")
+            except Exception:
+                pass
+            plot_x = k
+        self.curve.setData(plot_x, m)
         self.plot_canvas.autoRange()
 
-    def update_metrics(self, data: dict) -> None:
+    def update_metrics(self, data: dict, summary: dict = None) -> None:
         self.current_metrics = dict(data)
-        self.lbl_peak.value_label.setText(f"{data['max_abs_moment_kn_m']:.4g} kN.m")
-        self.lbl_loss.value_label.setText(f"{data['hysteresis_loss_kj_per_m_proxy']:.4g}")
+        if is_force_displacement_preview(summary or {}):
+            force_summary = force_displacement_summary(summary or {})
+            self.lbl_peak.title_label.setText("Peak |RF1|")
+            self.lbl_loss.title_label.setText("Loop work proxy")
+            peak = float(force_summary.get("max_abs_rf1_n", 0.0))
+            loss = float(force_summary.get("loop_energy_proxy_n_mm", 0.0))
+            self.lbl_peak.value_label.setText(f"{peak:.4g} N")
+            self.lbl_loss.value_label.setText(f"{loss:.4g} N.mm")
+        else:
+            self.lbl_peak.title_label.setText("Peak |M|")
+            self.lbl_loss.title_label.setText("Loop loss proxy")
+            self.lbl_peak.value_label.setText(f"{data['max_abs_moment_kn_m']:.4g} kN.m")
+            self.lbl_loss.value_label.setText(f"{data['hysteresis_loss_kj_per_m_proxy']:.4g}")
         self.lbl_points.value_label.setText(str(data["num_points"]))
         self.update_compare_panel()
 
@@ -4191,28 +4257,54 @@ class SCLASRemoteGUI(QMainWindow):
         odb = data.get("odb_extraction", {})
         endpoint_validation = data.get("endpoint_sweep_validation", {})
         derived = data.get("derived_placeholder_metrics", {})
+        force_summary = force_displacement_summary(data)
+        force_preview = is_force_displacement_preview(data)
         if self.ui_language == "KO":
-            lines = [
-                f"출처: {data.get('source', '-')}",
-                f"상태: {data.get('status', 'loaded')}",
-                f"계산 시각: {data.get('computed_at', '-')}",
-                f"최대 |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} kN.m",
-                f"루프 손실: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
-                f"데이터 수: {data.get('num_points', '-')}",
-                f"메시 상태: {mesh_status}",
-                f"활성 연구 범위: {enabled_text}",
-            ]
+            if force_preview:
+                lines = [
+                    f"출처: {data.get('source', '-')}",
+                    f"상태: {data.get('status', 'loaded')}",
+                    f"곡선 모드: RP U1-RF1 변위-반력 preview",
+                    f"최대 |RF1|: {float(force_summary.get('max_abs_rf1_n', 0.0)):.6g} N",
+                    f"U1 범위: {float(force_summary.get('u1_span_mm', 0.0)) * 1000.0:.6g} micrometer",
+                    f"루프 면적 proxy: {float(force_summary.get('loop_energy_proxy_n_mm', 0.0)):.6g} N.mm",
+                    f"데이터 수: {data.get('num_points', '-')}",
+                    "주의: 이 곡선은 모멘트-곡률 연구 곡선이 아니라 ODB 결과 확인용 변위-반력 루프입니다.",
+                ]
+            else:
+                lines = [
+                    f"출처: {data.get('source', '-')}",
+                    f"상태: {data.get('status', 'loaded')}",
+                    f"계산 시각: {data.get('computed_at', '-')}",
+                    f"최대 |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} kN.m",
+                    f"루프 손실: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
+                    f"데이터 수: {data.get('num_points', '-')}",
+                    f"메시 상태: {mesh_status}",
+                    f"활성 연구 범위: {enabled_text}",
+                ]
         else:
-            lines = [
-                f"Source: {data.get('source', '-')}",
-                f"Status: {data.get('status', 'loaded')}",
-                f"Computed: {data.get('computed_at', '-')}",
-                f"Peak |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} kN.m",
-                f"Loop loss: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
-                f"Points: {data.get('num_points', '-')}",
-                f"Mesh status: {mesh_status}",
-                f"Enabled scope: {enabled_text}",
-            ]
+            if force_preview:
+                lines = [
+                    f"Source: {data.get('source', '-')}",
+                    f"Status: {data.get('status', 'loaded')}",
+                    "Curve mode: RP U1-RF1 force-displacement preview",
+                    f"Peak |RF1|: {float(force_summary.get('max_abs_rf1_n', 0.0)):.6g} N",
+                    f"U1 span: {float(force_summary.get('u1_span_mm', 0.0)) * 1000.0:.6g} micrometer",
+                    f"Loop area proxy: {float(force_summary.get('loop_energy_proxy_n_mm', 0.0)):.6g} N.mm",
+                    f"Points: {data.get('num_points', '-')}",
+                    "Note: this is an ODB verification loop, not the final moment-curvature research curve.",
+                ]
+            else:
+                lines = [
+                    f"Source: {data.get('source', '-')}",
+                    f"Status: {data.get('status', 'loaded')}",
+                    f"Computed: {data.get('computed_at', '-')}",
+                    f"Peak |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} kN.m",
+                    f"Loop loss: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
+                    f"Points: {data.get('num_points', '-')}",
+                    f"Mesh status: {mesh_status}",
+                    f"Enabled scope: {enabled_text}",
+                ]
 
         if isinstance(quality, dict) and quality:
             if self.ui_language == "KO":
