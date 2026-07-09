@@ -1,6 +1,28 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-07-09 KST
+Last updated: 2026-07-10 KST
+
+## Mesh Count/Size Input Feedback - 2026-07-10 KST
+
+- Added a `Mesh input basis` control to the FEA Setting tab.
+  `Division count` keeps the previous direct `n_z`, `n_theta`, and `n_r`
+  workflow. `Target size` lets the user enter target mesh sizes in mm.
+- The GUI resolves target sizes into the existing backend-compatible count
+  keys before writing `input_data.json`: `mesh.axial_divisions`,
+  `mesh.core_circumferential_divisions`,
+  `mesh.armour_circumferential_divisions`,
+  `mesh.inner_sheath_radial_divisions`,
+  `mesh.bedding_radial_divisions`, and
+  `mesh.outer_sheath_radial_divisions`.
+- The original target sizes are retained under `mesh.target_sizes_mm` and
+  `mesh_controls.target_sizes_mm` for review and handoff.
+- Circumferential divisions are now recorded as "multiples of 4 recommended
+  for demos" but are not enforced, matching the team feedback that the actual
+  Abaqus mesh may not use the requested count exactly.
+- Mesh method feedback is recorded as policy metadata:
+  general solids prefer `medial_axis`; armour remains
+  `front_or_medial_axis_pending_backend_confirmation` until Bogwang/backend
+  confirms whether it should be fixed.
 
 ## Menard-Cartraud Pitch/Period Frontend Automation - 2026-07-09 KST
 

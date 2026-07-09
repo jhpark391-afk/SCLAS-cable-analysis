@@ -39,12 +39,19 @@
 | Finite Element Analysis Setting | Analysis Structure Setup | External pressure load | `pressure` | 40.00 | MPa | `analysis_conditions.external_pressure_mpa` | 실제 해석 기본 외압인지 |
 | Finite Element Analysis Setting | Analysis Structure Setup | Target curvature `kappa` | `curvature` | 0.08 | 1/m | `analysis_conditions.max_curvature_1_per_m` | 곡률 기본값/단위 확인 |
 | Finite Element Analysis Setting | Analysis Structure Setup | Friction coefficient `mu` | `friction` | 0.22 | - | `analysis_conditions.friction_coefficient` | 마찰계수 기본값 확인 |
+| Finite Element Analysis Setting | Mesh Setting Guide | Mesh input basis | `mesh_basis` | Division count | count/size | `mesh.mesh_input_basis` | 개수/목표 크기 입력 방식 선택 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Global axial `n_z` divisions | `z_elem` | 40 | count | `mesh.axial_divisions` | 모든 component 공통 적용 확정 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Core/Sheath `n_theta` divisions | `c_elem_core` | 24 | count | `mesh.core_circumferential_divisions` | core/sheath/bedding 공통인지 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Armour `n_theta` divisions | `c_elem_armour` | 8 | count | `mesh.armour_circumferential_divisions` | armour solid wire 기준 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Inner sheath `n_r` divisions | `r_elem_inner_sheath` | 3 | count | `mesh.inner_sheath_radial_divisions` | radial division 기준 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Bedding `n_r` divisions | `r_elem_bedding` | 1 | count | `mesh.bedding_radial_divisions` | radial division 기준 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Outer sheath `n_r` divisions | `r_elem_outer_sheath` | 3 | count | `mesh.outer_sheath_radial_divisions` | radial division 기준 |
+| Finite Element Analysis Setting | Mesh Setting Guide | Target axial size | `z_size` | 5.85 | mm | `mesh.target_sizes_mm.axial_mm` | size mode에서 `mesh.axial_divisions`로 환산 |
+| Finite Element Analysis Setting | Mesh Setting Guide | Target core/sheath circumferential size | `c_size_core` | 13.50 | mm | `mesh.target_sizes_mm.core_sheath_circumferential_mm` | size mode에서 `mesh.core_circumferential_divisions`로 환산 |
+| Finite Element Analysis Setting | Mesh Setting Guide | Target armour circumferential size | `c_size_armour` | 1.60 | mm | `mesh.target_sizes_mm.armour_circumferential_mm` | size mode에서 `mesh.armour_circumferential_divisions`로 환산 |
+| Finite Element Analysis Setting | Mesh Setting Guide | Target inner sheath radial size | `r_size_inner_sheath` | 1.50 | mm | `mesh.target_sizes_mm.inner_sheath_radial_mm` | size mode에서 `mesh.inner_sheath_radial_divisions`로 환산 |
+| Finite Element Analysis Setting | Mesh Setting Guide | Target bedding radial size | `r_size_bedding` | 0.60 | mm | `mesh.target_sizes_mm.bedding_radial_mm` | size mode에서 `mesh.bedding_radial_divisions`로 환산 |
+| Finite Element Analysis Setting | Mesh Setting Guide | Target outer sheath radial size | `r_size_outer_sheath` | 1.50 | mm | `mesh.target_sizes_mm.outer_sheath_radial_mm` | size mode에서 `mesh.outer_sheath_radial_divisions`로 환산 |
 
 ## 3. 계산값으로만 둘 값
 
@@ -61,6 +68,7 @@
 | Armour period multipliers | `round(L_eff*n_armour/p_raw)` | `derived_geometry_mm.*_period_multiplier` | GUI가 자동 선택 |
 | Armour backend pitch length | `L_eff*n_armour/k_armour` | `armour.*_backend_pitch_length_mm` | backend가 우선 사용 |
 | Filler z divisions | `mesh.axial_divisions`와 동일 | `mesh.filler_z_divisions` | 별도 입력 없음 |
+| Size-mode resolved mesh counts | `ceil(length_or_arc_or_thickness / target_size)` 후 spinbox 범위로 clamp | `mesh.*_divisions` | 사용자는 size 입력, backend는 기존 count key 사용 |
 | Equivalent EI estimate | material + conductor/core geometry 기반 GUI estimate | `equivalent_properties.core_equivalent_EI_N_m2` | 참고값, 연구 결과 아님 |
 
 ## 4. 숨기거나 고정해야 할 값
@@ -107,7 +115,9 @@
 2. filler 전용 z division은 완전히 제거해도 되는가?
 3. `Core/Sheath n_theta`를 core, inner sheath, bedding, outer sheath에 공통 적용해도 되는가?
 4. `Abaqus element type = C3D8R` 고정 표시가 보광 backend의 full 3D solid-wire workflow와 맞는가?
-5. sweep method, medial axis, advancing front 같은 mesh method는 GUI에서 고를 필요가 있는가, backend 고정값인가?
+5. circumferential division은 4의 배수를 권장만 하고 강제하지 않는 것이 맞는가?
+6. 사용자가 mesh size와 mesh count를 모두 입력 방식으로 선택할 수 있게 하는 현재 방식이 맞는가?
+7. sweep method, medial axis, advancing front 같은 mesh method는 GUI에서 고를 필요가 있는가, backend 고정값인가?
 
 ### analysis
 
@@ -193,6 +203,15 @@ Mesh 탭 Global axial n_z divisions
   -> mesh_controls 모든 component z.count에 같은 값 저장
   -> filler_z_divisions도 같은 값으로 mirror
   -> abaqus_runner.py에서 seedEdgeByNumber axial division에 사용
+```
+
+```text
+Mesh 탭 Target size mode
+  -> self.mesh_inputs["mesh_basis"] = size
+  -> z_size / c_size_core / c_size_armour / r_size_* 입력
+  -> mesh_request_values()에서 target size를 resolved count로 환산
+  -> build_payload()에서 mesh.target_sizes_mm과 mesh.*_divisions를 둘 다 저장
+  -> backend는 기존 count key를 그대로 사용하고, target size는 추적/검토용으로 보존
 ```
 
 ## 8. 다음 cleanup 제안

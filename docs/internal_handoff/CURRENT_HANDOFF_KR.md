@@ -1,4 +1,27 @@
-﻿# 2026-07-09 GUI 변수 정리 / 코드 구조 지도 추가
+﻿# 2026-07-10 Mesh count/size 입력 피드백 반영
+
+* 보광/팀 피드백 캡처 기준으로 Mesh Setting Guide에 `Mesh input basis`를 추가했습니다.
+  * `Division count`: 기존처럼 `n_z`, `n_theta`, `n_r` 개수를 직접 입력합니다.
+  * `Target size`: 목표 mesh size(mm)를 입력하면 GUI가 내부에서 division count로 환산합니다.
+* backend 호환성을 위해 `input_data.json`에는 항상 기존 count key를 유지합니다.
+  * `mesh.axial_divisions`
+  * `mesh.core_circumferential_divisions`
+  * `mesh.armour_circumferential_divisions`
+  * `mesh.inner_sheath_radial_divisions`
+  * `mesh.bedding_radial_divisions`
+  * `mesh.outer_sheath_radial_divisions`
+* size mode에서 입력한 원래 목표 크기는 `mesh.target_sizes_mm`와 `mesh_controls.target_sizes_mm`에 같이 저장합니다.
+* 원주방향 division은 4의 배수를 **강제하지 않고**, 데모/설명용 권장사항으로만 기록합니다.
+  * `mesh.circumferential_division_policy.multiples_of_4_recommended_for_demo = true`
+  * `mesh.circumferential_division_policy.multiples_of_4_enforced = false`
+* mesh method 관련 피드백은 정책 metadata로 기록했습니다.
+  * 일반 solid: `medial_axis`
+  * armour: `front_or_medial_axis_pending_backend_confirmation`
+  * 실제 Abaqus mesh method 강제 여부는 backend/보광 확인 후 확정합니다.
+* `docs/guides/SCLAS_GUI_VARIABLE_CLEANUP_AND_CODE_MAP_KR.md`의 변수표도 count/size 입력 방식에 맞춰 업데이트했습니다.
+
+---
+# 2026-07-09 GUI 변수 정리 / 코드 구조 지도 추가
 
 * 새 문서: `docs/guides/SCLAS_GUI_VARIABLE_CLEANUP_AND_CODE_MAP_KR.md`
 * 보광이 피드백 기준으로 GUI 값을 `User Input`, `Derived`, `Fixed / Backend Default`, `Output`으로 나누어 정리했습니다.
