@@ -1,0 +1,253 @@
+SCLAS Abaqus runner feedback for backend AI / backend developer
+Date: 2026-07-07 KST
+Target file: code/abaqus_runner.py
+
+Purpose
+=======
+This note summarizes the current review of the backend Abaqus runner draft.
+The runner is close to the right direction, but several issues still make the
+GUI misread a failed Abaqus run as a successful or still-running job.
+
+
+Current positive changes
+========================
+The latest draft improved several critical points:
+
+1. Removed the broken "try:" block around create_surface_checked.
+2. Changed ODB extractor argument from "--input-json" to "--input-data".
+3. Avoided always overwriting extractor-generated result_summary.json with
+   fallback_summary.
+4. Replaced bare main(sys.argv) with:
+
+   if __name__ == "__main__":
+       sys.exit(main(sys.argv))
+
+5. Added a post-waitForCompletion solver failure check using .dat/.log files.
+6. Added face-count validation for several contact surfaces.
+
+
+Remaining required fixes
+========================
+
+1. Return nonzero exit code when Abaqus analysis fails
+-----------------------------------------------------
+Current main() can still return 0 even when:
+
+    result["status"] == "abaqus_analysis_failed"
+
+That makes the GUI/subprocess layer think the runner finished successfully.
+
+Recommended change:
+
+    if result.get("status") != "abaqus_analysis_complete":
+        write_result_csv(result_csv, [0.0], [0.0])
+        summary = fallback_summary(data, result, [0.0], [0.0])
+        summary["source"] = "SCLAS_ABAQUS_RUNNER"
+        summary["status"] = result.get("status", "abaqus_analysis_failed")
+        summary["note"] = result.get("first_blocking_error", "")
+        write_json(summary_path, summary)
+        return 1
+
+
+2. Failure summary should not say mesh_request_only
+--------------------------------------------------
+fallback_summary() always writes:
+
+    "source": "SCLAS_ABAQUS_MESH_BRIDGE"
+    "status": "mesh_request_only"
+
+For a real Abaqus run that failed, the result summary should clearly say:
+
+    "source": "SCLAS_ABAQUS_RUNNER"
+    "status": "abaqus_analysis_failed"
+
+Recommended minimal override:
+
+    summary = fallback_summary(data, result, [0.0], [0.0])
+    summary["source"] = "SCLAS_ABAQUS_RUNNER"
+    summary["status"] = result.get("status", "abaqus_analysis_failed")
+    summary["note"] = result.get("first_blocking_error", "")
+    write_json(summary_path, summary)
+
+
+3. Treat ODB extractor failure as failure
+-----------------------------------------
+Current draft prints the extractor exit code but does not fail the runner when
+the extractor returns nonzero.
+
+Recommended change:
+
+    ret = subprocess.call([...])
+    print("ODB extractor exit code: " + str(ret))
+
+    if ret != 0:
+        write_result_csv(result_csv, [0.0], [0.0])
+        summary = fallback_summary(data, result, [0.0], [0.0])
+        summary["source"] = "SCLAS_ABAQUS_RUNNER"
+        summary["status"] = "odb_extraction_failed"
+        summary["odb_extraction"] = {
+            "status": "failed",
+            "extractor_exit_code": ret,
+        }
+        write_json(summary_path, summary)
+        return 1
+
+
+4. Remove stale result files at start of run
+-------------------------------------------
+Old result_data.csv or result_summary.json from a previous run can make the GUI
+see stale success or stale placeholder data.
+
+At the start of main(), after job_dir and result_csv are known, remove:
+
+    result_data.csv
+    result_summary.json
+    odb_extraction_summary.json
+
+Recommended code:
+
+    for stale in ["result_data.csv", "result_summary.json", "odb_extraction_summary.json"]:
+        stale_path = os.path.join(job_dir, stale)
+        if os.path.exists(stale_path):
+            os.remove(stale_path)
+
+
+5. Validate all contact surfaces, not only IAI/ISO/IAS/OAS/OSI
+--------------------------------------------------------------
+Current checked surfaces:
+
+    IAS
+    ISO
+    IAI
+    OAS
+    OSI
+
+But contact pairs also use:
+
+    BeddingO
+    BeddingI
+    CO
+    FO
+    FL
+    FR
+
+Any zero-face surface can create an Abaqus fatal error such as:
+
+    ***ERROR: The surface ASSEMBLY_INNERSHEATH_IAI has not been defined.
+
+Recommended helper:
+
+    def create_surface_checked(part, name, mask):
+        faces = part.faces.getSequenceFromMask((mask,))
+        debug_log("%s face count: %d" % (name, len(faces)), job_dir)
+        if len(faces) == 0:
+            raise RuntimeError("%s surface has zero faces; mask=%s" % (name, mask))
+        part.Surface(name=name, side1Faces=faces)
+        debug_log("%s created OK" % name, job_dir)
+
+Recommended usage:
+
+    create_surface_checked(m.parts["Bedding"], "BeddingO", "[#12088 ]")
+    create_surface_checked(m.parts["Bedding"], "BeddingI", "[#28110 ]")
+    create_surface_checked(m.parts["Core"], "CO", "[#20 ]")
+    create_surface_checked(m.parts["Filler"], "FO", "[#8 ]")
+    create_surface_checked(m.parts["Filler"], "FL", "[#20 ]")
+    create_surface_checked(m.parts["Filler"], "FR", "[#2 ]")
+    create_surface_checked(m.parts["InnerArmour"], "IAS", "[#1 ]")
+    create_surface_checked(m.parts["InnerSheath"], "ISO", "[#12088 ]")
+    create_surface_checked(m.parts["InnerSheath"], "IAI", "[#28110 ]")
+    create_surface_checked(m.parts["OuterArmour"], "OAS", "[#1 ]")
+    create_surface_checked(m.parts["OuterSheath"], "OSI", "[#28110 ]")
+
+Do not catch and ignore these exceptions. If a critical contact surface has zero
+faces, the runner should stop before submit().
+
+
+6. Make debug_log write to the job folder
+-----------------------------------------
+Current debug_log writes to "surface_debug.txt" in the current process working
+directory. That may not always be the job folder.
+
+Recommended helper:
+
+    def debug_log(msg, job_dir=None):
+        try:
+            path = os.path.join(path_text(job_dir), "surface_debug.txt") if job_dir else "surface_debug.txt"
+            with open(path, "a") as f:
+                f.write(str(msg) + "\n")
+        except Exception:
+            pass
+        print(msg)
+
+
+7. Restore filler division alias normalization
+----------------------------------------------
+GUI and backend should support both names:
+
+    mesh.filler_z_divisions
+    mesh.filler_divisions
+
+Recommended normalize_payload() addition:
+
+    filler_div = mesh.get(
+        "filler_z_divisions",
+        mesh.get("filler_divisions", mesh.get("axial_divisions", 40)),
+    )
+    mesh["filler_z_divisions"] = as_int(filler_div, 40)
+    mesh["filler_divisions"] = as_int(filler_div, 40)
+
+
+8. Confirm extractor command
+----------------------------
+sclas_odb_extractor.py currently expects:
+
+    --input-data
+
+not:
+
+    --input-json
+
+Correct command shape:
+
+    ret = subprocess.call([
+        "C:\\SIMULIA\\Commands\\abq2019.bat",
+        "python",
+        extractor_path,
+        odb_path,
+        "--job-dir", path_text(job_dir),
+        "--input-data", path_text(input_path),
+    ])
+
+
+Recommended final success criteria
+==================================
+The runner should only report success when all of these are true:
+
+1. Abaqus .dat/.log do not contain fatal preprocessing/solver errors.
+2. ODB exists.
+3. sclas_odb_extractor.py exits with code 0.
+4. result_data.csv exists and has at least 2 numeric data rows.
+5. result_summary.json contains:
+
+       "source": "SCLAS_ABAQUS_ODB_EXTRACTOR"
+
+6. result_summary.json / odb_extraction_summary.json contains:
+
+       "status": "extracted"
+       "rows_written" >= 2
+
+
+Recommended immediate priority
+==============================
+Apply these in order:
+
+1. Validate all contact surfaces with create_surface_checked.
+2. Stop before submit() if any surface has zero faces.
+3. After waitForCompletion(), check .dat/.log and return status
+   "abaqus_analysis_failed" plus exit code 1 on failure.
+4. Run ODB extractor only after a clean Abaqus solve.
+5. If ODB extractor fails, write "odb_extraction_failed" and return 1.
+6. Do not overwrite extractor-generated result_summary.json.
+7. Remove stale result files before each run.
+8. Restore filler_divisions / filler_z_divisions alias normalization.
+
