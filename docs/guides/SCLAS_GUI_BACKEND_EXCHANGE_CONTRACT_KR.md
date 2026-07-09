@@ -51,19 +51,40 @@ GUI에서 사용자가 직접 입력하는 값:
 GUI가 계산해서 넘기는 값:
 
 ```text
-pitch_length_mm = 2*pi*center_radius_mm/tan(helix_pitch_angle_deg)
-effective_length_mm = core_pitch_length_mm / core_count
+paper_basis = Menard and Cartraud 2023, Marine Structures 91, Eq. (2)-(4)
+raw_pitch_length_mm = 2*pi*R_h/tan(alpha)
+single_layer_period_mm = raw_pitch_length_mm / component_count
+multilayer_period_mm = k_j * raw_pitch_length_mm / component_count
+effective_length_mm = selected common multilayer period
 ```
+
+Frontend period selection rule:
+
+```text
+core_period = core_pitch_length_mm / core_count
+inner_armour_k = round(core_period * inner_armour_wire_count / inner_raw_pitch_length_mm)
+outer_armour_k = round(core_period * outer_armour_wire_count / outer_raw_pitch_length_mm)
+inner_backend_pitch_length_mm = core_period * inner_armour_wire_count / inner_armour_k
+outer_backend_pitch_length_mm = core_period * outer_armour_wire_count / outer_armour_k
+```
+
+GUI에서는 pitch angle로 계산한 raw pitch를 보여주고, backend에는 논문 Eq. (3)의 `l = k_j*p_j/n_j` 공통 period 조건에 맞춘 period-matched pitch를 넘긴다.
 
 주요 JSON key:
 
 | JSON key | 의미 |
 |---|---|
 | `derived_geometry_mm.core_pitch_length_mm` | core helix pitch length |
-| `derived_geometry_mm.inner_armour_pitch_length_mm` | inner armour pitch length |
-| `derived_geometry_mm.outer_armour_pitch_length_mm` | outer armour pitch length |
+| `derived_geometry_mm.inner_armour_input_pitch_length_mm` | inner armour raw pitch from input angle |
+| `derived_geometry_mm.outer_armour_input_pitch_length_mm` | outer armour raw pitch from input angle |
+| `derived_geometry_mm.inner_armour_pitch_length_mm` | inner armour period-matched backend pitch length |
+| `derived_geometry_mm.outer_armour_pitch_length_mm` | outer armour period-matched backend pitch length |
+| `derived_geometry_mm.pitch_period_design` | Eq. (2)-(4) source, selected period, k multipliers, raw-period errors |
+| `armour.inner_armour_backend_pitch_length_mm` | backend preferred inner armour pitch length |
+| `armour.outer_armour_backend_pitch_length_mm` | backend preferred outer armour pitch length |
+| `armour.pitch_period_design` | same period design block copied for backend handoff |
 | `analysis_conditions.effective_length_mm` | backend model length, GUI 자동 계산값 |
-| `analysis_conditions.effective_length_source` | 현재 `core_pitch_length_mm_divided_by_core_count` |
+| `analysis_conditions.effective_length_source` | `Menard_Cartraud_2023_Eq2_Eq3_core_pitch_divided_by_core_count` |
 
 주의: 현재 Abaqus backend의 실제 생성 모델은 기본 3-core full 3D 모델을 기준으로 안정화되어 있다. `core_count`는 JSON 계약에 포함되며, 추후 backend job 생성에서 core 개수까지 완전 변수화할 때 사용한다.
 

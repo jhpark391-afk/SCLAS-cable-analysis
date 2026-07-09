@@ -292,17 +292,45 @@ def normalize_payload(data):
     arm.setdefault("core_lay_angle_deg", 8.98)
     arm.setdefault("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg", arm.get("lay_angle_deg", 20.32)))
     arm.setdefault("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg", arm.get("lay_angle_deg", 19.62)))
+    core_pitch_source = arm.get(
+        "core_backend_pitch_length_mm",
+        arm.get("core_period_matched_pitch_length_mm", arm.get("core_pitch_length_mm", arm.get("core_pitch_mm"))),
+    )
+    inner_pitch_source = arm.get(
+        "inner_armour_backend_pitch_length_mm",
+        arm.get(
+            "inner_armour_period_matched_pitch_length_mm",
+            arm.get("inner_armour_pitch_length_mm", arm.get("inner_armour_pitch_mm")),
+        ),
+    )
+    outer_pitch_source = arm.get(
+        "outer_armour_backend_pitch_length_mm",
+        arm.get(
+            "outer_armour_period_matched_pitch_length_mm",
+            arm.get("outer_armour_pitch_length_mm", arm.get("outer_armour_pitch_mm")),
+        ),
+    )
     core_pitch_length = abs(as_float(
-        arm.get("core_pitch_length_mm", arm.get("core_pitch_mm")),
+        core_pitch_source,
         pitch_from_lay_angle(geometry["core_center_radius_mm"], arm.get("core_lay_angle_deg"), 702.6, sign=1.0),
     ))
     inner_pitch_length = abs(as_float(
-        arm.get("inner_armour_pitch_length_mm", arm.get("inner_armour_pitch_mm")),
-        pitch_from_lay_angle(geometry["inner_armour_center_radius_mm"], arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")), -677.94737, sign=-1.0),
+        inner_pitch_source,
+        pitch_from_lay_angle(
+            geometry["inner_armour_center_radius_mm"],
+            arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")),
+            -677.94737,
+            sign=-1.0,
+        ),
     ))
     outer_pitch_length = abs(as_float(
-        arm.get("outer_armour_pitch_length_mm", arm.get("outer_armour_pitch_mm")),
-        pitch_from_lay_angle(geometry["outer_armour_center_radius_mm"], arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")), 776.55789, sign=1.0),
+        outer_pitch_source,
+        pitch_from_lay_angle(
+            geometry["outer_armour_center_radius_mm"],
+            arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")),
+            776.55789,
+            sign=1.0,
+        ),
     ))
     arm["core_pitch_length_mm"] = core_pitch_length
     arm["inner_armour_pitch_length_mm"] = inner_pitch_length
@@ -316,8 +344,12 @@ def normalize_payload(data):
     merged_dgeo["core_pitch_length_mm"] = core_pitch_length
     merged_dgeo["inner_armour_pitch_length_mm"] = inner_pitch_length
     merged_dgeo["outer_armour_pitch_length_mm"] = outer_pitch_length
+    if isinstance(arm.get("pitch_period_design"), dict):
+        merged_dgeo["pitch_period_design"] = arm["pitch_period_design"]
+        merged_dgeo.setdefault("pitch_design_source", arm["pitch_period_design"].get("source"))
+        merged_dgeo.setdefault("pitch_design_strategy", arm["pitch_period_design"].get("strategy"))
     merged_dgeo.setdefault("effective_length_mm", core_pitch_length / max(geometry["core_count"], 1))
-    merged_dgeo.setdefault("effective_length_source", "core_pitch_length_mm_divided_by_core_count")
+    merged_dgeo.setdefault("effective_length_source", "Menard_Cartraud_2023_Eq2_Eq3_core_pitch_divided_by_core_count")
     data["derived_geometry_mm"] = merged_dgeo
 
     mesh = dict(data.get("mesh", {}))
@@ -433,7 +465,14 @@ def fallback_manifest(data):
     ac = data["analysis_conditions"]
     mesh = data["mesh"]
     arm = data.get("armour", {})
+    period_design_payload = arm.get("pitch_period_design")
+    if not isinstance(period_design_payload, dict):
+        period_design_payload = geom.get("pitch_period_design", {})
+    if not isinstance(period_design_payload, dict):
+        period_design_payload = {}
     pitch_design = {
+        "source": period_design_payload.get("source", "Menard_Cartraud_2023_Eq2_Eq3_Eq4"),
+        "strategy": period_design_payload.get("strategy", "frontend_period_matched_pitch_preferred"),
         "core_lay_angle_deg": as_float(arm.get("core_lay_angle_deg"), 8.98),
         "inner_armour_lay_angle_deg": as_float(arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")), 20.32),
         "outer_armour_lay_angle_deg": as_float(arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")), 19.62),
@@ -454,6 +493,11 @@ def fallback_manifest(data):
         ),
         "effective_length_mm": as_float(ac.get("effective_length_mm"), geom.get("effective_length_mm", 234.2)),
         "effective_length_source": ac.get("effective_length_source", geom.get("effective_length_source", "core_pitch_length_mm_divided_by_core_count")),
+        "period_multipliers": {
+            "inner_armour": arm.get("inner_armour_period_multiplier"),
+            "outer_armour": arm.get("outer_armour_period_multiplier"),
+        },
+        "pitch_period_design": period_design_payload,
     }
     defaults = {
         "normal": "penalty_or_augmented_lagrange",

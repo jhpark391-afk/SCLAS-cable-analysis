@@ -54,10 +54,12 @@
 |---|---|---|---|
 | Core center radius | `2*sqrt(3)/3 * R_core` | `derived_geometry_mm.core_center_radius_mm` | 입력창 없음 |
 | Armour count limit | `floor(pi/asin(r_wire/R_center))` | `derived_geometry_mm.*_wire_count_limit` | spinbox maximum으로만 사용 |
-| Core pitch length | `2*pi*R_core_center/tan(alpha_core)` | `derived_geometry_mm.core_pitch_length_mm` | 읽기 전용 확인 |
-| Inner armour pitch length | `2*pi*R_inner_armour_center/tan(alpha_ia)` | `derived_geometry_mm.inner_armour_pitch_length_mm` | 읽기 전용 확인 |
-| Outer armour pitch length | `2*pi*R_outer_armour_center/tan(alpha_oa)` | `derived_geometry_mm.outer_armour_pitch_length_mm` | 읽기 전용 확인 |
-| Effective length | `core_pitch_length_mm / core_count` | `analysis_conditions.effective_length_mm` | Analysis 탭에서 읽기 전용 |
+| Core raw pitch length | Menard-Cartraud 2023 Eq. (2): `p = 2*pi*R_h/tan(alpha_core)` | `derived_geometry_mm.core_pitch_length_mm` | 읽기 전용 확인 |
+| Inner armour raw pitch length | Eq. (2): `p = 2*pi*R_h/tan(alpha_ia)` | `derived_geometry_mm.inner_armour_input_pitch_length_mm` | 읽기 전용 확인 |
+| Outer armour raw pitch length | Eq. (2): `p = 2*pi*R_h/tan(alpha_oa)` | `derived_geometry_mm.outer_armour_input_pitch_length_mm` | 읽기 전용 확인 |
+| Common period / Effective length | Eq. (3): `l = k_j*p_j/n_j`, core period 기준 | `analysis_conditions.effective_length_mm` | Analysis 탭에서 읽기 전용 |
+| Armour period multipliers | `round(L_eff*n_armour/p_raw)` | `derived_geometry_mm.*_period_multiplier` | GUI가 자동 선택 |
+| Armour backend pitch length | `L_eff*n_armour/k_armour` | `armour.*_backend_pitch_length_mm` | backend가 우선 사용 |
 | Filler z divisions | `mesh.axial_divisions`와 동일 | `mesh.filler_z_divisions` | 별도 입력 없음 |
 | Equivalent EI estimate | material + conductor/core geometry 기반 GUI estimate | `equivalent_properties.core_equivalent_EI_N_m2` | 참고값, 연구 결과 아님 |
 
@@ -94,9 +96,10 @@
 ### pitch / effective length
 
 1. 사용자는 pitch length가 아니라 pitch angle을 입력하는 것이 맞는가?
-2. pitch length 계산식 `2*pi*R/tan(alpha)`가 보광 모델의 angle 정의와 같은가?
-3. inner armour pitch 부호는 backend 내부에서 음수로 쓰는 것이 맞는가?
-4. effective length를 `core_pitch_length / core_count`로 자동 설정하는 것이 맞는가?
+2. pitch length 계산식 `2*pi*R_h/tan(alpha)`가 보광 모델의 angle 정의와 같은가?
+3. 공통 period 자동 선택식 `l = k_j*p_j/n_j`가 보광 자동화 코드와 같은가?
+4. inner armour pitch 부호는 backend 내부에서 음수로 쓰는 것이 맞는가?
+5. effective length를 core period 기준으로 두고 armour pitch를 period-matched 값으로 보정하는 것이 맞는가?
 
 ### mesh
 
@@ -175,9 +178,11 @@ Design 탭 Bedding thickness
 ```text
 Design 탭 Core helix pitch angle
   -> self.inputs["core_lay_angle"]
-  -> parse_geometry()에서 core_pitch_length_mm 계산
-  -> effective_length_mm = core_pitch_length_mm / core_count
-  -> build_payload()에서 armour.core_pitch_mm, analysis_conditions.effective_length_mm 저장
+  -> parse_geometry()에서 Menard-Cartraud 2023 Eq. (2)로 core_pitch_length_mm 계산
+  -> Eq. (3) 기준 effective_length_mm = core_pitch_length_mm / core_count
+  -> inner/outer armour의 integer multiplier k를 자동 선택
+  -> armour.inner/outer_backend_pitch_length_mm를 period-matched 값으로 산출
+  -> build_payload()에서 armour.*_pitch_mm, analysis_conditions.effective_length_mm 저장
   -> abaqus_runner.py에서 BaseSolidExtrude pitch/depth에 사용
 ```
 

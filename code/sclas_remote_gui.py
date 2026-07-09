@@ -173,6 +173,98 @@ def pitch_length_from_angle(center_radius_mm: float, angle_deg: float, fallback_
     return abs(2.0 * math.pi * float(center_radius_mm) / tangent)
 
 
+def lay_angle_from_pitch(center_radius_mm: float, pitch_length_mm: float, fallback_deg: float) -> float:
+    pitch = abs(float(pitch_length_mm))
+    radius = float(center_radius_mm)
+    if pitch <= 1.0e-9 or radius <= 0.0:
+        return float(fallback_deg)
+    return abs(math.degrees(math.atan(2.0 * math.pi * radius / pitch)))
+
+
+def choose_period_multiplier(pitch_length_mm: float, component_count: int, reference_period_mm: float) -> int:
+    pitch = abs(float(pitch_length_mm))
+    count = max(1, int(component_count))
+    reference = abs(float(reference_period_mm))
+    if pitch <= 1.0e-9 or reference <= 1.0e-9:
+        return 1
+    return max(1, int(round(reference * count / pitch)))
+
+
+def build_menard_period_design(
+    *,
+    core_pitch_mm: float,
+    inner_pitch_mm: float,
+    outer_pitch_mm: float,
+    core_count: int,
+    inner_count: int,
+    outer_count: int,
+    inner_center_radius_mm: float,
+    outer_center_radius_mm: float,
+    inner_lay_angle_deg: float,
+    outer_lay_angle_deg: float,
+) -> dict:
+    """Apply Menard-Cartraud Eq. (2)-(4) to select a common frontend period."""
+    core_count = max(1, int(core_count))
+    inner_count = max(1, int(inner_count))
+    outer_count = max(1, int(outer_count))
+    period = abs(float(core_pitch_mm)) / core_count
+    inner_k = choose_period_multiplier(inner_pitch_mm, inner_count, period)
+    outer_k = choose_period_multiplier(outer_pitch_mm, outer_count, period)
+    inner_matched_pitch = period * inner_count / inner_k
+    outer_matched_pitch = period * outer_count / outer_k
+
+    def raw_period(pitch: float, count: int, multiplier: int) -> float:
+        return float(multiplier) * abs(float(pitch)) / max(1, int(count))
+
+    def error_percent(candidate: float) -> float:
+        if period <= 1.0e-9:
+            return 0.0
+        return 100.0 * (float(candidate) - period) / period
+
+    inner_raw_period = raw_period(inner_pitch_mm, inner_count, inner_k)
+    outer_raw_period = raw_period(outer_pitch_mm, outer_count, outer_k)
+    return {
+        "source": "Menard_Cartraud_2023_MarineStructures_Eq2_Eq3_Eq4",
+        "strategy": "core_period_reference_with_auto_integer_armour_multiplier",
+        "formula_pitch_length": "p = 2*pi*R_h/tan(alpha)",
+        "formula_single_layer_period": "l = p/n",
+        "formula_multilayer_period": "l = k_j*p_j/n_j",
+        "period_length_mm": round(period, 5),
+        "core": {
+            "component_count": core_count,
+            "period_multiplier": 1,
+            "input_pitch_length_mm": round(abs(float(core_pitch_mm)), 5),
+            "backend_pitch_length_mm": round(abs(float(core_pitch_mm)), 5),
+            "period_length_mm": round(period, 5),
+            "period_error_percent": 0.0,
+        },
+        "inner_armour": {
+            "component_count": inner_count,
+            "period_multiplier": inner_k,
+            "input_pitch_length_mm": round(abs(float(inner_pitch_mm)), 5),
+            "input_period_length_mm": round(inner_raw_period, 5),
+            "input_period_error_percent": round(error_percent(inner_raw_period), 5),
+            "backend_pitch_length_mm": round(inner_matched_pitch, 5),
+            "backend_lay_angle_deg": round(
+                lay_angle_from_pitch(inner_center_radius_mm, inner_matched_pitch, inner_lay_angle_deg),
+                5,
+            ),
+        },
+        "outer_armour": {
+            "component_count": outer_count,
+            "period_multiplier": outer_k,
+            "input_pitch_length_mm": round(abs(float(outer_pitch_mm)), 5),
+            "input_period_length_mm": round(outer_raw_period, 5),
+            "input_period_error_percent": round(error_percent(outer_raw_period), 5),
+            "backend_pitch_length_mm": round(outer_matched_pitch, 5),
+            "backend_lay_angle_deg": round(
+                lay_angle_from_pitch(outer_center_radius_mm, outer_matched_pitch, outer_lay_angle_deg),
+                5,
+            ),
+        },
+    }
+
+
 def format_mm(value: float) -> str:
     return f"{float(value):.2f}"
 
@@ -451,9 +543,15 @@ Important sections:
 
 Key GUI/backend conventions:
 - Users input helix pitch angles in `armour.*_lay_angle_deg`.
-- The GUI computes pitch lengths with `pitch = 2*pi*R_center/tan(alpha)`.
-- `analysis_conditions.effective_length_mm` is auto-derived from
-  `derived_geometry_mm.core_pitch_length_mm / geometry_mm.core_count`.
+- Following Menard and Cartraud (2023), Marine Structures 91, Eqs. (2)-(4),
+  the GUI computes raw pitch lengths with `p = 2*pi*R_h/tan(alpha)` and then
+  selects a common period with `l = k_j*p_j/n_j`.
+- `analysis_conditions.effective_length_mm` is the selected common period. The
+  core period `p_core / geometry_mm.core_count` is used as the reference, and
+  armour integer multipliers are automatically selected to match that period.
+- The GUI writes both raw input-angle pitches and period-matched backend
+  pitches. Backends should prefer `armour.*_backend_pitch_length_mm` or the
+  signed `armour.*_pitch_mm` values when generating the Abaqus helix.
 - `geometry_mm.core_count` defaults to `3` and is passed for backend job setup.
 - `mesh.axial_divisions` is the single z-direction division count for all cable
   components. `mesh.filler_z_divisions` is kept only for backward compatibility
@@ -1411,17 +1509,20 @@ class SCLASRemoteGUI(QMainWindow):
                 section_form.addRow(self.form_label(label), self.inputs[key])
             left.addWidget(section_box)
 
-        derived_box = QGroupBox("Derived Pitch / Length")
+        derived_box = QGroupBox("Derived Pitch / Period")
         derived_grid = QGridLayout(derived_box)
         derived_grid.setContentsMargins(12, 10, 12, 10)
         derived_grid.setHorizontalSpacing(10)
         derived_grid.setVerticalSpacing(7)
         self.pitch_summary_labels = {}
         derived_rows = [
-            ("Core pitch length", "core_pitch_length_mm"),
-            ("Inner armour pitch length", "inner_armour_pitch_length_mm"),
-            ("Outer armour pitch length", "outer_armour_pitch_length_mm"),
-            ("Auto effective length", "effective_length_mm"),
+            ("Core input pitch p_core", "core_pitch_length_mm"),
+            ("Inner input pitch p_ia", "inner_armour_input_pitch_length_mm"),
+            ("Outer input pitch p_oa", "outer_armour_input_pitch_length_mm"),
+            ("Selected period L_eff", "effective_length_mm"),
+            ("Inner backend pitch", "inner_armour_backend_pitch_summary"),
+            ("Outer backend pitch", "outer_armour_backend_pitch_summary"),
+            ("Period match error", "period_match_error_summary"),
         ]
         for row, (label, key) in enumerate(derived_rows):
             name = QLabel(label)
@@ -2181,9 +2282,23 @@ class SCLASRemoteGUI(QMainWindow):
         nia = nia_input if nia_input > 0 else nia_limit
         noa = noa_input if noa_input > 0 else noa_limit
         core_pitch_length = pitch_length_from_angle(coc, core_lay_angle, 702.6)
-        inner_pitch_length = pitch_length_from_angle(co_ia, inner_lay_angle, 677.94737)
-        outer_pitch_length = pitch_length_from_angle(co_oa, outer_lay_angle, 776.55789)
-        effective_length = core_pitch_length / max(core_count, 1)
+        inner_input_pitch_length = pitch_length_from_angle(co_ia, inner_lay_angle, 677.94737)
+        outer_input_pitch_length = pitch_length_from_angle(co_oa, outer_lay_angle, 776.55789)
+        period_design = build_menard_period_design(
+            core_pitch_mm=core_pitch_length,
+            inner_pitch_mm=inner_input_pitch_length,
+            outer_pitch_mm=outer_input_pitch_length,
+            core_count=core_count,
+            inner_count=nia,
+            outer_count=noa,
+            inner_center_radius_mm=co_ia,
+            outer_center_radius_mm=co_oa,
+            inner_lay_angle_deg=inner_lay_angle,
+            outer_lay_angle_deg=outer_lay_angle,
+        )
+        effective_length = float(period_design["period_length_mm"])
+        inner_backend_pitch_length = float(period_design["inner_armour"]["backend_pitch_length_mm"])
+        outer_backend_pitch_length = float(period_design["outer_armour"]["backend_pitch_length_mm"])
 
         self.derived_geom = {
             "conductor_radius_mm": rc,
@@ -2217,22 +2332,51 @@ class SCLASRemoteGUI(QMainWindow):
             "filler_count": 3,
             "filler_outer_radius_mm": iris,
             "filler_profile_scale": roc / 15.3,
+            "pitch_period_design": period_design,
+            "pitch_design_source": period_design["source"],
+            "pitch_design_strategy": period_design["strategy"],
+            "core_input_pitch_length_mm": round(core_pitch_length, 5),
+            "inner_armour_input_pitch_length_mm": round(inner_input_pitch_length, 5),
+            "outer_armour_input_pitch_length_mm": round(outer_input_pitch_length, 5),
             "core_pitch_length_mm": round(core_pitch_length, 5),
-            "inner_armour_pitch_length_mm": round(inner_pitch_length, 5),
-            "outer_armour_pitch_length_mm": round(outer_pitch_length, 5),
+            "inner_armour_pitch_length_mm": round(inner_backend_pitch_length, 5),
+            "outer_armour_pitch_length_mm": round(outer_backend_pitch_length, 5),
+            "inner_armour_backend_pitch_length_mm": round(inner_backend_pitch_length, 5),
+            "outer_armour_backend_pitch_length_mm": round(outer_backend_pitch_length, 5),
+            "inner_armour_period_multiplier": int(period_design["inner_armour"]["period_multiplier"]),
+            "outer_armour_period_multiplier": int(period_design["outer_armour"]["period_multiplier"]),
+            "inner_armour_input_period_length_mm": period_design["inner_armour"]["input_period_length_mm"],
+            "outer_armour_input_period_length_mm": period_design["outer_armour"]["input_period_length_mm"],
+            "inner_armour_input_period_error_percent": period_design["inner_armour"]["input_period_error_percent"],
+            "outer_armour_input_period_error_percent": period_design["outer_armour"]["input_period_error_percent"],
+            "inner_armour_period_matched_lay_angle_deg": period_design["inner_armour"]["backend_lay_angle_deg"],
+            "outer_armour_period_matched_lay_angle_deg": period_design["outer_armour"]["backend_lay_angle_deg"],
             "effective_length_mm": round(effective_length, 5),
-            "effective_length_source": "core_pitch_length_mm_divided_by_core_count",
+            "effective_length_source": "Menard_Cartraud_2023_Eq2_Eq3_core_pitch_divided_by_core_count",
         }
         self.sync_derived_pitch_widgets(self.derived_geom)
         return self.derived_geom
 
     def sync_derived_pitch_widgets(self, dg: Dict[str, float]) -> None:
         if hasattr(self, "pitch_summary_labels"):
+            inner_error = float(dg.get("inner_armour_input_period_error_percent", 0.0))
+            outer_error = float(dg.get("outer_armour_input_period_error_percent", 0.0))
             labels = {
                 "core_pitch_length_mm": f"{format_mm(dg['core_pitch_length_mm'])} mm",
-                "inner_armour_pitch_length_mm": f"{format_mm(dg['inner_armour_pitch_length_mm'])} mm",
-                "outer_armour_pitch_length_mm": f"{format_mm(dg['outer_armour_pitch_length_mm'])} mm",
+                "inner_armour_input_pitch_length_mm": f"{format_mm(dg['inner_armour_input_pitch_length_mm'])} mm",
+                "outer_armour_input_pitch_length_mm": f"{format_mm(dg['outer_armour_input_pitch_length_mm'])} mm",
                 "effective_length_mm": f"{format_mm(dg['effective_length_mm'])} mm",
+                "inner_armour_backend_pitch_summary": (
+                    f"k={int(dg['inner_armour_period_multiplier'])}, "
+                    f"p={format_mm(dg['inner_armour_backend_pitch_length_mm'])} mm, "
+                    f"\u03b1={float(dg['inner_armour_period_matched_lay_angle_deg']):.2f}\u00b0"
+                ),
+                "outer_armour_backend_pitch_summary": (
+                    f"k={int(dg['outer_armour_period_multiplier'])}, "
+                    f"p={format_mm(dg['outer_armour_backend_pitch_length_mm'])} mm, "
+                    f"\u03b1={float(dg['outer_armour_period_matched_lay_angle_deg']):.2f}\u00b0"
+                ),
+                "period_match_error_summary": f"inner {inner_error:+.2f}%, outer {outer_error:+.2f}%",
             }
             for key, text in labels.items():
                 if key in self.pitch_summary_labels:
@@ -2318,17 +2462,29 @@ class SCLASRemoteGUI(QMainWindow):
                 "outer_lay_angle_deg": safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour lay angle"),
                 "inner_armour_lay_angle_deg": safe_float(self.inputs["inner_lay_angle"], 20.1, "Inner armour lay angle"),
                 "outer_armour_lay_angle_deg": safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour lay angle"),
+                "inner_armour_period_matched_lay_angle_deg": dg["inner_armour_period_matched_lay_angle_deg"],
+                "outer_armour_period_matched_lay_angle_deg": dg["outer_armour_period_matched_lay_angle_deg"],
                 "lay_angle_deg": 0.5 * (
                     safe_float(self.inputs["inner_lay_angle"], 20.1, "Inner armour lay angle")
                     + safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour lay angle")
                 ),
+                "core_input_pitch_length_mm": dg["core_input_pitch_length_mm"],
+                "inner_armour_input_pitch_length_mm": dg["inner_armour_input_pitch_length_mm"],
+                "outer_armour_input_pitch_length_mm": dg["outer_armour_input_pitch_length_mm"],
                 "core_pitch_length_mm": dg["core_pitch_length_mm"],
                 "inner_armour_pitch_length_mm": dg["inner_armour_pitch_length_mm"],
                 "outer_armour_pitch_length_mm": dg["outer_armour_pitch_length_mm"],
+                "core_backend_pitch_length_mm": dg["core_pitch_length_mm"],
+                "inner_armour_backend_pitch_length_mm": dg["inner_armour_backend_pitch_length_mm"],
+                "outer_armour_backend_pitch_length_mm": dg["outer_armour_backend_pitch_length_mm"],
+                "inner_armour_period_multiplier": dg["inner_armour_period_multiplier"],
+                "outer_armour_period_multiplier": dg["outer_armour_period_multiplier"],
                 "core_pitch_mm": dg["core_pitch_length_mm"],
                 "inner_armour_pitch_mm": -dg["inner_armour_pitch_length_mm"],
                 "outer_armour_pitch_mm": dg["outer_armour_pitch_length_mm"],
-                "pitch_formula": "pitch_length_mm = 2*pi*center_radius_mm/tan(helix_pitch_angle_deg)",
+                "pitch_period_design": dg["pitch_period_design"],
+                "pitch_formula": "Menard-Cartraud 2023 Eq. (2): p = 2*pi*R_h/tan(alpha); Eq. (3): l = k_j*p_j/n_j",
+                "pitch_strategy": dg["pitch_design_strategy"],
             },
             "materials": materials,
             "mesh": {
@@ -2401,6 +2557,7 @@ class SCLASRemoteGUI(QMainWindow):
             "analysis_conditions": {
                 "effective_length_mm": dg["effective_length_mm"],
                 "effective_length_source": dg["effective_length_source"],
+                "pitch_period_design_source": dg["pitch_design_source"],
                 "external_pressure_mpa": safe_float(self.cond["pressure"], 40.0, "External pressure"),
                 "hydrostatic_pressure_mpa": safe_float(self.cond["pressure"], 40.0, "External pressure"),
                 "residual_contact_pressure_mpa": safe_float(self.cond["residual_contact_pressure"], 0.3, "Residual contact pressure"),
@@ -2494,8 +2651,9 @@ class SCLASRemoteGUI(QMainWindow):
                     "odb": "*.odb",
                 },
                 "derived_input_policy": {
-                    "pitch_lengths": "computed by GUI from helix pitch angles and center radii",
-                    "effective_length_mm": "computed by GUI as core_pitch_length_mm/core_count",
+                    "pitch_lengths": "computed by GUI from Menard-Cartraud 2023 Eq. (2) using helix pitch angles and layer mean radii",
+                    "period_length": "computed by GUI from Menard-Cartraud 2023 Eq. (3); armour integer multipliers are auto-selected against the core period",
+                    "effective_length_mm": "computed by GUI as the selected common period length L_eff",
                     "filler_z_divisions": "mirrors mesh.axial_divisions; no separate GUI input",
                 },
             },
@@ -2652,7 +2810,9 @@ class SCLASRemoteGUI(QMainWindow):
                 f"Inner armour center radius: {payload['derived_geometry_mm']['inner_armour_center_radius_mm']:.3f} mm\n"
                 f"Outer armour center radius: {payload['derived_geometry_mm']['outer_armour_center_radius_mm']:.3f} mm\n"
                 f"Core pitch length: {payload['derived_geometry_mm']['core_pitch_length_mm']:.3f} mm\n"
-                f"Auto effective length: {payload['analysis_conditions']['effective_length_mm']:.3f} mm\n"
+                f"Selected period length: {payload['analysis_conditions']['effective_length_mm']:.3f} mm\n"
+                f"Inner armour backend pitch: {payload['armour']['inner_armour_backend_pitch_length_mm']:.3f} mm\n"
+                f"Outer armour backend pitch: {payload['armour']['outer_armour_backend_pitch_length_mm']:.3f} mm\n"
                 f"Estimated EI: {payload['equivalent_properties']['core_equivalent_EI_N_m2']:.6g} N.m^2\n"
                 f"Enabled assessments: {', '.join(k for k, v in payload['study_scope']['enabled_assessments'].items() if v)}"
             )
@@ -2704,6 +2864,9 @@ class SCLASRemoteGUI(QMainWindow):
         mesh = payload["mesh"]
         analysis = payload["analysis_conditions"]
         armour = payload["armour"]
+        pitch_design = armour.get("pitch_period_design", {})
+        inner_pitch = pitch_design.get("inner_armour", {})
+        outer_pitch = pitch_design.get("outer_armour", {})
         job_root = Path(self.job_root_input.text().strip()).expanduser()
         job_folder = job_root / str(payload["metadata"]["job_id"])
         enabled = [
@@ -2724,11 +2887,20 @@ class SCLASRemoteGUI(QMainWindow):
             f"outer_sheath_outer_radius_mm: {dg['outer_sheath_outer_radius_mm']:.5g}",
             "",
             "[Derived Pitch / Effective Length]",
-            f"core_pitch_length_mm: {dg['core_pitch_length_mm']:.5g}",
-            f"inner_armour_pitch_length_mm: {dg['inner_armour_pitch_length_mm']:.5g}",
-            f"outer_armour_pitch_length_mm: {dg['outer_armour_pitch_length_mm']:.5g}",
+            "paper_basis: Menard-Cartraud 2023 Eq. (2)-(4)",
+            f"core_input_pitch_length_mm: {dg['core_input_pitch_length_mm']:.5g}",
+            f"inner_input_pitch_length_mm: {dg['inner_armour_input_pitch_length_mm']:.5g}",
+            f"outer_input_pitch_length_mm: {dg['outer_armour_input_pitch_length_mm']:.5g}",
             f"effective_length_mm: {analysis['effective_length_mm']:.5g}",
             f"effective_length_source: {analysis['effective_length_source']}",
+            f"inner_period_multiplier_k: {inner_pitch.get('period_multiplier', '-')}",
+            f"inner_backend_pitch_length_mm: {armour['inner_armour_backend_pitch_length_mm']:.5g}",
+            f"inner_backend_lay_angle_deg: {armour['inner_armour_period_matched_lay_angle_deg']:.5g}",
+            f"inner_input_period_error_percent: {inner_pitch.get('input_period_error_percent', '-')}",
+            f"outer_period_multiplier_k: {outer_pitch.get('period_multiplier', '-')}",
+            f"outer_backend_pitch_length_mm: {armour['outer_armour_backend_pitch_length_mm']:.5g}",
+            f"outer_backend_lay_angle_deg: {armour['outer_armour_period_matched_lay_angle_deg']:.5g}",
+            f"outer_input_period_error_percent: {outer_pitch.get('input_period_error_percent', '-')}",
             "",
             "[Armour]",
             f"inner_wire_count: {armour['inner_wire_count_resolved']} ({armour['inner_wire_count_source']})",

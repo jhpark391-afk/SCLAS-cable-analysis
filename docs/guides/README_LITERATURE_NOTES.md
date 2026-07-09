@@ -48,6 +48,12 @@ Useful points for this project:
   approaches a lower slip-zone stiffness.
 - A periodic homogenized cell can reduce the 3D computational domain to a
   helical period while preserving the relevant contact interactions.
+- Section 4.2 defines the period from the helical pitch and component count:
+  Eq. (2) uses `l = p/n = 2*pi*R_h/(n*tan(alpha))`, and Eq. (3) generalizes
+  this to multiple helical layers with `l = k_j*p_j/n_j`.
+- The paper's umbilical example, Eq. (4), chooses a common model length from
+  the outer armour, inner armour, and three power cores. The armour lay angles
+  may be adjusted slightly so all layers share the same period.
 - Armour wires can be represented efficiently with beam elements and contact
   surface elements. This is a practical compromise between model size and local
   contact fidelity.
@@ -59,8 +65,13 @@ Useful points for this project:
 
 SCLAS implementation response:
 
-- `mesh.model_strategy` defaults to `periodic_homogenized_cell`.
-- `mesh.armour_model` defaults to `beam_with_contact_surface`.
+- The GUI computes raw pitch lengths from input helix pitch angles, then
+  automatically selects a common effective period using the Eq. (3) multiplier
+  rule. It passes both raw input pitches and period-matched backend pitch values
+  in `input_data.json`.
+- The current GUI-facing model path is the Full 3D solid-wire workflow, while
+  the periodic-cell/beam-surface approach remains the paper reference and a
+  backend implementation target where appropriate.
 - `analysis_conditions.residual_contact_pressure_mpa` and
   `analysis_conditions.contact_regularization_beta` are passed to the backend.
 - The placeholder backend reports stick/slip stiffness proxies, contact

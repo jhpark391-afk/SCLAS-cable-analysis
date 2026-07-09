@@ -2,6 +2,25 @@
 
 Last updated: 2026-07-09 KST
 
+## Menard-Cartraud Pitch/Period Frontend Automation - 2026-07-09 KST
+
+- Read the user-provided Marine Structures paper by Menard and Cartraud
+  (2023), especially Section 4.2 and Eqs. (2)-(4).
+- The GUI now computes raw pitch lengths from input helix pitch angles using
+  `p = 2*pi*R_h/tan(alpha)`.
+- The GUI then automatically selects the common period/effective length using
+  the multilayer rule `l = k_j*p_j/n_j`. The core period
+  `core_pitch_length_mm / core_count` is used as the reference.
+- Inner/outer armour integer period multipliers are selected automatically as
+  `round(L_eff*n_armour/p_raw)`.
+- The Design tab derived box now shows raw input pitches, selected `L_eff`,
+  backend matched armour pitch/angle values, and raw-period matching errors.
+- `input_data.json` now carries `armour.pitch_period_design`,
+  raw input-angle pitches, period multipliers, and backend preferred pitch keys
+  such as `armour.inner_armour_backend_pitch_length_mm`.
+- `code/abaqus_runner.py` now prefers the new backend/matched pitch keys while
+  keeping backward-compatible fallback to older pitch fields.
+
 ## GUI Input Simplification - 2026-07-09 KST
 
 - Rechecked the user-provided variable workbook against the current backend

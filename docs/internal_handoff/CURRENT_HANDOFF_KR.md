@@ -7,6 +7,20 @@
 * 다음 cleanup 후보는 `Abaqus element type` combo 축소/고정, future analysis 변수 숨김, Derived Pitch/Length 표시 방식 조정입니다.
 
 ---
+# 2026-07-09 Menard-Cartraud pitch/period 프론트 자동화
+
+* 사용자가 첨부한 Marine Structures 논문(Menard and Cartraud, 2023)의 4.2절 Eq. (2)-(4)를 확인했습니다.
+* GUI는 이제 helix pitch angle 입력값으로 raw pitch length를 계산합니다.
+  * Eq. (2): `p = 2*pi*R_h/tan(alpha)`
+* GUI는 여러 helical layer의 공통 period를 Eq. (3) 형태로 자동 선택합니다.
+  * Eq. (3): `l = k_j*p_j/n_j`
+  * core period `core_pitch_length_mm / core_count`를 기준 `L_eff`로 사용합니다.
+* inner/outer armour의 integer multiplier `k`는 `round(L_eff*n_armour/p_raw)`로 자동 선택합니다.
+* Design 탭의 `Derived Pitch / Period` 박스는 raw pitch, 선택된 `L_eff`, backend에 넘길 period-matched armour pitch/angle, raw-period error를 표시합니다.
+* `input_data.json`에는 `armour.pitch_period_design`, raw pitch, period multiplier, backend preferred pitch key(`armour.inner_armour_backend_pitch_length_mm` 등)를 함께 기록합니다.
+* `code/abaqus_runner.py`는 새 period-matched pitch key를 우선 사용하고, 기존 pitch key fallback도 유지합니다.
+
+---
 # 2026-07-09 GUI-Backend 정보 교환 계약 확립
 
 * 새 계약 문서: `docs/guides/SCLAS_GUI_BACKEND_EXCHANGE_CONTRACT_KR.md`
