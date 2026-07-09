@@ -791,7 +791,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Filler": "필러",
             "Core Section": "코어 단면",
             "Sheath / Bedding": "시스 / 베딩",
-            "Armour Wires": "아머 와이어",
+            "Armour": "아머",
             "Helix Pitch Angle": "헬릭스 피치 각",
             "Material Properties": "재료 물성",
             "Material": "재료",
@@ -819,7 +819,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Armour divisions": "아머 분할",
             "Axial z divisions": "축방향 z 분할",
             "Core/Sheath n_theta divisions": "코어/시스 n_theta 분할",
-            "Armour wire n_theta divisions": "아머 와이어 n_theta 분할",
+            "Armour n_theta divisions": "아머 n_theta 분할",
             "Inner sheath n_r divisions": "내부 시스 n_r 분할",
             "Bedding n_r divisions": "베딩 n_r 분할",
             "Outer sheath n_r divisions": "외부 시스 n_r 분할",
@@ -1330,12 +1330,12 @@ class SCLASRemoteGUI(QMainWindow):
                 ],
             ),
             (
-                "Armour Wires",
+                "Armour",
                 [
-                    ("Inner armour wire radius r_ia (mm)", "r_ia"),
-                    ("Inner armour wire number n_ia", "no_ia"),
-                    ("Outer armour wire radius r_oa (mm)", "r_oa"),
-                    ("Outer armour wire number n_oa", "no_oa"),
+                    ("Inner armour radius r_ia (mm)", "r_ia"),
+                    ("Inner armour number n_ia", "no_ia"),
+                    ("Outer armour radius r_oa (mm)", "r_oa"),
+                    ("Outer armour number n_oa", "no_oa"),
                 ],
             ),
             (
@@ -1415,7 +1415,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Layer",
             "Material",
             "Young's modulus\nE (GPa)",
-            "Poisson's ratio\n\u03bd (-)",
+            "Poisson's ratio\n\u03bd",
             "Density\n\u03c1 (kg/m^3)",
         ])
         self.style_material_headers()
@@ -1530,7 +1530,7 @@ class SCLASRemoteGUI(QMainWindow):
             "contact_beta": "Tangential contact regularization value for stick-slip stability.",
             "z_elem": "Axial n_z divisions along the cable length for core, sheath, bedding, and armour.",
             "c_elem_core": "Circumferential n_theta divisions for core, sheath, and bedding preview surfaces.",
-            "c_elem_armour": "Circumferential n_theta divisions around each armour wire cross-section.",
+            "c_elem_armour": "Circumferential n_theta divisions around each armour cross-section.",
             "r_elem_inner_sheath": "n_r divisions through the inner sheath thickness.",
             "r_elem_bedding": "n_r divisions through the bedding layer.",
             "r_elem_outer_sheath": "n_r divisions through the outer sheath thickness.",
@@ -1562,7 +1562,7 @@ class SCLASRemoteGUI(QMainWindow):
         form.addRow(self.form_label("Abaqus element type"), self.mesh_inputs["elem_type"])
         form.addRow(self.form_label("Axial n_z divisions"), self.mesh_inputs["z_elem"])
         form.addRow(self.form_label("Core/Sheath n_theta divisions"), self.mesh_inputs["c_elem_core"])
-        form.addRow(self.form_label("Armour wire n_theta divisions"), self.mesh_inputs["c_elem_armour"])
+        form.addRow(self.form_label("Armour n_theta divisions"), self.mesh_inputs["c_elem_armour"])
         form.addRow(self.form_label("Inner sheath n_r divisions"), self.mesh_inputs["r_elem_inner_sheath"])
         form.addRow(self.form_label("Bedding n_r divisions"), self.mesh_inputs["r_elem_bedding"])
         form.addRow(self.form_label("Outer sheath n_r divisions"), self.mesh_inputs["r_elem_outer_sheath"])
@@ -1978,7 +1978,7 @@ class SCLASRemoteGUI(QMainWindow):
             ("#87949a", "Core Shield"),
             ("#5f96a4", "Filler"),
             ("#76868d", "Inner Sheath"),
-            ("#d39135", "Armour Wire"),
+            ("#d39135", "Armour"),
             ("#26333a", "Bedding"),
             ("#6b7d87", "Outer Sheath"),
         ]
@@ -2006,7 +2006,7 @@ class SCLASRemoteGUI(QMainWindow):
             "Layer",
             "Material",
             "Young's modulus\nE (GPa)",
-            "Poisson's ratio\n\u03bd (-)",
+            "Poisson's ratio\n\u03bd",
             "Density\n\u03c1 (kg/m^3)",
         ])
         default_font = QFont(APP_FONT_FAMILY, 9)
@@ -2042,14 +2042,14 @@ class SCLASRemoteGUI(QMainWindow):
 
     def init_material_table(self) -> None:
         materials = [
-            ("Outer sheath layer", "Outer Sheath", 1.4, 0.45, 1300, QColor("#6b7d87")),
-            ("Filler region", "Filler", 0.8, 0.48, 1200, QColor("#5f96a4")),
-            ("Core insulation", "Insulation", 1.2, 0.46, 940, QColor("#dfcf75")),
-            ("Core conductor", "Conductor", 108.0, 0.33, 8960, QColor("#1d3270")),
-            ("Inner / outer armour", "Armour Wire", 210.0, 0.30, 7850, QColor("#d39135")),
-            ("Inner sheath layer", "Inner Sheath", 1.5, 0.45, 1300, QColor("#76868d")),
-            ("Core shield layer", "Core Shield", 16.0, 0.44, 11340, QColor("#87949a")),
-            ("Bedding layer", "Bedding", 0.5, 0.49, 1100, QColor("#26333a")),
+            ("Conductor", "Copper", 108.0, 0.33, 8960, QColor("#1d3270")),
+            ("Insulation", "XLPE", 1.2, 0.46, 940, QColor("#dfcf75")),
+            ("Core Shield", "HDPE", 16.0, 0.44, 11340, QColor("#87949a")),
+            ("Filler", "PP", 0.8, 0.48, 1200, QColor("#5f96a4")),
+            ("Inner Sheath", "HDPE", 1.5, 0.45, 1300, QColor("#76868d")),
+            ("Armour", "Steel", 210.0, 0.30, 7850, QColor("#d39135")),
+            ("Bedding", "PFR", 0.5, 0.49, 1100, QColor("#26333a")),
+            ("Outer Sheath", "HDPE", 1.4, 0.45, 1300, QColor("#6b7d87")),
         ]
         for row, (name, material, e, nu, density, color) in enumerate(materials):
             layer_item = QTableWidgetItem(name)
@@ -2072,9 +2072,9 @@ class SCLASRemoteGUI(QMainWindow):
         roc = safe_float(self.inputs["roc"], 15.3, "Core outer radius")
         coc = core_center_from_outer_radius(roc)
         tis = safe_float(self.inputs["tis"], 4.5, "Inner sheath thickness")
-        ria = safe_float(self.inputs["r_ia"], 2.0, "Inner armour wire radius")
+        ria = safe_float(self.inputs["r_ia"], 2.0, "Inner armour radius")
         bedding_thickness = safe_float(self.inputs["bedding_thickness"], 0.6, "Bedding thickness")
-        roa = safe_float(self.inputs["r_oa"], 2.0, "Outer armour wire radius")
+        roa = safe_float(self.inputs["r_oa"], 2.0, "Outer armour radius")
         tos = safe_float(self.inputs["tos"], 4.5, "Outer sheath thickness")
         nia_input = int(self.inputs["no_ia"].value())
         noa_input = int(self.inputs["no_oa"].value())
@@ -2206,8 +2206,8 @@ class SCLASRemoteGUI(QMainWindow):
             },
             "derived_geometry_mm": dg,
             "armour": {
-                "inner_wire_radius_mm": safe_float(self.inputs["r_ia"], 2.0, "Inner armour wire radius"),
-                "outer_wire_radius_mm": safe_float(self.inputs["r_oa"], 2.0, "Outer armour wire radius"),
+                "inner_wire_radius_mm": safe_float(self.inputs["r_ia"], 2.0, "Inner armour radius"),
+                "outer_wire_radius_mm": safe_float(self.inputs["r_oa"], 2.0, "Outer armour radius"),
                 "inner_wire_count": int(self.inputs["no_ia"].value()),
                 "outer_wire_count": int(self.inputs["no_oa"].value()),
                 "inner_wire_count_resolved": int(dg["inner_armour_wire_count"]),
@@ -2466,6 +2466,7 @@ class SCLASRemoteGUI(QMainWindow):
                 material
                 for material in materials
                 if "conductor" in str(material.get("material", "")).lower()
+                or "copper" in str(material.get("material", "")).lower()
                 or "conductor" in str(material.get("name", "")).lower()
             ),
             materials[0],
@@ -4070,7 +4071,7 @@ class SCLASRemoteGUI(QMainWindow):
         painter.setPen(QColor("#991b1b"))
         painter.drawText(x + 34, y + 292, "surface-to-surface contact")
         painter.setPen(QColor("#374151"))
-        painter.drawText(x + 34, y + 318, "armour wire to bedding / sheath")
+        painter.drawText(x + 34, y + 318, "armour to bedding / sheath")
         painter.drawText(x + 34, y + 342, f"friction coefficient \u03bc = {friction_value}")
 
         painter.setFont(small_font)
@@ -4424,7 +4425,7 @@ class SCLASRemoteGUI(QMainWindow):
                     f"Axial divisions: {z_rows}\n"
                     f"Filler n_z divisions: {filler_z_rows}\n"
                     f"Core/Sheath n_theta divisions: {core_cols}\n"
-                    f"Armour wire n_theta divisions: {armour_cols}"
+                    f"Armour n_theta divisions: {armour_cols}"
                 )
             if hasattr(self, "inp_mesh_legend"):
                 self.inp_mesh_legend.setVisible(False)

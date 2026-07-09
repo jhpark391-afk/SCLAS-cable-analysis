@@ -12,10 +12,10 @@
   * `Core Package`는 `Core Section`, `Helix Lay`는 `Helix Pitch Angle`로 변경했습니다.
   * 사용자 입력에서 `core center radius`, `clearance gap`은 제거 상태를 유지하고, 아머-아머 사이 `Bedding thickness` 입력을 사용합니다.
 * **Material table 정리**:
-  * 컬럼은 `Layer`, `Material`, `Young's modulus E (GPa)`, `Poisson's ratio ν (-)`, `Density ρ (kg/m^3)` 순서입니다.
+  * 컬럼은 `Layer`, `Material`, `Young's modulus E (GPa)`, `Poisson's ratio ν`, `Density ρ (kg/m^3)` 순서입니다.
   * 기존 category 컬럼은 제거했습니다.
-  * material 행은 논문 기준 8행(`Outer Sheath`, `Filler`, `Insulation`, `Conductor`, `Armour Wire`, `Inner Sheath`, `Core Shield`, `Bedding`)으로 정리했습니다.
-  * inner/outer armour는 별도 material 행으로 쪼개지 않고 `Armour Wire` 한 행을 공유합니다. Abaqus runner도 고정 row index가 아니라 material 이름/alias로 물성을 찾도록 수정했습니다.
+  * material 행은 회의 피드백 기준 8행(`Conductor-Copper`, `Insulation-XLPE`, `Core Shield-HDPE`, `Filler-PP`, `Inner Sheath-HDPE`, `Armour-Steel`, `Bedding-PFR`, `Outer Sheath-HDPE`)으로 정리했습니다.
+  * inner/outer armour는 별도 material 행으로 쪼개지 않고 `Armour` 한 행을 공유합니다. Abaqus runner도 고정 row index가 아니라 layer/material 이름/alias로 물성을 찾도록 수정했습니다.
 * **Mesh 탭 방향 전환**:
   * strategy/armour model은 화면에서 제거하고 backend 기본값을 full 3D segment + solid wire로 고정했습니다.
   * 기존 mesh readiness / generate-preview 흐름은 제거했습니다.

@@ -17,17 +17,17 @@ Last updated: 2026-07-08 KST
   center radius` and `clearance gap` controls remain removed; the backend still
   receives derived geometry values where needed.
 - The material table now has `Layer`, `Material`, `Young's modulus E (GPa)`,
-  `Poisson's ratio ν (-)`, and `Density ρ (kg/m^3)` columns. The previous
+  `Poisson's ratio ν`, and `Density ρ (kg/m^3)` columns. The previous
   category column was removed.
-- The material table now uses the paper-facing 8-row material set:
-  Outer Sheath, Filler, Insulation, Conductor, Armour Wire, Inner Sheath, Core
-  Shield, and Bedding. Inner/outer armour share the single Armour Wire material
-  row. The Abaqus runner now resolves materials by name/material alias rather
-  than fixed row index so this paper-order table does not break section
-  assignment.
+- The material table now uses the meeting-facing Layer-Material pairs:
+  Conductor-Copper, Insulation-XLPE, Core Shield-HDPE, Filler-PP,
+  Inner Sheath-HDPE, Armour-Steel, Bedding-PFR, and Outer Sheath-HDPE.
+  Inner/outer armour share the single Armour material row. The Abaqus runner
+  now resolves materials by layer/material alias rather than fixed row index so
+  this paper-order table does not break section assignment.
 - The Design preview now includes a simple layer legend matching the cable
   section picture labels: Conductor, Insulation, Core Shield, Filler, Inner
-  Sheath, Armour Wire, Bedding, and Outer Sheath.
+  Sheath, Armour, Bedding, and Outer Sheath.
 - The Mesh tab now keeps the backend fixed to full 3D segment + solid wire,
   removes the old readiness/generate-preview workflow, and focuses on mesh
   setting guidance. The guide figure now explains z/theta/r divisions, external

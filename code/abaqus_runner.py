@@ -557,15 +557,15 @@ def build_abaqus_model(data, job_dir):
 
     mat_data = data['materials']
     mat_aliases = {
-        'Conductor':   ['conductor'],
-        'Insulation':  ['insulation'],
+        'Conductor':   ['conductor', 'copper'],
+        'Insulation':  ['insulation', 'xlpe'],
         'CoreShield':  ['core shield', 'coreshield'],
         'InnerSheath': ['inner sheath', 'innersheath'],
-        'InnerArmour': ['armour wire', 'armor wire', 'inner armour', 'inner armor'],
-        'Bedding':     ['bedding'],
-        'OuterArmour': ['armour wire', 'armor wire', 'outer armour', 'outer armor'],
+        'InnerArmour': ['armour', 'armor', 'steel', 'inner armour', 'inner armor'],
+        'Bedding':     ['bedding', 'pfr'],
+        'OuterArmour': ['armour', 'armor', 'steel', 'outer armour', 'outer armor'],
         'OuterSheath': ['outer sheath', 'outersheath'],
-        'Filler':      ['filler'],
+        'Filler':      ['filler', 'pp'],
     }
 
     def _mat_text(item):
