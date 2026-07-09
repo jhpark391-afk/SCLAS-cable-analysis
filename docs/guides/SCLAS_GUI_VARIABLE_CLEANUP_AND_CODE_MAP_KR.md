@@ -69,13 +69,17 @@
 |---|---|---|
 | `mesh.model_strategy` | backend 기본 `full_3d_segment` | 계속 숨김 |
 | `mesh.armour_model` | backend 기본 `solid_wire` | 계속 숨김 |
+| `mesh.requested_element_type` | GUI 표시값 `C3D8R` | 선택형 combo가 아니라 고정 표시 |
 | `mesh.filler_z_divisions` | 호환 key로 JSON에 남음 | 화면에서는 숨김 |
 | `analysis_conditions.residual_contact_pressure_mpa` | hidden widget | 보광/현수 calibration 단계 전까지 숨김 |
+| `analysis_conditions.max_twist_rad_per_m` | future/coupled-load 기본값 | Analysis 탭 화면에서 숨김 |
+| `analysis_conditions.max_axial_strain` | future/coupled-load 기본값 | Analysis 탭 화면에서 숨김 |
+| `analysis_conditions.radial_compression_ratio` | future/coupled-load 기본값 | Analysis 탭 화면에서 숨김 |
 | solver increments | JSON fixed values | 전문가 모드 전까지 숨김 |
 | output request field list | JSON fixed list | backend 구현 기준으로 유지 |
 | run mode flags | backend 실행 모드 내부값 | 일반 변수표에서 분리 |
 
-특히 `Abaqus element type`은 확인이 필요하다. 현재 GUI에는 `C3D8R`, `C3D4`, `B31` option이 남아 있는데, full 3D + solid wire가 고정 방향이면 사용자가 `B31`을 고르게 두는 것이 맞는지 보광이와 확인해야 한다. 확인 후에는 `C3D8R` 고정 표시 또는 숨김으로 줄이는 것이 더 깔끔하다.
+현재 GUI는 `Abaqus element type`을 `C3D8R` 고정 표시로 단순화했다. `C3D4`, `B31` 선택지는 사용자가 잘못 고를 수 있으므로 화면에서 제거했다. 내부 backend는 필요하면 solid/beam element를 자체적으로 결정해야 한다.
 
 ## 5. 보광이와 회의할 때 맞춰야 할 질문
 
@@ -99,7 +103,7 @@
 1. `mesh.axial_divisions` 하나가 모든 component의 z direction에 적용되는 것이 맞는가?
 2. filler 전용 z division은 완전히 제거해도 되는가?
 3. `Core/Sheath n_theta`를 core, inner sheath, bedding, outer sheath에 공통 적용해도 되는가?
-4. `Abaqus element type`을 사용자가 고르게 할 것인가, `C3D8R`로 고정할 것인가?
+4. `Abaqus element type = C3D8R` 고정 표시가 보광 backend의 full 3D solid-wire workflow와 맞는가?
 5. sweep method, medial axis, advancing front 같은 mesh method는 GUI에서 고를 필요가 있는가, backend 고정값인가?
 
 ### analysis
@@ -188,11 +192,20 @@ Mesh 탭 Global axial n_z divisions
 
 ## 8. 다음 cleanup 제안
 
-가장 먼저 정리할 후보는 다음 세 가지다.
+2026-07-09 기준으로 GUI 3번 탭도 단순화했다.
 
-1. `Abaqus element type` combo를 실제 backend 기준으로 고정 또는 축소한다.
-2. Analysis 탭의 `twist`, `axial_strain`, `radial_compression`을 당장 backend 검증에 쓰지 않으면 advanced/future 영역으로 숨긴다.
-3. Derived Pitch / Length 박스는 Design 탭에 남기되 "calculated, not user input" 문구를 추가하거나 JSON preview 쪽으로 옮긴다.
+1. Analysis 탭은 `Effective length`, `Loading cycles`, `Result points`만 직접 표시한다.
+2. `twist`, `axial_strain`, `radial_compression`은 payload default로 남기되 화면에서는 숨긴다.
+3. `Research Scope / Local Behavior` 체크박스 묶음은 화면에서 제거하고, payload에는 bending/pressure 중심 scope만 남긴다.
+4. Backend mode는 `FAST GUI preview`, `Export job package only`, `Run local/shared-folder command`만 화면에 표시한다.
+5. SSH/scp 원격 설정은 코드 호환용으로 남기되 일반 GUI 화면에서는 숨긴다.
+6. Run Controls에 `Import Backend JSON` 버튼을 추가해 `input_data.json`을 GUI 값으로 다시 불러오는 정보 교환 루프를 명확히 했다.
 
-이 세 가지는 코드 삭제보다 먼저 보광이와 기본값/필요성을 확인한 뒤 진행하는 것이 안전하다.
+남은 cleanup 후보는 다음과 같다.
+
+1. Derived Pitch / Length 박스는 Design 탭에 남기되 "calculated, not user input" 문구를 추가하거나 JSON preview 쪽으로 옮긴다.
+2. 보광이 엑셀의 최종 기본값을 받아 Design/FEA Setting 탭 기본값과 변수 register를 다시 맞춘다.
+3. `docs/SCLAS_GUI_VARIABLE_REGISTER_20260708.xlsx`에 `User Input / Derived / Hidden Backend Default / Output` 판정 열을 추가한다.
+
+이후 코드 삭제는 backend가 실제로 더 이상 읽지 않는 것이 확인된 뒤에 진행하는 것이 안전하다.
 

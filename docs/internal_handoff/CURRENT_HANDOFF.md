@@ -2,6 +2,27 @@
 
 Last updated: 2026-07-09 KST
 
+## GUI Input Simplification - 2026-07-09 KST
+
+- Rechecked the user-provided variable workbook against the current backend
+  contract and separated visible GUI inputs from derived values and hidden
+  backend defaults.
+- The FEA Setting tab now shows `Abaqus element type` as a fixed `C3D8R`
+  request instead of exposing `C3D4`/`B31` choices to the user.
+- The Analysis Results tab is simplified around execution, JSON exchange, and
+  result review. It now visibly exposes only derived effective length, loading
+  cycles, and result points for run-side input.
+- Future coupled-load values such as twist, axial strain, radial compression,
+  residual contact pressure, solver increments, and SSH/scp remote settings
+  remain in code/payload compatibility paths but are hidden from the main GUI.
+- The visible backend mode choices are now FAST preview, export job package,
+  and local/shared-folder command. Remote SSH support remains an internal
+  compatibility path.
+- Added `Import Backend JSON` to Run Controls so an existing
+  `input_data.json` can be loaded back into supported GUI fields.
+- Updated `docs/guides/SCLAS_GUI_VARIABLE_CLEANUP_AND_CODE_MAP_KR.md` with the
+  same variable/input simplification policy.
+
 ## GUI-Backend Exchange Contract - 2026-07-09 KST
 
 - Added `docs/guides/SCLAS_GUI_BACKEND_EXCHANGE_CONTRACT_KR.md` as the current

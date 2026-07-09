@@ -19,6 +19,19 @@
 * `code/sclas_remote_gui.py`, `code/sclas_backend_gui_bridge.py`, `code/abaqus_runner.py`가 새 계약을 읽고 보존하도록 수정되었습니다.
 
 ---
+# 2026-07-09 GUI 입력 변수 및 Analysis 탭 단순화
+
+* `SCLAS_변수_정리.xlsx` 기준으로 사용자 입력값과 backend 내부/default 값을 다시 분리했습니다.
+* Mesh/FEA Setting 탭의 `Abaqus element type`은 `C3D8R` 고정 표시로 바꾸고 `C3D4`, `B31` 선택지를 화면에서 제거했습니다.
+* Analysis Results 탭은 실행/JSON/결과 확인 중심으로 단순화했습니다.
+  * 화면 표시 입력: `Effective length`, `Loading cycles`, `Result points`
+  * 숨김 backend default: `twist`, `axial_strain`, `radial_compression`, residual contact pressure, solver increment values
+* `Research Scope / Local Behavior` 체크박스 묶음은 일반 화면에서 숨겼고, payload에는 현재 구현 범위인 bending/pressure 중심 scope만 남깁니다.
+* Backend mode는 `FAST GUI preview`, `Export job package only`, `Run local/shared-folder command`만 표시합니다. SSH/scp 원격 설정은 코드 호환용으로 남기되 화면에서는 숨겼습니다.
+* Run Controls에 `Import Backend JSON` 버튼을 추가해 기존 `input_data.json`을 GUI 값으로 다시 불러오는 정보 교환 루프를 명확히 했습니다.
+* 관련 문서 `docs/guides/SCLAS_GUI_VARIABLE_CLEANUP_AND_CODE_MAP_KR.md`도 같은 내용으로 업데이트했습니다.
+
+---
 # CURRENT_HANDOFF_KR (현재 인수인계 및 개발 현황)
 
 최종 갱신일: 2026-07-08 KST

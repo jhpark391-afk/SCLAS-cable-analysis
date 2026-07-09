@@ -555,6 +555,7 @@ class VariableFormLabel(QWidget):
         "\u03b1_core": ("\u03b1", "core"),
         "\u03b1_ia": ("\u03b1", "ia"),
         "\u03b1_oa": ("\u03b1", "oa"),
+        "L_eff": ("L", "eff"),
         "n_core": ("n", "core"),
         "n_z": ("n", "z"),
         "n_theta": ("n", "\u03b8"),
@@ -1576,7 +1577,8 @@ class SCLASRemoteGUI(QMainWindow):
             "r_elem_outer_sheath": QSpinBox(),
             "filler_z_elem": QSpinBox(),
         }
-        self.mesh_inputs["elem_type"].addItems(["C3D8R", "C3D4", "B31"])
+        self.mesh_inputs["elem_type"].addItem("C3D8R", "C3D8R")
+        self.mesh_inputs["elem_type"].setEnabled(False)
         self.mesh_inputs["model_strategy"].addItem("Full 3D segment", "Full 3D segment")
         self.mesh_inputs["armour_model"].addItem("Solid wire", "Solid wire")
         self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(40)
@@ -1588,7 +1590,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_inputs["filler_z_elem"].setRange(2, 500); self.mesh_inputs["filler_z_elem"].setValue(40)
         self.mesh_inputs["filler_z_elem"].setVisible(False)
         mesh_tips = {
-            "elem_type": "Abaqus element family requested in input_data.json.",
+            "elem_type": "Fixed GUI request for the full 3D solid-wire workflow.",
             "model_strategy": "Fixed backend strategy: full 3D segment.",
             "armour_model": "Fixed armour representation: solid wire.",
             "contact_beta": "Tangential contact regularization value for stick-slip stability.",
@@ -1622,7 +1624,7 @@ class SCLASRemoteGUI(QMainWindow):
         form.setVerticalSpacing(10)
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         form.setRowWrapPolicy(QFormLayout.WrapLongRows)
-        form.addRow(self.form_label("Abaqus element type"), self.mesh_inputs["elem_type"])
+        form.addRow(self.form_label("Abaqus element type fixed"), self.mesh_inputs["elem_type"])
         form.addRow(self.form_label("Axial n_z divisions"), self.mesh_inputs["z_elem"])
         form.addRow(self.form_label("Core/Sheath n_theta divisions"), self.mesh_inputs["c_elem_core"])
         form.addRow(self.form_label("Armour n_theta divisions"), self.mesh_inputs["c_elem_armour"])
@@ -1742,13 +1744,10 @@ class SCLASRemoteGUI(QMainWindow):
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(9)
-        form.addRow("Effective length (mm)", self.cond["eff_length"])
-        form.addRow("Max twist (rad/m)", self.cond["twist"])
-        form.addRow("Max axial strain", self.cond["axial_strain"])
-        form.addRow("Radial compression ratio", self.cond["radial_compression"])
-        form.addRow("Loading cycles", self.cond["cycles"])
-        form.addRow("Result steps", self.cond["steps"])
-        left.addWidget(self.collapsible_section("Conditions", conditions_box, expanded=True))
+        form.addRow(self.form_label("Effective length L_eff (mm)"), self.cond["eff_length"])
+        form.addRow(self.form_label("Loading cycles"), self.cond["cycles"])
+        form.addRow(self.form_label("Result points"), self.cond["steps"])
+        left.addWidget(self.collapsible_section("Run Inputs", conditions_box, expanded=True))
 
         scope_box = QFrame()
         scope_layout = QVBoxLayout(scope_box)
@@ -1759,12 +1758,12 @@ class SCLASRemoteGUI(QMainWindow):
             "compression_bird_caging": QCheckBox("Compression: bird-caging risk"),
             "pressure_effect": QCheckBox("Hydrostatic pressure effect"),
         }
+        self.visible_study_scope_keys = {"bending_stick_slip", "pressure_effect"}
         self.study_checks["bending_stick_slip"].setChecked(True)
         self.study_checks["pressure_effect"].setChecked(True)
         for check in self.study_checks.values():
             check.setToolTip("Enable this assessment in the exported backend contract.")
             scope_layout.addWidget(check)
-        left.addWidget(self.collapsible_section("Research Scope / Local Behavior", scope_box, expanded=True))
 
         backend_box = QFrame()
         backend_layout = QVBoxLayout(backend_box)
@@ -1774,7 +1773,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.radio_local = QRadioButton("Run local/shared-folder command")
         self.radio_remote = QRadioButton("Run remote computer via SSH/scp")
         self.radio_fast.setChecked(True)
-        for r in [self.radio_fast, self.radio_package, self.radio_local, self.radio_remote]:
+        self.radio_remote.setVisible(False)
+        for r in [self.radio_fast, self.radio_package, self.radio_local]:
             r.setToolTip("Choose how the current input package should be handled.")
             backend_layout.addWidget(r)
         left.addWidget(self.collapsible_section("Backend Mode", backend_box, expanded=True))
@@ -1797,11 +1797,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.remote_command_input.setToolTip("Abaqus command executed remotely after the job package is copied.")
         self.job_root_input.editingFinished.connect(self.refresh_job_history)
         remote_form.addRow("Local job root", self.job_root_input)
-        remote_form.addRow("Local command", self.local_command_input)
-        remote_form.addRow("SSH target", self.remote_target_input)
-        remote_form.addRow("Remote job root", self.remote_root_input)
-        remote_form.addRow("Remote command", self.remote_command_input)
-        left.addWidget(self.collapsible_section("Remote / Backend Settings", remote_box, expanded=False))
+        remote_form.addRow("Abaqus command", self.local_command_input)
+        left.addWidget(self.collapsible_section("Backend Settings", remote_box, expanded=False))
 
         run_box = QFrame()
         run_layout = QVBoxLayout(run_box)
@@ -1809,21 +1806,25 @@ class SCLASRemoteGUI(QMainWindow):
         buttons = QGridLayout()
         self.btn_validate = QPushButton("Validate inputs")
         self.btn_json = QPushButton("Export JSON")
+        self.btn_load_backend_json = QPushButton("Import Backend JSON")
         self.btn_run = QPushButton("Run / Create Job")
         self.btn_run.setObjectName("RunBtn")
         self.btn_load_result = QPushButton("Load result CSV")
         self.btn_validate.clicked.connect(self.validate_inputs_dialog)
         self.btn_json.clicked.connect(self.export_json_dialog)
+        self.btn_load_backend_json.clicked.connect(self.load_backend_json_dialog)
         self.btn_run.clicked.connect(self.run_analysis)
         self.btn_load_result.clicked.connect(self.load_result_csv_dialog)
         self.btn_validate.setToolTip("Validate geometry, materials, mesh settings, and analysis conditions.")
         self.btn_json.setToolTip("Export only input_data.json for backend review.")
+        self.btn_load_backend_json.setToolTip("Load an existing backend input_data.json and apply its supported GUI fields.")
         self.btn_run.setToolTip("Create a job folder, then run the selected backend mode.")
         self.btn_load_result.setToolTip("Load an existing result_data.csv and optional result_summary.json.")
         buttons.addWidget(self.btn_validate, 0, 0)
         buttons.addWidget(self.btn_json, 0, 1)
-        buttons.addWidget(self.btn_run, 1, 0, 1, 2)
-        buttons.addWidget(self.btn_load_result, 2, 0, 1, 2)
+        buttons.addWidget(self.btn_load_backend_json, 1, 0)
+        buttons.addWidget(self.btn_load_result, 1, 1)
+        buttons.addWidget(self.btn_run, 2, 0, 1, 2)
         run_layout.addLayout(buttons)
 
         self.progress = QProgressBar(); self.progress.setValue(0)
@@ -2583,14 +2584,15 @@ class SCLASRemoteGUI(QMainWindow):
         }
 
     def collect_study_scope(self) -> dict:
+        visible_keys = getattr(self, "visible_study_scope_keys", set(self.study_checks))
         return {
             "project_goal": "local behavior evaluation framework for submarine power cable",
             "enabled_assessments": {
-                key: bool(widget.isChecked())
+                key: bool(widget.isChecked()) if key in visible_keys else False
                 for key, widget in self.study_checks.items()
             },
             "primary_gui_output": "moment-curvature hysteresis loop",
-            "backend_note": "Abaqus backend may add extra CSV/JSON outputs for enabled non-bending assessments.",
+            "backend_note": "GUI currently exposes bending plus pressure-effect scope only; torsion, tension, and compression remain backend/future defaults.",
         }
 
     def collect_materials(self) -> List[dict]:
@@ -2752,16 +2754,18 @@ class SCLASRemoteGUI(QMainWindow):
             f"effective_length_mm: {analysis['effective_length_mm']:.5g}",
             f"external_pressure_mpa: {analysis['external_pressure_mpa']:.5g}",
             f"max_curvature_1_per_m: {analysis['max_curvature_1_per_m']:.5g}",
-            f"max_twist_rad_per_m: {analysis['max_twist_rad_per_m']:.5g}",
-            f"max_axial_strain: {analysis['max_axial_strain']:.5g}",
-            f"radial_compression_ratio: {analysis['radial_compression_ratio']:.5g}",
+            f"friction_coefficient: {analysis['friction_coefficient']:.5g}",
             f"loading_cycles: {analysis['loading_cycles']}",
             f"solver_steps: {analysis['solver_steps']}",
             "",
-            "[Backend Defaults Hidden From Jiho GUI Scope]",
-            f"friction_coefficient: {analysis['friction_coefficient']:.5g}",
+            "[Hidden Backend Defaults]",
+            f"curve_factors: {analysis['curve_factors']}",
             f"residual_contact_pressure_mpa: {analysis['residual_contact_pressure_mpa']:.5g}",
             f"contact_regularization_beta: {analysis['contact_regularization_beta']:.5g}",
+            f"max_twist_rad_per_m: {analysis['max_twist_rad_per_m']:.5g}",
+            f"max_axial_strain: {analysis['max_axial_strain']:.5g}",
+            f"radial_compression_ratio: {analysis['radial_compression_ratio']:.5g}",
+            "solver_increment_policy: backend defaults",
             "",
             "[Enabled Assessments]",
             ", ".join(enabled) if enabled else "none",
@@ -2914,7 +2918,6 @@ class SCLASRemoteGUI(QMainWindow):
             "FAST": self.radio_fast,
             "LOCAL_FOLDER": self.radio_package,
             "LOCAL_COMMAND": self.radio_local,
-            "REMOTE_SSH": self.radio_remote,
         }
         mode_buttons.get(mode, self.radio_fast).setChecked(True)
         language = settings.get("ui", {}).get("language", "EN")
