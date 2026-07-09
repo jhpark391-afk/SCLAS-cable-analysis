@@ -64,6 +64,7 @@ def backend_payload_gui_values(payload):
             "r_cond": first_present(geometry, "conductor_radius_mm"),
             "r_insu": first_present(geometry, "insulation_radius_mm"),
             "roc": first_present(geometry, "core_outer_radius_mm", "radius_of_core_mm"),
+            "core_count": first_present(geometry, "core_count") or first_present(derived, "core_count"),
             "tis": first_present(geometry, "inner_sheath_thickness_mm"),
             "bedding_thickness": first_present(geometry, "bedding_thickness_mm") or first_present(derived, "bedding_thickness_mm"),
             "tos": first_present(geometry, "outer_sheath_thickness_mm"),
@@ -119,6 +120,7 @@ def resolved_backend_geometry(payload):
     values = backend_payload_gui_values(payload)
     geometry = values["geometry"]
     roc = float(geometry.get("roc") or 15.3)
+    core_count = int(float(geometry.get("core_count") or 3))
     coc = core_center_from_outer_radius(roc)
     tis = float(geometry.get("tis") or 4.5)
     gap = 0.0
@@ -135,6 +137,7 @@ def resolved_backend_geometry(payload):
     noa_input = int(float(geometry.get("no_oa") or 0))
     return {
         "core_outer_radius_mm": roc,
+        "core_count": core_count,
         "core_center_radius_mm": coc,
         "inner_armour_center_radius_mm": co_ia,
         "outer_armour_center_radius_mm": co_oa,

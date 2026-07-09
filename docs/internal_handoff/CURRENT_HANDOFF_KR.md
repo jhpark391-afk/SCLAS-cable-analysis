@@ -1,3 +1,15 @@
+﻿# 2026-07-09 GUI-Backend 정보 교환 계약 확립
+
+* 새 계약 문서: `docs/guides/SCLAS_GUI_BACKEND_EXCHANGE_CONTRACT_KR.md`
+* 전체 흐름을 `GUI 입력 -> input_data.json -> Abaqus backend -> result_data.csv/result_summary.json/ODB -> GUI 표시`로 고정했습니다.
+* Design 탭에 `core_count` 입력을 추가했습니다. 기본값은 `3`이며 현재 backend 기본 3-core 모델과 맞춥니다.
+* 사용자는 core/inner armour/outer armour helix pitch angle을 입력하고, GUI가 pitch length를 계산합니다.
+* `analysis_conditions.effective_length_mm`은 더 이상 수동 입력값이 아니라 `core_pitch_length_mm / core_count`로 자동 계산되는 표시값입니다.
+* Mesh 탭의 z-direction 분할은 `mesh.axial_divisions` 하나로 통일했습니다. `mesh.filler_z_divisions`는 구버전 호환 key로만 남기고 `same_as_axial_divisions`를 명시합니다.
+* `input_data.json`에 `backend_exchange_contract`를 추가해 GUI가 쓰는 파일, backend가 처리해야 하는 순서, GUI가 읽는 결과 파일을 함께 기록합니다.
+* `code/sclas_remote_gui.py`, `code/sclas_backend_gui_bridge.py`, `code/abaqus_runner.py`가 새 계약을 읽고 보존하도록 수정되었습니다.
+
+---
 # CURRENT_HANDOFF_KR (현재 인수인계 및 개발 현황)
 
 최종 갱신일: 2026-07-08 KST
@@ -108,3 +120,4 @@ graph TD
 
 1. **복합 하중 구속 조건 자동화**: Torsion(비틀림) 및 인장력을 Cyclic Bending(반복 굽힘)과 다중 스텝으로 조합 적용하는 아바쿠스 제어 자동화.
 2. **국부 지표 ODB 세부 파싱**: CPRESS(접촉압력), COPEN(접촉이격), CSLIP(마찰슬립량) 등의 미세 국부 필드값을 ODB에서 자동으로 분리 후처리하여 시각화.
+

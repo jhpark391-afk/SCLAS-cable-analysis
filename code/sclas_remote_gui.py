@@ -165,6 +165,18 @@ def table_float(table: QTableWidget, row: int, col: int, default: float, name: s
         raise ValueError(f"{name} must be a number. Current value: {text!r}") from exc
 
 
+def pitch_length_from_angle(center_radius_mm: float, angle_deg: float, fallback_mm: float) -> float:
+    angle_rad = float(angle_deg) * math.pi / 180.0
+    tangent = math.tan(angle_rad)
+    if abs(tangent) < 1.0e-9:
+        return float(fallback_mm)
+    return abs(2.0 * math.pi * float(center_radius_mm) / tangent)
+
+
+def format_mm(value: float) -> str:
+    return f"{float(value):.2f}"
+
+
 def parse_csv_number(text: str) -> float:
     cleaned = text.strip().replace(",", "")
     if cleaned.startswith("(") and cleaned.endswith(")"):
@@ -409,13 +421,25 @@ def create_job_package(job_root: Path, payload: dict) -> Path:
 
 BACKEND_CONTRACT_TEXT = """# SCLAS Abaqus Backend Contract v1
 
+## Data flow
+The GUI creates one job folder per run and writes:
+- `input_data.json`: source of truth for geometry, material, mesh, and analysis request values.
+- `units_manifest.json`: unit summary copied from `input_data.json`.
+- `BACKEND_CONTRACT.md`: this handoff file.
+- `abaqus_runner.py` and `sclas_odb_extractor.py`: runner/extractor copies used by the backend.
+
+The backend reads `input_data.json`, creates Abaqus model/deck files, runs or
+prepares the solver, extracts ODB data when available, then writes result files
+back into the same job folder.
+
 ## Input
 Read `input_data.json` in the job folder.
 
 Important sections:
 - `metadata`: job id, contract version, frontend version.
 - `geometry_mm`: raw GUI geometry values in mm.
-- `derived_geometry_mm`: GUI-derived radii and armor center radii in mm.
+- `derived_geometry_mm`: GUI-derived radii, armor center radii, pitch lengths,
+  and the auto effective model length in mm.
 - `materials`: layer elastic properties from GUI table.
 - `mesh`: requested element type, model strategy, armour representation, preview discretization.
 - `analysis_conditions`: length, pressure, friction, curvature, twist, axial strain, radial compression, cycle count.
@@ -424,6 +448,16 @@ Important sections:
   `numerical_model.contact_interfaces` lists the first contact pairs to define
   in Abaqus.
 - `equivalent_properties`: GUI-side equivalent EI estimates.
+
+Key GUI/backend conventions:
+- Users input helix pitch angles in `armour.*_lay_angle_deg`.
+- The GUI computes pitch lengths with `pitch = 2*pi*R_center/tan(alpha)`.
+- `analysis_conditions.effective_length_mm` is auto-derived from
+  `derived_geometry_mm.core_pitch_length_mm / geometry_mm.core_count`.
+- `geometry_mm.core_count` defaults to `3` and is passed for backend job setup.
+- `mesh.axial_divisions` is the single z-direction division count for all cable
+  components. `mesh.filler_z_divisions` is kept only for backward compatibility
+  and must mirror `mesh.axial_divisions`.
 
 ## Required output
 Write `result_data.csv` in the same job folder.
@@ -521,6 +555,7 @@ class VariableFormLabel(QWidget):
         "\u03b1_core": ("\u03b1", "core"),
         "\u03b1_ia": ("\u03b1", "ia"),
         "\u03b1_oa": ("\u03b1", "oa"),
+        "n_core": ("n", "core"),
         "n_z": ("n", "z"),
         "n_theta": ("n", "\u03b8"),
         "n_r": ("n", "r"),
@@ -596,7 +631,7 @@ class VariableFormLabel(QWidget):
             parts.append(
                 f"<span style='font-size:15px; font-weight:750; "
                 f"color:{symbol_color};'>&nbsp;{symbol}</span>"
-                f"<sub style='font-size:12px; font-weight:750; "
+                f"<sub style='font-size:13px; font-weight:750; "
                 f"color:{symbol_color};'>{subscript}</sub>"
             )
         else:
@@ -628,7 +663,7 @@ class VariableFormLabel(QWidget):
         if subscript:
             symbol_label.setText(
                 "<span style=\"font-family:{0}; font-size:15px; font-weight:750; color:#0b5cad;\">{1}</span>"
-                "<sub style=\"font-family:{0}; font-size:12px; font-weight:750; color:#0b5cad;\">{2}</sub>".format(
+                "<sub style=\"font-family:{0}; font-size:13px; font-weight:750; color:#0b5cad;\">{2}</sub>".format(
                     SYMBOL_FONT_QSS,
                     symbol,
                     subscript,
@@ -1308,7 +1343,10 @@ class SCLASRemoteGUI(QMainWindow):
             "core_lay_angle": QLineEdit("8.98"),
             "inner_lay_angle": QLineEdit("20.1"),
             "outer_lay_angle": QLineEdit("19.6"),
+            "core_count": QSpinBox(),
         }
+        self.inputs["core_count"].setRange(1, 12); self.inputs["core_count"].setValue(3)
+        self.inputs["core_count"].setToolTip("Default 3. Passed to the backend job setup; effective length is core pitch length divided by this count.")
         self.inputs["no_ia"].setRange(0, 300); self.inputs["no_ia"].setValue(55); self.inputs["no_ia"].setSpecialValueText("Auto")
         self.inputs["no_oa"].setRange(0, 300); self.inputs["no_oa"].setValue(63); self.inputs["no_oa"].setSpecialValueText("Auto")
 
@@ -1319,6 +1357,7 @@ class SCLASRemoteGUI(QMainWindow):
                     ("Conductor radius r_cond (mm)", "r_cond"),
                     ("Insulation radius r_ins (mm)", "r_insu"),
                     ("Core outer radius R_core (mm)", "roc"),
+                    ("Core count n_core", "core_count"),
                 ],
             ),
             (
@@ -1371,6 +1410,30 @@ class SCLASRemoteGUI(QMainWindow):
                 section_form.addRow(self.form_label(label), self.inputs[key])
             left.addWidget(section_box)
 
+        derived_box = QGroupBox("Derived Pitch / Length")
+        derived_grid = QGridLayout(derived_box)
+        derived_grid.setContentsMargins(12, 10, 12, 10)
+        derived_grid.setHorizontalSpacing(10)
+        derived_grid.setVerticalSpacing(7)
+        self.pitch_summary_labels = {}
+        derived_rows = [
+            ("Core pitch length", "core_pitch_length_mm"),
+            ("Inner armour pitch length", "inner_armour_pitch_length_mm"),
+            ("Outer armour pitch length", "outer_armour_pitch_length_mm"),
+            ("Auto effective length", "effective_length_mm"),
+        ]
+        for row, (label, key) in enumerate(derived_rows):
+            name = QLabel(label)
+            name.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            name.setStyleSheet("font-weight: 650; color: #17202a;")
+            value = QLabel("-")
+            value.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            value.setStyleSheet("color: #0b5cad; font-weight: 750;")
+            self.pitch_summary_labels[key] = value
+            derived_grid.addWidget(name, row, 0)
+            derived_grid.addWidget(value, row, 1)
+        left.addWidget(derived_box)
+
         layer_box = QGroupBox("Visible Layers")
         layer_layout = QGridLayout(layer_box)
         layer_layout.addWidget(QLabel("Layer Presets"), 0, 0, 1, 2)
@@ -1393,7 +1456,7 @@ class SCLASRemoteGUI(QMainWindow):
             "inner_armour": QCheckBox("Inner armour"),
             "inner_sheath": QCheckBox("Inner sheath"),
             "filler": QCheckBox("Filler"),
-            "cores": QCheckBox("Three cores"),
+            "cores": QCheckBox("Cores"),
         }
         for idx, check in enumerate(self.layer_checks.values()):
             check.setChecked(True)
@@ -1523,18 +1586,19 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_inputs["r_elem_bedding"].setRange(1, 50); self.mesh_inputs["r_elem_bedding"].setValue(1)
         self.mesh_inputs["r_elem_outer_sheath"].setRange(1, 50); self.mesh_inputs["r_elem_outer_sheath"].setValue(3)
         self.mesh_inputs["filler_z_elem"].setRange(2, 500); self.mesh_inputs["filler_z_elem"].setValue(40)
+        self.mesh_inputs["filler_z_elem"].setVisible(False)
         mesh_tips = {
             "elem_type": "Abaqus element family requested in input_data.json.",
             "model_strategy": "Fixed backend strategy: full 3D segment.",
             "armour_model": "Fixed armour representation: solid wire.",
             "contact_beta": "Tangential contact regularization value for stick-slip stability.",
-            "z_elem": "Axial n_z divisions along the cable length for core, sheath, bedding, and armour.",
+            "z_elem": "Global axial n_z divisions along the cable length for every component, including filler.",
             "c_elem_core": "Circumferential n_theta divisions for core, sheath, and bedding preview surfaces.",
             "c_elem_armour": "Circumferential n_theta divisions around each armour cross-section.",
             "r_elem_inner_sheath": "n_r divisions through the inner sheath thickness.",
             "r_elem_bedding": "n_r divisions through the bedding layer.",
             "r_elem_outer_sheath": "n_r divisions through the outer sheath thickness.",
-            "filler_z_elem": "Axial n_z divisions for the special four-part filler profile.",
+            "filler_z_elem": "Backward-compatible internal mirror of axial n_z divisions.",
         }
         self.mesh_inputs["contact_beta"].setVisible(False)
         for key in ["elem_type", "model_strategy", "armour_model"]:
@@ -1547,7 +1611,6 @@ class SCLASRemoteGUI(QMainWindow):
             "r_elem_inner_sheath",
             "r_elem_bedding",
             "r_elem_outer_sheath",
-            "filler_z_elem",
         ]:
             self.mesh_inputs[key].setMinimumWidth(112)
             self.mesh_inputs[key].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -1566,14 +1629,13 @@ class SCLASRemoteGUI(QMainWindow):
         form.addRow(self.form_label("Inner sheath n_r divisions"), self.mesh_inputs["r_elem_inner_sheath"])
         form.addRow(self.form_label("Bedding n_r divisions"), self.mesh_inputs["r_elem_bedding"])
         form.addRow(self.form_label("Outer sheath n_r divisions"), self.mesh_inputs["r_elem_outer_sheath"])
-        form.addRow(self.form_label("Filler n_z divisions"), self.mesh_inputs["filler_z_elem"])
         left.addLayout(form)
         self.btn_import_inp_mesh = QPushButton("Import Abaqus INP")
         self.btn_import_inp_mesh.setFixedHeight(42)
         self.btn_import_inp_mesh.setToolTip("Read an Abaqus .inp file and render a part-colored end-section mesh preview.")
         self.btn_import_inp_mesh.clicked.connect(self.import_inp_mesh_dialog)
         left.addWidget(self.btn_import_inp_mesh)
-        note = QLabel("Use this tab to set n_\u03b8, n_r, and n_z division guidance. The actual Abaqus mesh is checked by importing the generated INP.")
+        note = QLabel("Use this tab to set n_\u03b8, n_r, and one global n_z division guide. The actual Abaqus mesh is checked by importing the generated INP.")
         note.setWordWrap(True)
         left.addWidget(note)
         self.inp_mesh_summary = QTextEdit()
@@ -1647,7 +1709,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.cond["cycles"].setRange(1, 20); self.cond["cycles"].setValue(2)
         self.cond["steps"].setRange(50, 10000); self.cond["steps"].setValue(500)
         analysis_tips = {
-            "eff_length": "Effective cable length used for the periodic/homogenized bending request.",
+            "eff_length": "Auto-computed as core pitch length divided by core count. Backend uses this as the model length.",
             "pressure": "External pressure load passed to the Abaqus analysis request.",
             "residual_contact_pressure": "Residual normal contact pressure for stick-slip/friction calibration.",
             "friction": "Coulomb friction coefficient for armour-to-sheath and armour-to-bedding contact.",
@@ -1659,6 +1721,8 @@ class SCLASRemoteGUI(QMainWindow):
             "steps": "Number of output samples in the result curve.",
         }
         self.cond["residual_contact_pressure"].setVisible(False)
+        self.cond["eff_length"].setReadOnly(True)
+        self.cond["eff_length"].setStyleSheet("background: #f8fafc; color: #0b5cad; font-weight: 750;")
         for key, tip in analysis_tips.items():
             self.cond[key].setToolTip(tip)
 
@@ -2078,6 +2142,10 @@ class SCLASRemoteGUI(QMainWindow):
         tos = safe_float(self.inputs["tos"], 4.5, "Outer sheath thickness")
         nia_input = int(self.inputs["no_ia"].value())
         noa_input = int(self.inputs["no_oa"].value())
+        core_count = int(self.inputs["core_count"].value())
+        core_lay_angle = safe_float(self.inputs["core_lay_angle"], 8.98, "Core helix pitch angle")
+        inner_lay_angle = safe_float(self.inputs["inner_lay_angle"], 20.1, "Inner armour helix pitch angle")
+        outer_lay_angle = safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour helix pitch angle")
 
         if not (0 < rc < ri <= roc):
             raise ValueError("Geometry must satisfy 0 < conductor_radius < insulation_radius <= core_outer_radius.")
@@ -2111,11 +2179,17 @@ class SCLASRemoteGUI(QMainWindow):
         self.inputs["no_oa"].blockSignals(False)
         nia = nia_input if nia_input > 0 else nia_limit
         noa = noa_input if noa_input > 0 else noa_limit
+        core_pitch_length = pitch_length_from_angle(coc, core_lay_angle, 702.6)
+        inner_pitch_length = pitch_length_from_angle(co_ia, inner_lay_angle, 677.94737)
+        outer_pitch_length = pitch_length_from_angle(co_oa, outer_lay_angle, 776.55789)
+        effective_length = core_pitch_length / max(core_count, 1)
 
         self.derived_geom = {
             "conductor_radius_mm": rc,
             "insulation_radius_mm": ri,
             "core_outer_radius_mm": roc,
+            "core_count": core_count,
+            "core_count_source": "GUI_default_or_user",
             "core_center_radius_mm": coc,
             "core_center_radius_input_mm": coc,
             "core_center_radius_source": "auto_2sqrt3_over_3_times_core_outer_radius",
@@ -2142,8 +2216,31 @@ class SCLASRemoteGUI(QMainWindow):
             "filler_count": 3,
             "filler_outer_radius_mm": iris,
             "filler_profile_scale": roc / 15.3,
+            "core_pitch_length_mm": round(core_pitch_length, 5),
+            "inner_armour_pitch_length_mm": round(inner_pitch_length, 5),
+            "outer_armour_pitch_length_mm": round(outer_pitch_length, 5),
+            "effective_length_mm": round(effective_length, 5),
+            "effective_length_source": "core_pitch_length_mm_divided_by_core_count",
         }
+        self.sync_derived_pitch_widgets(self.derived_geom)
         return self.derived_geom
+
+    def sync_derived_pitch_widgets(self, dg: Dict[str, float]) -> None:
+        if hasattr(self, "pitch_summary_labels"):
+            labels = {
+                "core_pitch_length_mm": f"{format_mm(dg['core_pitch_length_mm'])} mm",
+                "inner_armour_pitch_length_mm": f"{format_mm(dg['inner_armour_pitch_length_mm'])} mm",
+                "outer_armour_pitch_length_mm": f"{format_mm(dg['outer_armour_pitch_length_mm'])} mm",
+                "effective_length_mm": f"{format_mm(dg['effective_length_mm'])} mm",
+            }
+            for key, text in labels.items():
+                if key in self.pitch_summary_labels:
+                    self.pitch_summary_labels[key].setText(text)
+        if hasattr(self, "cond") and "eff_length" in self.cond:
+            widget = self.cond["eff_length"]
+            widget.blockSignals(True)
+            widget.setText(format_mm(dg["effective_length_mm"]))
+            widget.blockSignals(False)
 
     def mesh_value(self, key: str) -> str:
         if key == "model_strategy":
@@ -2198,6 +2295,7 @@ class SCLASRemoteGUI(QMainWindow):
                 "conductor_radius_mm": safe_float(self.inputs["r_cond"], 4.0, "Conductor radius"),
                 "insulation_radius_mm": safe_float(self.inputs["r_insu"], 11.3, "Insulation radius"),
                 "core_outer_radius_mm": dg["core_outer_radius_mm"],
+                "core_count": int(self.inputs["core_count"].value()),
                 "core_center_radius_mm": dg["core_center_radius_mm"],
                 "inner_sheath_thickness_mm": safe_float(self.inputs["tis"], 4.5, "Inner sheath thickness"),
                 "bedding_thickness_mm": safe_float(self.inputs["bedding_thickness"], 0.6, "Bedding thickness"),
@@ -2223,6 +2321,13 @@ class SCLASRemoteGUI(QMainWindow):
                     safe_float(self.inputs["inner_lay_angle"], 20.1, "Inner armour lay angle")
                     + safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour lay angle")
                 ),
+                "core_pitch_length_mm": dg["core_pitch_length_mm"],
+                "inner_armour_pitch_length_mm": dg["inner_armour_pitch_length_mm"],
+                "outer_armour_pitch_length_mm": dg["outer_armour_pitch_length_mm"],
+                "core_pitch_mm": dg["core_pitch_length_mm"],
+                "inner_armour_pitch_mm": -dg["inner_armour_pitch_length_mm"],
+                "outer_armour_pitch_mm": dg["outer_armour_pitch_length_mm"],
+                "pitch_formula": "pitch_length_mm = 2*pi*center_radius_mm/tan(helix_pitch_angle_deg)",
             },
             "materials": materials,
             "mesh": {
@@ -2236,8 +2341,10 @@ class SCLASRemoteGUI(QMainWindow):
                 "inner_sheath_radial_divisions": int(self.mesh_inputs["r_elem_inner_sheath"].value()),
                 "bedding_radial_divisions": int(self.mesh_inputs["r_elem_bedding"].value()),
                 "outer_sheath_radial_divisions": int(self.mesh_inputs["r_elem_outer_sheath"].value()),
-                "filler_divisions": int(self.mesh_inputs["filler_z_elem"].value()),
-                "filler_z_divisions": int(self.mesh_inputs["filler_z_elem"].value()),
+                "filler_divisions": int(self.mesh_inputs["z_elem"].value()),
+                "filler_z_divisions": int(self.mesh_inputs["z_elem"].value()),
+                "filler_z_divisions_source": "same_as_axial_divisions",
+                "axial_divisions_scope": "global_all_components",
                 "radial_divisions_per_layer": int(self.mesh_inputs["r_elem_bedding"].value()),
                 "global_seed_size_mm": None,
                 "local_refinement_factor": 1.0,
@@ -2281,12 +2388,18 @@ class SCLASRemoteGUI(QMainWindow):
                     "Filler": {
                         "r": {"mode": "special_profile"},
                         "theta": {"mode": "special_profile"},
-                        "z": {"mode": "count", "count": int(self.mesh_inputs["filler_z_elem"].value()), "size_mm": None},
+                        "z": {
+                            "mode": "count",
+                            "count": int(self.mesh_inputs["z_elem"].value()),
+                            "size_mm": None,
+                            "source": "same_as_global_axial_divisions",
+                        },
                     },
                 },
             },
             "analysis_conditions": {
-                "effective_length_mm": safe_float(self.cond["eff_length"], 234.2, "Effective length"),
+                "effective_length_mm": dg["effective_length_mm"],
+                "effective_length_source": dg["effective_length_source"],
                 "external_pressure_mpa": safe_float(self.cond["pressure"], 40.0, "External pressure"),
                 "hydrostatic_pressure_mpa": safe_float(self.cond["pressure"], 40.0, "External pressure"),
                 "residual_contact_pressure_mpa": safe_float(self.cond["residual_contact_pressure"], 0.3, "Residual contact pressure"),
@@ -2343,12 +2456,47 @@ class SCLASRemoteGUI(QMainWindow):
                 "required_columns": ["curvature_1_per_m", "moment_kn_m"],
                 "optional_summary": "result_summary.json",
                 "primary_result": "bending moment-curvature loop",
+                "optional_odb": "*.odb",
+                "mesh_manifest": "abaqus_mesh_manifest.json",
                 "additional_requested_assessments": [
                     "torsion stiffness",
                     "tension-bending coupling",
                     "compression bird-caging risk",
                     "hydrostatic pressure effect",
                 ],
+            },
+            "backend_exchange_contract": {
+                "input_source_of_truth": "input_data.json",
+                "job_folder_files_written_by_gui": [
+                    "input_data.json",
+                    "units_manifest.json",
+                    "BACKEND_CONTRACT.md",
+                    "abaqus_runner.py",
+                    "sclas_odb_extractor.py",
+                ],
+                "backend_expected_flow": [
+                    "read input_data.json",
+                    "create Abaqus CAE/INP from geometry/material/mesh/analysis keys",
+                    "submit or prepare Abaqus solver job",
+                    "extract ODB response when available",
+                    "write result_data.csv and result_summary.json",
+                ],
+                "gui_reads_after_backend": [
+                    "result_data.csv",
+                    "result_summary.json",
+                    "abaqus_mesh_manifest.json",
+                    "odb_extraction_summary.json",
+                ],
+                "authoritative_result_files": {
+                    "curve_csv": "result_data.csv",
+                    "summary_json": "result_summary.json",
+                    "odb": "*.odb",
+                },
+                "derived_input_policy": {
+                    "pitch_lengths": "computed by GUI from helix pitch angles and center radii",
+                    "effective_length_mm": "computed by GUI as core_pitch_length_mm/core_count",
+                    "filler_z_divisions": "mirrors mesh.axial_divisions; no separate GUI input",
+                },
             },
         }
         return payload
@@ -2357,6 +2505,8 @@ class SCLASRemoteGUI(QMainWindow):
         friction = safe_float(self.cond["friction"], 0.22, "Friction coefficient")
         residual_pressure = safe_float(self.cond["residual_contact_pressure"], 0.3, "Residual contact pressure")
         contact_beta = safe_float(self.mesh_inputs["contact_beta"], 0.001, "Contact regularization beta")
+        dg = getattr(self, "derived_geom", {})
+        effective_length = float(dg.get("effective_length_mm", safe_float(self.cond["eff_length"], 234.2, "Effective length")))
         return {
             "literature_basis": [
                 {
@@ -2424,10 +2574,11 @@ class SCLASRemoteGUI(QMainWindow):
                 "regularization_beta": contact_beta,
             },
             "periodic_cell": {
-                "effective_length_mm": safe_float(self.cond["eff_length"], 234.2, "Effective length"),
+                "effective_length_mm": effective_length,
+                "effective_length_source": dg.get("effective_length_source", "core_pitch_length_mm_divided_by_core_count"),
                 "strategy": self.mesh_value("model_strategy"),
                 "armour_representation": self.mesh_value("armour_model"),
-                "note": "234.2 mm is consistent with the helical-period style benchmark used in the literature notes.",
+                "note": "Effective length is derived from the core pitch length divided by the configured core count.",
             },
         }
 
@@ -2474,14 +2625,16 @@ class SCLASRemoteGUI(QMainWindow):
         e_copper_pa = conductor["elastic_modulus_GPa"] * 1e9
         r_cond_m = dg["conductor_radius_mm"] / 1000.0
         core_center_m = dg["core_center_radius_mm"] / 1000.0
+        core_count = int(dg.get("core_count", 3))
         area_cond = math.pi * r_cond_m ** 2
         local_i = math.pi * r_cond_m ** 4 / 4.0
-        # Improved over original: includes parallel-axis contribution for 3 off-center cores.
-        i_three_core_about_center = 3.0 * (local_i + area_cond * core_center_m ** 2)
-        ei_core = e_copper_pa * i_three_core_about_center
+        # GUI estimate only: includes parallel-axis contribution for off-center cores.
+        i_core_about_center = core_count * (local_i + area_cond * core_center_m ** 2)
+        ei_core = e_copper_pa * i_core_about_center
         return {
-            "method": "3_copper_cores_with_parallel_axis_estimate_GUI_only",
-            "core_equivalent_I_m4": i_three_core_about_center,
+            "method": f"{core_count}_copper_cores_with_parallel_axis_estimate_GUI_only",
+            "core_count": core_count,
+            "core_equivalent_I_m4": i_core_about_center,
             "core_equivalent_EI_N_m2": ei_core,
             "warning": "Approximation only. Backend Abaqus result is authoritative.",
         }
@@ -2496,6 +2649,8 @@ class SCLASRemoteGUI(QMainWindow):
                 f"Outer sheath radius: {payload['derived_geometry_mm']['outer_sheath_outer_radius_mm']:.3f} mm\n"
                 f"Inner armour center radius: {payload['derived_geometry_mm']['inner_armour_center_radius_mm']:.3f} mm\n"
                 f"Outer armour center radius: {payload['derived_geometry_mm']['outer_armour_center_radius_mm']:.3f} mm\n"
+                f"Core pitch length: {payload['derived_geometry_mm']['core_pitch_length_mm']:.3f} mm\n"
+                f"Auto effective length: {payload['analysis_conditions']['effective_length_mm']:.3f} mm\n"
                 f"Estimated EI: {payload['equivalent_properties']['core_equivalent_EI_N_m2']:.6g} N.m^2\n"
                 f"Enabled assessments: {', '.join(k for k, v in payload['study_scope']['enabled_assessments'].items() if v)}"
             )
@@ -2561,9 +2716,17 @@ class SCLASRemoteGUI(QMainWindow):
             "contract: GUI writes input_data.json; Abaqus backend creates CAE/INP/results.",
             "",
             "[Geometry]",
+            f"core_count: {payload['geometry_mm']['core_count']}",
             f"core_outer_radius_mm: {payload['geometry_mm']['core_outer_radius_mm']:.5g}",
             f"bedding_thickness_mm: {payload['geometry_mm']['bedding_thickness_mm']:.5g}",
             f"outer_sheath_outer_radius_mm: {dg['outer_sheath_outer_radius_mm']:.5g}",
+            "",
+            "[Derived Pitch / Effective Length]",
+            f"core_pitch_length_mm: {dg['core_pitch_length_mm']:.5g}",
+            f"inner_armour_pitch_length_mm: {dg['inner_armour_pitch_length_mm']:.5g}",
+            f"outer_armour_pitch_length_mm: {dg['outer_armour_pitch_length_mm']:.5g}",
+            f"effective_length_mm: {analysis['effective_length_mm']:.5g}",
+            f"effective_length_source: {analysis['effective_length_source']}",
             "",
             "[Armour]",
             f"inner_wire_count: {armour['inner_wire_count_resolved']} ({armour['inner_wire_count_source']})",
@@ -2583,7 +2746,7 @@ class SCLASRemoteGUI(QMainWindow):
             f"inner_sheath_radial_divisions: {mesh['inner_sheath_radial_divisions']}",
             f"bedding_radial_divisions: {mesh['bedding_radial_divisions']}",
             f"outer_sheath_radial_divisions: {mesh['outer_sheath_radial_divisions']}",
-            f"filler_z_divisions: {mesh['filler_z_divisions']}",
+            f"filler_z_divisions: {mesh['filler_z_divisions']} ({mesh['filler_z_divisions_source']})",
             "",
             "[Analysis Conditions]",
             f"effective_length_mm: {analysis['effective_length_mm']:.5g}",
@@ -3893,8 +4056,9 @@ class SCLASRemoteGUI(QMainWindow):
             if self.layer_visible("filler"):
                 self.add_solid(dg["filler_outer_radius_mm"], 0, 0, 0.55, [0.37, 0.59, 0.64, 0.72])
             if self.layer_visible("cores"):
-                for i in range(3):
-                    a = np.radians(120 * i)
+                core_count = max(1, int(dg.get("core_count", 3)))
+                for i in range(core_count):
+                    a = 2 * np.pi * i / core_count
                     cx = dg["core_center_radius_mm"] * np.cos(a)
                     cy = dg["core_center_radius_mm"] * np.sin(a)
                     self.add_solid(dg["core_outer_radius_mm"], cx, cy, 0.6, [0.53, 0.58, 0.60, 1.0])
@@ -3910,10 +4074,10 @@ class SCLASRemoteGUI(QMainWindow):
 
     def estimate_mesh_elements(self, dg: dict) -> int:
         z_elem = int(self.mesh_inputs["z_elem"].value())
-        filler_z_elem = int(self.mesh_inputs["filler_z_elem"].value())
+        filler_z_elem = z_elem
         core_div = int(self.mesh_inputs["c_elem_core"].value())
         armour_div = int(self.mesh_inputs["c_elem_armour"].value())
-        core_solids = 3 * z_elem * core_div * 2
+        core_solids = int(dg.get("core_count", 3)) * z_elem * core_div * 2
         filler_solids = 4 * filler_z_elem * core_div
         sheath_solids = z_elem * core_div * 3
         armour_beams = z_elem * armour_div * (
@@ -4090,17 +4254,17 @@ class SCLASRemoteGUI(QMainWindow):
         painter.setRenderHint(QPainter.Antialiasing, True)
 
         z_div = int(self.mesh_inputs["z_elem"].value()) if hasattr(self, "mesh_inputs") else 40
-        filler_z_div = int(self.mesh_inputs["filler_z_elem"].value()) if hasattr(self, "mesh_inputs") else z_div
+        filler_z_div = z_div
         core_div = int(self.mesh_inputs["c_elem_core"].value()) if hasattr(self, "mesh_inputs") else 24
         armour_div = int(self.mesh_inputs["c_elem_armour"].value()) if hasattr(self, "mesh_inputs") else 8
         r_inner = int(self.mesh_inputs["r_elem_inner_sheath"].value()) if hasattr(self, "mesh_inputs") else 3
         r_bedding = int(self.mesh_inputs["r_elem_bedding"].value()) if hasattr(self, "mesh_inputs") else 1
         r_outer = int(self.mesh_inputs["r_elem_outer_sheath"].value()) if hasattr(self, "mesh_inputs") else 3
         active_key = getattr(self, "active_mesh_key", "")
-        active_z = active_key in {"z_elem", "filler_z_elem"}
+        active_z = active_key == "z_elem"
         active_core_theta = active_key == "c_elem_core"
         active_armour_theta = active_key == "c_elem_armour"
-        active_filler = active_key == "filler_z_elem"
+        active_filler = False
         active_r_key = {
             "r_elem_inner_sheath": "inner",
             "r_elem_bedding": "bedding",
@@ -4254,8 +4418,9 @@ class SCLASRemoteGUI(QMainWindow):
             draw_circle(float(dg["filler_outer_radius_mm"]), "#fbbf24", 2.6 if active_filler else 1.2)
 
             core_theta = max(8, min(core_div, 48))
-            for i in range(3):
-                angle = 2.0 * math.pi * i / 3.0 - math.pi / 2.0
+            core_count = max(1, int(dg.get("core_count", 3)))
+            for i in range(core_count):
+                angle = 2.0 * math.pi * i / core_count - math.pi / 2.0
                 core_x = float(dg["core_center_radius_mm"]) * math.cos(angle)
                 core_y = float(dg["core_center_radius_mm"]) * math.sin(angle)
                 painter.setPen(QPen(QColor("#ff8a2a"), 2.0 if active_core_theta else 1.0))
@@ -4363,7 +4528,7 @@ class SCLASRemoteGUI(QMainWindow):
                 add_segments(segments, edge_color)
 
             z_rows = self.mesh_inputs["z_elem"].value()
-            filler_z_rows = self.mesh_inputs["filler_z_elem"].value()
+            filler_z_rows = z_rows
             core_cols = self.mesh_inputs["c_elem_core"].value()
             armour_cols = self.mesh_inputs["c_elem_armour"].value()
             add_ring_mesh(
@@ -4402,8 +4567,9 @@ class SCLASRemoteGUI(QMainWindow):
                 (0.34, 0.82, 0.82, 0.72),
             )
             add_segments(circle_segments(0.0, 0.0, dg["filler_outer_radius_mm"], core_cols), (0.96, 0.75, 0.16, 0.62))
-            for i in range(3):
-                a = 2 * np.pi * i / 3.0 - np.pi / 2.0
+            core_count = max(1, int(dg.get("core_count", 3)))
+            for i in range(core_count):
+                a = 2 * np.pi * i / core_count - np.pi / 2.0
                 core_x = dg["core_center_radius_mm"] * np.cos(a)
                 core_y = dg["core_center_radius_mm"] * np.sin(a)
                 add_core_mesh(
@@ -4422,8 +4588,8 @@ class SCLASRemoteGUI(QMainWindow):
             if hasattr(self, "inp_mesh_summary"):
                 self.inp_mesh_summary.setPlainText(
                     "Generated from GUI values only.\n"
-                    f"Axial divisions: {z_rows}\n"
-                    f"Filler n_z divisions: {filler_z_rows}\n"
+                    f"Global axial n_z divisions: {z_rows}\n"
+                    f"Filler n_z divisions: {filler_z_rows} (same as global axial n_z)\n"
                     f"Core/Sheath n_theta divisions: {core_cols}\n"
                     f"Armour n_theta divisions: {armour_cols}"
                 )

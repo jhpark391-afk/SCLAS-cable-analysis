@@ -212,6 +212,7 @@ def normalized_geometry(data):
 
     roc = as_float(geo.get("core_outer_radius_mm", dgeo.get("core_outer_radius_mm")), 15.3)
     coc = core_center_from_outer_radius(roc)
+    core_count = as_int(geo.get("core_count", dgeo.get("core_count")), 3)
     r_cond = as_float(geo.get("conductor_radius_mm"), 4.0)
     r_insu = as_float(geo.get("insulation_radius_mm"), 11.3)
     tis = as_float(geo.get("inner_sheath_thickness_mm"), 4.5)
@@ -239,6 +240,8 @@ def normalized_geometry(data):
         "conductor_radius_mm": r_cond,
         "insulation_radius_mm": r_insu,
         "core_outer_radius_mm": roc,
+        "core_count": core_count,
+        "core_count_source": geo.get("core_count_source", dgeo.get("core_count_source", "GUI_default_or_user")),
         "core_center_radius_mm": coc,
         "core_center_radius_source": "auto_2sqrt3_over_3_times_core_outer_radius",
         "inner_sheath_inner_radius_mm": iris,
@@ -270,6 +273,7 @@ def normalize_payload(data):
     geo.setdefault("conductor_radius_mm", geometry["conductor_radius_mm"])
     geo.setdefault("insulation_radius_mm", geometry["insulation_radius_mm"])
     geo["core_outer_radius_mm"] = geometry["core_outer_radius_mm"]
+    geo["core_count"] = geometry["core_count"]
     geo["core_center_radius_mm"] = geometry["core_center_radius_mm"]
     geo.setdefault("inner_sheath_thickness_mm", 4.5)
     geo.setdefault("outer_sheath_thickness_mm", 4.5)
@@ -288,9 +292,33 @@ def normalize_payload(data):
     arm.setdefault("core_lay_angle_deg", 8.98)
     arm.setdefault("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg", arm.get("lay_angle_deg", 20.32)))
     arm.setdefault("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg", arm.get("lay_angle_deg", 19.62)))
+    core_pitch_length = abs(as_float(
+        arm.get("core_pitch_length_mm", arm.get("core_pitch_mm")),
+        pitch_from_lay_angle(geometry["core_center_radius_mm"], arm.get("core_lay_angle_deg"), 702.6, sign=1.0),
+    ))
+    inner_pitch_length = abs(as_float(
+        arm.get("inner_armour_pitch_length_mm", arm.get("inner_armour_pitch_mm")),
+        pitch_from_lay_angle(geometry["inner_armour_center_radius_mm"], arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")), -677.94737, sign=-1.0),
+    ))
+    outer_pitch_length = abs(as_float(
+        arm.get("outer_armour_pitch_length_mm", arm.get("outer_armour_pitch_mm")),
+        pitch_from_lay_angle(geometry["outer_armour_center_radius_mm"], arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")), 776.55789, sign=1.0),
+    ))
+    arm["core_pitch_length_mm"] = core_pitch_length
+    arm["inner_armour_pitch_length_mm"] = inner_pitch_length
+    arm["outer_armour_pitch_length_mm"] = outer_pitch_length
+    arm["core_pitch_mm"] = as_float(arm.get("core_pitch_mm"), core_pitch_length)
+    arm["inner_armour_pitch_mm"] = as_float(arm.get("inner_armour_pitch_mm"), -inner_pitch_length)
+    arm["outer_armour_pitch_mm"] = as_float(arm.get("outer_armour_pitch_mm"), outer_pitch_length)
     arm["inner_wire_count_resolved"] = geometry["inner_armour_wire_count"]
     arm["outer_wire_count_resolved"] = geometry["outer_armour_wire_count"]
     data["armour"] = arm
+    merged_dgeo["core_pitch_length_mm"] = core_pitch_length
+    merged_dgeo["inner_armour_pitch_length_mm"] = inner_pitch_length
+    merged_dgeo["outer_armour_pitch_length_mm"] = outer_pitch_length
+    merged_dgeo.setdefault("effective_length_mm", core_pitch_length / max(geometry["core_count"], 1))
+    merged_dgeo.setdefault("effective_length_source", "core_pitch_length_mm_divided_by_core_count")
+    data["derived_geometry_mm"] = merged_dgeo
 
     mesh = dict(data.get("mesh", {}))
     mesh.setdefault("axial_divisions", 40)
@@ -299,8 +327,12 @@ def normalize_payload(data):
     mesh.setdefault("inner_sheath_radial_divisions", mesh.get("radial_divisions_per_layer", 3))
     mesh.setdefault("bedding_radial_divisions", mesh.get("radial_divisions_per_layer", 1))
     mesh.setdefault("outer_sheath_radial_divisions", mesh.get("radial_divisions_per_layer", 3))
-    mesh.setdefault("filler_z_divisions", mesh.get("filler_divisions", mesh.get("axial_divisions", 40)))
-    mesh.setdefault("filler_divisions", mesh.get("filler_z_divisions", 40))
+    if mesh.get("filler_z_divisions_source") == "same_as_axial_divisions":
+        mesh["filler_z_divisions"] = mesh["axial_divisions"]
+        mesh["filler_divisions"] = mesh["axial_divisions"]
+    else:
+        mesh.setdefault("filler_z_divisions", mesh.get("filler_divisions", mesh.get("axial_divisions", 40)))
+        mesh.setdefault("filler_divisions", mesh.get("filler_z_divisions", 40))
     mesh.setdefault("requested_element_type", mesh.get("solid_element_type", "C3D8R"))
     mesh.setdefault("global_seed_size_mm", None)
     mesh.setdefault("contact_regularization_beta", 0.001)
@@ -310,7 +342,8 @@ def normalize_payload(data):
     pressure = ac.get("external_pressure_mpa", ac.get("hydrostatic_pressure_mpa", 0.0))
     ac["external_pressure_mpa"] = as_float(pressure, 0.0)
     ac["hydrostatic_pressure_mpa"] = ac["external_pressure_mpa"]
-    ac.setdefault("effective_length_mm", 234.2)
+    ac.setdefault("effective_length_mm", merged_dgeo.get("effective_length_mm", 234.2))
+    ac.setdefault("effective_length_source", merged_dgeo.get("effective_length_source", "core_pitch_length_mm_divided_by_core_count"))
     ac.setdefault("residual_contact_pressure_mpa", 0.3)
     ac.setdefault("friction_coefficient", 0.22)
     ac.setdefault("max_curvature_1_per_m", 0.08)
@@ -404,9 +437,23 @@ def fallback_manifest(data):
         "core_lay_angle_deg": as_float(arm.get("core_lay_angle_deg"), 8.98),
         "inner_armour_lay_angle_deg": as_float(arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")), 20.32),
         "outer_armour_lay_angle_deg": as_float(arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")), 19.62),
-        "core_pitch_mm": pitch_from_lay_angle(geom["core_center_radius_mm"], arm.get("core_lay_angle_deg"), 702.6, sign=1.0),
-        "inner_armour_pitch_mm": pitch_from_lay_angle(geom["inner_armour_center_radius_mm"], arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")), -677.94737, sign=-1.0),
-        "outer_armour_pitch_mm": pitch_from_lay_angle(geom["outer_armour_center_radius_mm"], arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")), 776.55789, sign=1.0),
+        "core_pitch_mm": as_float(
+            arm.get("core_pitch_mm", arm.get("core_pitch_length_mm")),
+            pitch_from_lay_angle(geom["core_center_radius_mm"], arm.get("core_lay_angle_deg"), 702.6, sign=1.0),
+        ),
+        "inner_armour_pitch_mm": as_float(
+            arm.get("inner_armour_pitch_mm"),
+            -abs(as_float(
+                arm.get("inner_armour_pitch_length_mm"),
+                pitch_from_lay_angle(geom["inner_armour_center_radius_mm"], arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")), -677.94737, sign=-1.0),
+            )),
+        ),
+        "outer_armour_pitch_mm": as_float(
+            arm.get("outer_armour_pitch_mm", arm.get("outer_armour_pitch_length_mm")),
+            pitch_from_lay_angle(geom["outer_armour_center_radius_mm"], arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")), 776.55789, sign=1.0),
+        ),
+        "effective_length_mm": as_float(ac.get("effective_length_mm"), geom.get("effective_length_mm", 234.2)),
+        "effective_length_source": ac.get("effective_length_source", geom.get("effective_length_source", "core_pitch_length_mm_divided_by_core_count")),
     }
     defaults = {
         "normal": "penalty_or_augmented_lagrange",
@@ -439,6 +486,7 @@ def fallback_manifest(data):
         "boundary_condition_scaffold_status": "not_created",
         "equivalent_properties_from_gui": data.get("equivalent_properties", {}),
         "components": [
+            {"name": "core_solids", "count": geom.get("core_count", 3), "current_backend_default": 3},
             {"name": "inner_sheath_equivalent_solid"},
             {"name": "filler_matrix_solids", "count": geom["filler_count"], "profile_scale": geom["filler_profile_scale"]},
             {"name": "bedding_equivalent_solid"},
@@ -518,9 +566,12 @@ def build_abaqus_model(data, job_dir):
     core_lay_angle = as_float(arm.get('core_lay_angle_deg'), 8.98)
     inner_lay_angle = as_float(arm.get('inner_armour_lay_angle_deg', arm.get('inner_lay_angle_deg')), 20.32)
     outer_lay_angle = as_float(arm.get('outer_armour_lay_angle_deg', arm.get('outer_lay_angle_deg')), 19.62)
-    pitch_core = pitch_from_lay_angle(CoC, core_lay_angle, 702.6, sign=1.0)
-    pitch_inner = pitch_from_lay_angle(CoIA, inner_lay_angle, -677.94737, sign=-1.0)
-    pitch_outer = pitch_from_lay_angle(CoOA, outer_lay_angle, 776.55789, sign=1.0)
+    pitch_core_default = pitch_from_lay_angle(CoC, core_lay_angle, 702.6, sign=1.0)
+    pitch_inner_default = pitch_from_lay_angle(CoIA, inner_lay_angle, -677.94737, sign=-1.0)
+    pitch_outer_default = pitch_from_lay_angle(CoOA, outer_lay_angle, 776.55789, sign=1.0)
+    pitch_core = as_float(arm.get('core_pitch_mm', arm.get('core_pitch_length_mm')), pitch_core_default)
+    pitch_inner = as_float(arm.get('inner_armour_pitch_mm'), -abs(as_float(arm.get('inner_armour_pitch_length_mm'), pitch_inner_default)))
+    pitch_outer = as_float(arm.get('outer_armour_pitch_mm', arm.get('outer_armour_pitch_length_mm')), pitch_outer_default)
 
     depth          = as_float(ac.get('effective_length_mm'), 234.2)
     pressure       = as_float(ac.get('external_pressure_mpa', ac.get('hydrostatic_pressure_mpa')), 0.0)

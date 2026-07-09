@@ -1,6 +1,30 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-07-08 KST
+Last updated: 2026-07-09 KST
+
+## GUI-Backend Exchange Contract - 2026-07-09 KST
+
+- Added `docs/guides/SCLAS_GUI_BACKEND_EXCHANGE_CONTRACT_KR.md` as the current
+  team-facing contract for `GUI -> input_data.json -> Abaqus backend ->
+  result_data.csv/result_summary.json/ODB -> GUI`.
+- The Design tab now exposes `core_count` with default `3`. The GUI computes
+  `derived_geometry_mm.core_pitch_length_mm`,
+  `derived_geometry_mm.inner_armour_pitch_length_mm`,
+  `derived_geometry_mm.outer_armour_pitch_length_mm`, and
+  `analysis_conditions.effective_length_mm`.
+- `analysis_conditions.effective_length_mm` is now derived from
+  `core_pitch_length_mm / core_count`; the Analysis condition field is a
+  read-only display of that derived value.
+- The Mesh guide now treats `mesh.axial_divisions` as the single global
+  z-direction division count for all components. `mesh.filler_z_divisions` is
+  still written only as a backward-compatible mirror with
+  `filler_z_divisions_source = same_as_axial_divisions`.
+- `input_data.json` now includes `backend_exchange_contract`, listing the files
+  written by the GUI, the expected backend flow, and the result files the GUI
+  reads after backend execution.
+- `code/abaqus_runner.py` and `code/sclas_backend_gui_bridge.py` were updated
+  to preserve/read the new `core_count`, pitch length, effective length, and
+  global axial division contract while remaining compatible with older payloads.
 
 ## GUI Design/Mesh Cleanup - 2026-07-08 KST
 
