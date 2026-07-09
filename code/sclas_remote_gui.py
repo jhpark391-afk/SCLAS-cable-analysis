@@ -4078,10 +4078,11 @@ class SCLASRemoteGUI(QMainWindow):
         if is_force_displacement_preview(summary or {}):
             if hasattr(self, "result_title_label"):
                 self.result_title_label.setText("RP Force-Displacement Result")
-            self.plot_canvas.setLabel("left", "RP Reaction Force RF1", units="N")
-            self.plot_canvas.setLabel("bottom", "RP Displacement U1 (micrometer)")
+            self.plot_canvas.setLabel("left", "Force RF1 [x1e9 N]")
+            self.plot_canvas.setLabel("bottom", "Displacement U1 [x1e-3 mm]")
             try:
                 self.plot_canvas.getAxis("bottom").enableAutoSIPrefix(False)
+                self.plot_canvas.getAxis("left").enableAutoSIPrefix(False)
             except Exception:
                 pass
             try:
@@ -4089,6 +4090,7 @@ class SCLASRemoteGUI(QMainWindow):
             except Exception:
                 pass
             plot_x = k * 1000.0
+            plot_y = m / 1.0e9
         else:
             if hasattr(self, "result_title_label"):
                 self.result_title_label.setText("Moment-Curvature Result")
@@ -4096,6 +4098,7 @@ class SCLASRemoteGUI(QMainWindow):
             self.plot_canvas.setLabel("bottom", "Curvature \u03ba", units="1/m")
             try:
                 self.plot_canvas.getAxis("bottom").enableAutoSIPrefix(True)
+                self.plot_canvas.getAxis("left").enableAutoSIPrefix(True)
             except Exception:
                 pass
             try:
@@ -4103,7 +4106,8 @@ class SCLASRemoteGUI(QMainWindow):
             except Exception:
                 pass
             plot_x = k
-        self.curve.setData(plot_x, m)
+            plot_y = m
+        self.curve.setData(plot_x, plot_y)
         self.plot_canvas.autoRange()
 
     def update_metrics(self, data: dict, summary: dict = None) -> None:
