@@ -123,8 +123,8 @@ def rich_backend_payload() -> dict:
             "lay_angle_deg": 19.85,
         },
         "mesh": {
-            "requested_element_type": "C3D8R",
-            "solid_element_type": "C3D8R",
+            "requested_element_type": "C3D8",
+            "solid_element_type": "C3D8",
             "model_strategy": "periodic_homogenized_cell",
             "armour_model": "solid_wire",
             "axial_divisions": 40,

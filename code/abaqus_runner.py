@@ -365,7 +365,8 @@ def normalize_payload(data):
     else:
         mesh.setdefault("filler_z_divisions", mesh.get("filler_divisions", mesh.get("axial_divisions", 40)))
         mesh.setdefault("filler_divisions", mesh.get("filler_z_divisions", 40))
-    mesh.setdefault("requested_element_type", mesh.get("solid_element_type", "C3D8R"))
+    mesh.setdefault("solid_element_type", mesh.get("requested_element_type", "C3D8"))
+    mesh.setdefault("requested_element_type", mesh.get("solid_element_type", "C3D8"))
     mesh.setdefault("global_seed_size_mm", None)
     mesh.setdefault("contact_regularization_beta", 0.001)
     data["mesh"] = mesh

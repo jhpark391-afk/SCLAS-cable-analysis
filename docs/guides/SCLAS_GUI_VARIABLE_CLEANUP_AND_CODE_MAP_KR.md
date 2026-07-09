@@ -79,7 +79,7 @@
 |---|---|---|
 | `mesh.model_strategy` | backend 기본 `full_3d_segment` | 계속 숨김 |
 | `mesh.armour_model` | backend 기본 `solid_wire` | 계속 숨김 |
-| `mesh.requested_element_type` | GUI 표시값 `C3D8R` | 선택형 combo가 아니라 고정 표시 |
+| `mesh.requested_element_type` | GUI 표시값 `C3D8` | 선택형 combo가 아니라 고정 표시 |
 | `mesh.filler_z_divisions` | 호환 key로 JSON에 남음 | 화면에서는 숨김 |
 | `analysis_conditions.residual_contact_pressure_mpa` | hidden widget | 보광/현수 calibration 단계 전까지 숨김 |
 | `analysis_conditions.max_twist_rad_per_m` | future/coupled-load 기본값 | Analysis 탭 화면에서 숨김 |
@@ -89,7 +89,7 @@
 | output request field list | JSON fixed list | backend 구현 기준으로 유지 |
 | run mode flags | backend 실행 모드 내부값 | 일반 변수표에서 분리 |
 
-현재 GUI는 `Abaqus element type`을 `C3D8R` 고정 표시로 단순화했다. `C3D4`, `B31` 선택지는 사용자가 잘못 고를 수 있으므로 화면에서 제거했다. 내부 backend는 필요하면 solid/beam element를 자체적으로 결정해야 한다.
+현재 GUI는 `Abaqus element type`을 `C3D8` 고정 표시로 단순화했다. `C3D8R`의 `R`은 reduced integration을 의미하므로 현재 발표/기본 계약값으로 쓰지 않는다. `C3D4`, `B31` 선택지는 사용자가 잘못 고를 수 있으므로 화면에서 제거했다. 내부 backend는 필요하면 solid/beam element를 자체적으로 결정해야 한다.
 
 ## 5. 보광이와 회의할 때 맞춰야 할 질문
 
@@ -114,7 +114,7 @@
 1. `mesh.axial_divisions` 하나가 모든 component의 z direction에 적용되는 것이 맞는가?
 2. filler 전용 z division은 완전히 제거해도 되는가?
 3. `Core/Sheath n_theta`를 core, inner sheath, bedding, outer sheath에 공통 적용해도 되는가?
-4. `Abaqus element type = C3D8R` 고정 표시가 보광 backend의 full 3D solid-wire workflow와 맞는가?
+4. `Abaqus element type = C3D8` 고정 표시가 보광 backend의 full 3D solid-wire workflow와 맞는가?
 5. circumferential division은 4의 배수를 권장만 하고 강제하지 않는 것이 맞는가?
 6. 사용자가 mesh size와 mesh count를 모두 입력 방식으로 선택할 수 있게 하는 현재 방식이 맞는가?
 7. sweep method, medial axis, advancing front 같은 mesh method는 GUI에서 고를 필요가 있는가, backend 고정값인가?

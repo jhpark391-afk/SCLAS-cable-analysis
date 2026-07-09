@@ -254,7 +254,7 @@ class SCLAS_V8(QMainWindow):
             "c_elem_core": QSpinBox(),
             "c_elem_armour": QSpinBox()
         }
-        self.mesh_inputs["elem_type"].addItems(["C3D8R (8-node Brick)", "C3D4 (4-node Tetra)", "B31 (2-node Beam)"])
+        self.mesh_inputs["elem_type"].addItems(["C3D8 (8-node Brick)", "C3D4 (4-node Tetra)", "B31 (2-node Beam)"])
         self.mesh_inputs["z_elem"].setRange(10, 200); self.mesh_inputs["z_elem"].setValue(40)
         self.mesh_inputs["c_elem_core"].setRange(8, 100); self.mesh_inputs["c_elem_core"].setValue(24)
         self.mesh_inputs["c_elem_armour"].setRange(4, 20); self.mesh_inputs["c_elem_armour"].setValue(6)

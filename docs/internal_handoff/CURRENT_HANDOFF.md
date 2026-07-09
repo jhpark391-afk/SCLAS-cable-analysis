@@ -2,6 +2,18 @@
 
 Last updated: 2026-07-10 KST
 
+## C3D8 Element-Type Feedback - 2026-07-10 KST
+
+- Updated the visible GUI/default JSON element type from `C3D8R` to `C3D8`.
+- Team feedback clarified that the `R` suffix means reduced integration, so it
+  should not be presented as the default/full solid element contract.
+- `code/sclas_remote_gui.py` now shows fixed `C3D8` in the FEA Setting tab.
+- `code/abaqus_runner.py` now defaults missing solid/requested element keys to
+  `C3D8`.
+- The actual Abaqus runner solid assignments were already using
+  `ElemType(elemCode=C3D8, ...)`, so this change aligns the GUI/payload/docs
+  wording with the backend behavior.
+
 ## Mesh Count/Size Input Feedback - 2026-07-10 KST
 
 - Added a `Mesh input basis` control to the FEA Setting tab.
@@ -48,7 +60,7 @@ Last updated: 2026-07-10 KST
 - Rechecked the user-provided variable workbook against the current backend
   contract and separated visible GUI inputs from derived values and hidden
   backend defaults.
-- The FEA Setting tab now shows `Abaqus element type` as a fixed `C3D8R`
+- The FEA Setting tab now shows `Abaqus element type` as a fixed `C3D8`
   request instead of exposing `C3D4`/`B31` choices to the user.
 - The Analysis Results tab is simplified around execution, JSON exchange, and
   result review. It now visibly exposes only derived effective length, loading
@@ -232,7 +244,7 @@ All baseline integration readiness statuses: `Status: accepted` (within standard
 
 - The GUI runs through `code/sclas_remote_gui.py`.
 - **One-Click Solver Integration**: GUI's `[Run / Create Job]` now executes `abaqus_runner.py` -> monitors Abaqus solver -> runs `sclas_odb_extractor.py` -> automatically loads and plots the resulting `result_data.csv`.
-- **B31 Solid Element Fix**: Solved the `Cannot assign element type B31 to a cell` crash. The backend automatically forces 3D solid parts to use `C3D8R` elements via the `elem_code_for_solid` guard.
+- **B31 Solid Element Fix**: Solved the `Cannot assign element type B31 to a cell` crash. The backend automatically forces 3D solid parts to use `C3D8` elements via the `elem_code_for_solid` guard.
 - **Windows PATH Auto-Detection**: The runner automatically scans for `abq2019.bat` in standard directories (e.g. `C:\SIMULIA\Commands`) if Abaqus is not present in the Windows system PATH, preventing subprocess `FileNotFoundError`.
 - **SCLAS Quick Launch**: Created a dedicated folder (`SCLAS_Quick_Launch/`) containing easy-to-use batch scripts for the user to launch the GUI and run self-checks without terminal access.
 - HELIX branding and team logo assets are integrated.

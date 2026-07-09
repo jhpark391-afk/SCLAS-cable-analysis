@@ -1,4 +1,13 @@
-﻿# 2026-07-10 Mesh count/size 입력 피드백 반영
+﻿# 2026-07-10 C3D8 element type 피드백 반영
+
+* 팀 피드백 캡처 기준으로 GUI/JSON 기본 element type을 `C3D8R`에서 `C3D8`로 수정했습니다.
+* `C3D8R`의 `R`은 reduced integration을 의미하므로, 계산 단순화 모델로 오해될 수 있어 현재 발표/기본 계약값에서 제외했습니다.
+* `code/sclas_remote_gui.py`의 FEA Setting 탭 고정 표시값은 이제 `C3D8`입니다.
+* `code/abaqus_runner.py`의 최소 payload default도 `C3D8`로 바꿨습니다.
+* 실제 Abaqus runner의 solid mesh assignment는 이미 `ElemType(elemCode=C3D8, ...)`를 쓰고 있었으므로, 이번 변경은 GUI/payload/docs 표현을 실제 backend 동작과 맞추는 성격입니다.
+
+---
+# 2026-07-10 Mesh count/size 입력 피드백 반영
 
 * 보광/팀 피드백 캡처 기준으로 Mesh Setting Guide에 `Mesh input basis`를 추가했습니다.
   * `Division count`: 기존처럼 `n_z`, `n_theta`, `n_r` 개수를 직접 입력합니다.
@@ -59,7 +68,7 @@
 # 2026-07-09 GUI 입력 변수 및 Analysis 탭 단순화
 
 * `SCLAS_변수_정리.xlsx` 기준으로 사용자 입력값과 backend 내부/default 값을 다시 분리했습니다.
-* Mesh/FEA Setting 탭의 `Abaqus element type`은 `C3D8R` 고정 표시로 바꾸고 `C3D4`, `B31` 선택지를 화면에서 제거했습니다.
+* Mesh/FEA Setting 탭의 `Abaqus element type`은 `C3D8` 고정 표시로 바꾸고 `C3D4`, `B31` 선택지를 화면에서 제거했습니다.
 * Analysis Results 탭은 실행/JSON/결과 확인 중심으로 단순화했습니다.
   * 화면 표시 입력: `Effective length`, `Loading cycles`, `Result points`
   * 숨김 backend default: `twist`, `axial_strain`, `radial_compression`, residual contact pressure, solver increment values
@@ -146,7 +155,7 @@
   * 반응형 윈도우 스크롤바와 Resizable Splitter가 도입되어, 1366x768 해상도에서도 화면 잘림 현상 없이 부드럽게 스크롤됩니다.
 * **아바쿠스 Solid-Beam 하이브리드 메쉬 할당 버그 해결**:
   * Sheath 및 Bedding과 같은 3D Solid 요소 영역(Cells)에 1D Beam 요소(`B31`)가 중복 할당되어 아바쿠스가 크래시나던 문제를 해결했습니다.
-  * `abaqus_runner.py`의 `elem_code_for_solid` 감지 로직을 추가하여, Solid 영역은 강제적으로 `C3D8R` 요소로 변환하도록 예외 제어 처리를 적용했습니다.
+  * `abaqus_runner.py`의 `elem_code_for_solid` 감지 로직을 추가하여, Solid 영역은 강제적으로 `C3D8` 요소로 변환하도록 예외 제어 처리를 적용했습니다.
 * **Windows 아바쿠스 경로(PATH) 자동 우회 탐색**:
   * 아바쿠스 실행 명령어 환경변수(`PATH`)가 누락된 원격 PC 환경에서도, `abaqus_runner.py`가 시스템 드라이브의 아바쿠스 기본 경로(예: `C:\SIMULIA\Commands`)를 스스로 재귀 탐색하여 `abq2019.bat`를 실행해내는 자동 경로 스캐너를 구축했습니다.
 * **SCLAS 퀵 런처 구축**:

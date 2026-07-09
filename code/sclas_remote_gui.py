@@ -1825,7 +1825,7 @@ class SCLASRemoteGUI(QMainWindow):
         }
         self.mesh_inputs["mesh_basis"].addItem("Division count", "count")
         self.mesh_inputs["mesh_basis"].addItem("Target size", "size")
-        self.mesh_inputs["elem_type"].addItem("C3D8R", "C3D8R")
+        self.mesh_inputs["elem_type"].addItem("C3D8", "C3D8")
         self.mesh_inputs["elem_type"].setEnabled(False)
         self.mesh_inputs["model_strategy"].addItem("Full 3D segment", "Full 3D segment")
         self.mesh_inputs["armour_model"].addItem("Solid wire", "Solid wire")
