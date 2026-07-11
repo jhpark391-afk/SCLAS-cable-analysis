@@ -33,8 +33,8 @@ os.environ.setdefault("PYQTGRAPH_QT_LIB", "PyQt5")
 
 import numpy as np
 import psutil
-from PyQt5.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QPainter, QPen, QPixmap
+from PyQt5.QtCore import QPoint, QEasingCurve, QEvent, QPropertyAnimation, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPen, QPixmap, QPolygon
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -82,8 +82,8 @@ from sclas_job_filters import candidate_job_dirs
 
 SCLAS_710_VARIABLE_DEFAULTS = {
     "geometry_input": {
-        "Roc": 11.0,
-        "RoI": 4.0,
+        "Roc": 4.0,
+        "RoI": 11.3,
         "RoC": 15.3,
         "TIS": 4.5,
         "TOS": 4.5,
@@ -101,7 +101,7 @@ SCLAS_710_VARIABLE_DEFAULTS = {
     "analysis_input": {
         "P": 0.3,
         "FrCo": 0.3,
-        "conStiff": None,
+        "conStiff": 0.005,
         "BendFac": 5.0e-5,
     },
     "solver_input": {
@@ -120,9 +120,9 @@ SCLAS_710_VARIABLE_DEFAULTS = {
         "BSMeshType": "count",
         "ArmourMeshType": "count",
         "FillerMeshType": "count",
-        "ZAD": 60,
+        "ZAD": 40,
         "CCD": 20,
-        "BSCD": 80,
+        "BSCD": 64,
         "ACD": 3,
         "BSRD": 3,
         "FD1": 2,
@@ -138,7 +138,7 @@ APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
 DEFAULT_JOB_ROOT = PROJECT_DIR / "jobs" / "SCLAS_jobs"
 SETTINGS_PATH = PROJECT_DIR / "settings.json"
-SETTINGS_SCHEMA_VERSION = "sclas-710-variable-contract-v1"
+SETTINGS_SCHEMA_VERSION = "sclas-711-variable-contract-v1"
 BACKEND_RUNNER_TEMPLATE = APP_DIR / "abaqus_runner.py"
 ODB_EXTRACTOR_TEMPLATE = APP_DIR / "sclas_odb_extractor.py"
 TEAM_LOGO_PATH = PROJECT_DIR / "assets" / "helix_logo.png"
@@ -628,7 +628,7 @@ Important sections:
 - `derived_geometry_mm`: GUI-derived radii, armor center radii, pitch lengths,
   and the auto effective model length in mm.
 - `materials`: layer elastic properties from GUI table.
-- `mesh`: requested element type and SCLAS 710 mesh division values.
+- `mesh`: requested element type and SCLAS 711 mesh division values.
 - `analysis_conditions`: effective length, pressure, friction, curvature/factor, cycle count.
 
 Key GUI/backend conventions:
@@ -1701,17 +1701,19 @@ class SCLASRemoteGUI(QMainWindow):
 
     def mesh_count_size_stack(self, count_key: str, size_key: str) -> QWidget:
         control = QWidget()
+        control.setMinimumWidth(0)
         layout = QHBoxLayout(control)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
         combo = QComboBox()
         combo.addItem("Count", "count")
         combo.addItem("Size", "size")
-        combo.setFixedWidth(74)
+        combo.setMinimumWidth(78)
+        combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         combo.setToolTip("Choose count or target size for this mesh variable only.")
         stack = QStackedWidget()
         stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        stack.setMinimumWidth(112)
+        stack.setMinimumWidth(88)
         stack.addWidget(self.mesh_inputs[count_key])
         stack.addWidget(self.mesh_inputs[size_key])
         layout.addWidget(combo)
@@ -1874,28 +1876,9 @@ class SCLASRemoteGUI(QMainWindow):
     def build_mesh_tab(self) -> None:
         self.ensure_analysis_condition_widgets()
         tab = QWidget()
-        layout = QHBoxLayout(tab)
+        layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
-        panel = QFrame(); panel.setObjectName("Card")
-        panel.setMinimumWidth(360)
-        left = QVBoxLayout(panel)
-        left.setContentsMargins(18, 16, 18, 16)
-        left.setSpacing(12)
-        left.addWidget(self.header("Finite Element Analysis Setting"))
-
-        setup_box = QGroupBox("Analysis Structure Setup")
-        setup_form = QFormLayout(setup_box)
-        setup_form.setLabelAlignment(Qt.AlignRight)
-        setup_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        setup_form.setHorizontalSpacing(12)
-        setup_form.setVerticalSpacing(9)
-        setup_form.addRow(self.form_label("External pressure load (MPa)"), self.cond["pressure"])
-        setup_form.addRow(self.form_label("Target curvature kappa (1/m)"), self.cond["curvature"])
-        setup_form.addRow(self.form_label("Friction coefficient mu"), self.cond["friction"])
-        left.addWidget(setup_box)
-
-        left.addWidget(self.header("Mesh Setting Guide"))
+        layout.setSpacing(0)
         self.mesh_inputs = {
             "elem_type": QComboBox(),
             "z_elem": QSpinBox(),
@@ -1919,9 +1902,9 @@ class SCLASRemoteGUI(QMainWindow):
         }
         self.mesh_inputs["elem_type"].addItem("C3D8", "C3D8")
         self.mesh_inputs["elem_type"].setEnabled(False)
-        self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(60)
+        self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(40)
         self.mesh_inputs["c_elem_core"].setRange(3, 240); self.mesh_inputs["c_elem_core"].setValue(20)
-        self.mesh_inputs["c_elem_bedding_sheath"].setRange(3, 320); self.mesh_inputs["c_elem_bedding_sheath"].setValue(80)
+        self.mesh_inputs["c_elem_bedding_sheath"].setRange(3, 320); self.mesh_inputs["c_elem_bedding_sheath"].setValue(64)
         self.mesh_inputs["c_elem_armour"].setRange(1, 64); self.mesh_inputs["c_elem_armour"].setValue(3)
         self.mesh_inputs["r_elem_inner_sheath"].setRange(1, 50); self.mesh_inputs["r_elem_inner_sheath"].setValue(3)
         self.mesh_inputs["r_elem_bedding"].setRange(1, 50); self.mesh_inputs["r_elem_bedding"].setValue(3)
@@ -1933,16 +1916,16 @@ class SCLASRemoteGUI(QMainWindow):
         mesh_tips = {
             "elem_type": "Fixed GUI request for the full 3D solid-wire workflow.",
             "z_elem": "Global axial n_z divisions along the cable length for every component, including filler.",
-            "c_elem_core": "Core circumferential divisions from SCLAS 710 variable CCD.",
-            "c_elem_bedding_sheath": "Bedding and sheath circumferential divisions from SCLAS 710 variable BSCD.",
+            "c_elem_core": "Core circumferential divisions from SCLAS 711 variable CCD.",
+            "c_elem_bedding_sheath": "Bedding and sheath circumferential divisions from SCLAS 711 variable BSCD.",
             "c_elem_armour": "Circumferential n_theta divisions around each armour cross-section.",
             "r_elem_inner_sheath": "n_r divisions through the inner sheath thickness.",
             "r_elem_bedding": "n_r divisions through the bedding layer.",
             "r_elem_outer_sheath": "n_r divisions through the outer sheath thickness.",
-            "filler_short_line_elem": "Filler short line divisions from SCLAS 710 variable FD1.",
-            "filler_long_line_elem": "Filler long line divisions from SCLAS 710 variable FD2.",
-            "filler_short_arc_elem": "Filler short arc divisions from SCLAS 710 variable FD3.",
-            "filler_long_arc_elem": "Filler long arc divisions from SCLAS 710 variable FD4.",
+            "filler_short_line_elem": "Filler short line divisions from SCLAS 711 variable FD1.",
+            "filler_long_line_elem": "Filler long line divisions from SCLAS 711 variable FD2.",
+            "filler_short_arc_elem": "Filler short arc divisions from SCLAS 711 variable FD3.",
+            "filler_long_arc_elem": "Filler long arc divisions from SCLAS 711 variable FD4.",
             "z_size": "Target axial element length in mm; frontend converts this to n_z.",
             "c_size_core": "Target circumferential arc length in mm for core/sheath/bedding; frontend converts this to n_theta.",
             "c_size_bedding_sheath": "Target circumferential arc length in mm for bedding and sheath; frontend converts this to BSCD.",
@@ -1952,7 +1935,7 @@ class SCLASRemoteGUI(QMainWindow):
             "r_size_outer_sheath": "Target radial element thickness in mm for outer sheath; frontend converts this to n_r.",
         }
         for key in ["elem_type"]:
-            self.mesh_inputs[key].setMinimumWidth(140)
+            self.mesh_inputs[key].setMinimumWidth(96)
             self.mesh_inputs[key].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for key in [
             "z_elem",
@@ -1967,7 +1950,7 @@ class SCLASRemoteGUI(QMainWindow):
             "filler_short_arc_elem",
             "filler_long_arc_elem",
         ]:
-            self.mesh_inputs[key].setMinimumWidth(112)
+            self.mesh_inputs[key].setMinimumWidth(86)
             self.mesh_inputs[key].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for key in [
             "z_size",
@@ -1978,67 +1961,169 @@ class SCLASRemoteGUI(QMainWindow):
             "r_size_bedding",
             "r_size_outer_sheath",
         ]:
-            self.mesh_inputs[key].setMinimumWidth(112)
+            self.mesh_inputs[key].setMinimumWidth(86)
             self.mesh_inputs[key].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for key, tip in mesh_tips.items():
             self.mesh_inputs[key].setToolTip(tip)
         self.mesh_basis_controls = {}
         self.mesh_basis_stacks = {}
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignRight)
-        form.setHorizontalSpacing(12)
-        form.setVerticalSpacing(10)
-        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
-        form.addRow(self.form_label("Abaqus element type fixed"), self.mesh_inputs["elem_type"])
-        form.addRow(self.form_label("Axial n_z / size"), self.mesh_count_size_stack("z_elem", "z_size"))
-        form.addRow(self.form_label("Core n_theta / size"), self.mesh_count_size_stack("c_elem_core", "c_size_core"))
-        form.addRow(self.form_label("Bedding/Sheath n_theta / size"), self.mesh_count_size_stack("c_elem_bedding_sheath", "c_size_bedding_sheath"))
-        form.addRow(self.form_label("Armour n_theta / size"), self.mesh_count_size_stack("c_elem_armour", "c_size_armour"))
-        form.addRow(self.form_label("Inner sheath n_r / size"), self.mesh_count_size_stack("r_elem_inner_sheath", "r_size_inner_sheath"))
-        form.addRow(self.form_label("Bedding n_r / size"), self.mesh_count_size_stack("r_elem_bedding", "r_size_bedding"))
-        form.addRow(self.form_label("Outer sheath n_r / size"), self.mesh_count_size_stack("r_elem_outer_sheath", "r_size_outer_sheath"))
-        form.addRow(self.form_label("Filler FD1 short line"), self.mesh_inputs["filler_short_line_elem"])
-        form.addRow(self.form_label("Filler FD2 long line"), self.mesh_inputs["filler_long_line_elem"])
-        form.addRow(self.form_label("Filler FD3 short arc"), self.mesh_inputs["filler_short_arc_elem"])
-        form.addRow(self.form_label("Filler FD4 long arc"), self.mesh_inputs["filler_long_arc_elem"])
-        left.addLayout(form)
+
+        mesh_factor_panel = QFrame(); mesh_factor_panel.setObjectName("Card")
+        mesh_factor_panel.setMinimumWidth(280)
+        mesh_factor_panel.setMaximumWidth(360)
+        mesh_factors = QVBoxLayout(mesh_factor_panel)
+        mesh_factors.setContentsMargins(14, 12, 14, 12)
+        mesh_factors.setSpacing(8)
+        mesh_factors.addWidget(self.header("Mesh Generation Factors"))
+        primary_mesh_box = QGroupBox("Primary mesh controls")
+        primary_mesh_layout = QVBoxLayout(primary_mesh_box)
+        primary_mesh_layout.setContentsMargins(12, 14, 12, 12)
+        primary_mesh_layout.setSpacing(8)
+        primary_mesh_layout.addWidget(self.compact_control_row("Element type", self.mesh_inputs["elem_type"]))
+        primary_mesh_layout.addWidget(self.compact_control_row("Axial n_z / size", self.mesh_count_size_stack("z_elem", "z_size")))
+        primary_mesh_layout.addWidget(self.compact_control_row("Core n_theta / size", self.mesh_count_size_stack("c_elem_core", "c_size_core")))
+        primary_mesh_layout.addWidget(self.compact_control_row("Bedding/Sheath n_theta / size", self.mesh_count_size_stack("c_elem_bedding_sheath", "c_size_bedding_sheath")))
+        primary_mesh_layout.addWidget(self.compact_control_row("Armour n_theta / size", self.mesh_count_size_stack("c_elem_armour", "c_size_armour")))
+        primary_mesh_layout.addWidget(self.compact_control_row("Inner sheath n_r / size", self.mesh_count_size_stack("r_elem_inner_sheath", "r_size_inner_sheath")))
+        primary_mesh_layout.addWidget(self.compact_control_row("Bedding n_r / size", self.mesh_count_size_stack("r_elem_bedding", "r_size_bedding")))
+        primary_mesh_layout.addWidget(self.compact_control_row("Outer sheath n_r / size", self.mesh_count_size_stack("r_elem_outer_sheath", "r_size_outer_sheath")))
+        mesh_factors.addWidget(primary_mesh_box)
+        filler_box = QFrame()
+        filler_layout = QVBoxLayout(filler_box)
+        filler_layout.setContentsMargins(0, 0, 0, 0)
+        filler_layout.setSpacing(8)
+        filler_layout.addWidget(self.compact_control_row("FD1 short line", self.mesh_inputs["filler_short_line_elem"]))
+        filler_layout.addWidget(self.compact_control_row("FD2 long line", self.mesh_inputs["filler_long_line_elem"]))
+        filler_layout.addWidget(self.compact_control_row("FD3 short arc", self.mesh_inputs["filler_short_arc_elem"]))
+        filler_layout.addWidget(self.compact_control_row("FD4 long arc", self.mesh_inputs["filler_long_arc_elem"]))
+        mesh_factors.addWidget(self.collapsible_section("Filler Profile", filler_box, expanded=False))
         note = QLabel("Set count or target size independently for each mesh variable. Counts are resolved before export for the Abaqus backend.")
         note.setWordWrap(True)
-        left.addWidget(note)
-        left.addStretch()
+        mesh_factors.addWidget(note)
+        mesh_factors.addStretch()
 
-        viewer = QFrame(); viewer.setObjectName("Card")
-        right = QVBoxLayout(viewer)
-        right.setContentsMargins(18, 18, 18, 18)
-        right.setSpacing(10)
-        mesh_header = QHBoxLayout()
-        mesh_header.addWidget(self.header("Mesh Guide / INP Preview"))
-        mesh_header.addStretch()
-        right.addLayout(mesh_header)
+        mesh_cylinder_viewer = QFrame(); mesh_cylinder_viewer.setObjectName("Card")
+        mesh_cylinder_view = QVBoxLayout(mesh_cylinder_viewer)
+        mesh_cylinder_view.setContentsMargins(18, 16, 18, 16)
+        mesh_cylinder_view.setSpacing(10)
+        mesh_cylinder_view.addWidget(self.header("Longitudinal Mesh Setting"))
+        self.mesh_cylinder_guide_label = QLabel()
+        self.mesh_cylinder_guide_label.setObjectName("MeshGuide")
+        self.mesh_cylinder_guide_label.setFixedHeight(250)
+        self.mesh_cylinder_guide_label.setMinimumWidth(0)
+        self.mesh_cylinder_guide_label.setAlignment(Qt.AlignCenter)
+        self.mesh_cylinder_guide_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        mesh_cylinder_view.addWidget(self.mesh_cylinder_guide_label)
+        mesh_cylinder_view.addStretch()
+
+        mesh_viewer = QFrame(); mesh_viewer.setObjectName("Card")
+        mesh_view = QVBoxLayout(mesh_viewer)
+        mesh_view.setContentsMargins(18, 16, 18, 16)
+        mesh_view.setSpacing(10)
+        mesh_view.addWidget(self.header("Cross-Section Mesh Setting"))
         self.mesh_guide_label = QLabel()
         self.mesh_guide_label.setObjectName("MeshGuide")
-        self.mesh_guide_label.setFixedHeight(520)
+        self.mesh_guide_label.setFixedHeight(250)
         self.mesh_guide_label.setMinimumWidth(0)
         self.mesh_guide_label.setAlignment(Qt.AlignCenter)
         self.mesh_guide_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        right.addWidget(self.mesh_guide_label)
+        mesh_view.addWidget(self.mesh_guide_label)
         self.view_wire = gl.GLViewWidget()
         self.view_wire.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.view_wire.setMinimumHeight(300)
+        self.view_wire.setMinimumHeight(240)
         self.view_wire.setBackgroundColor("#1e1e1e")
         self.view_wire.setCameraPosition(distance=150, elevation=90, azimuth=0)
         self.view_wire.setVisible(False)
-        right.addWidget(self.view_wire, 1)
+        mesh_view.addWidget(self.view_wire, 1)
         self.inp_mesh_legend = QLabel("")
         self.inp_mesh_legend.setObjectName("MeshLegend")
         self.inp_mesh_legend.setTextFormat(Qt.RichText)
         self.inp_mesh_legend.setWordWrap(True)
         self.inp_mesh_legend.setVisible(False)
-        right.addWidget(self.inp_mesh_legend)
-        viewer_scroll = self.scroll_panel(viewer)
-        mesh_scroll = self.scroll_panel(panel, min_width=440)
-        layout.addWidget(self.panel_splitter(viewer_scroll, mesh_scroll, [1020, 440]), 1)
+        mesh_view.addWidget(self.inp_mesh_legend)
+
+        fe_factor_panel = QFrame(); fe_factor_panel.setObjectName("Card")
+        fe_factor_panel.setMinimumWidth(280)
+        fe_factor_panel.setMaximumWidth(360)
+        fe_factors = QVBoxLayout(fe_factor_panel)
+        fe_factors.setContentsMargins(14, 12, 14, 12)
+        fe_factors.setSpacing(8)
+        fe_factors.addWidget(self.header("Finite Element Factors"))
+        setup_box = QGroupBox("Analysis Structure Setup")
+        setup_layout = QVBoxLayout(setup_box)
+        setup_layout.setContentsMargins(12, 14, 12, 12)
+        setup_layout.setSpacing(8)
+        setup_layout.addWidget(self.compact_control_row("Pressure P (MPa)", self.cond["pressure"]))
+        setup_layout.addWidget(self.compact_control_row("Curvature k (1/m)", self.cond["curvature"]))
+        setup_layout.addWidget(self.compact_control_row("Friction mu", self.cond["friction"]))
+        setup_layout.addWidget(self.compact_control_row("Contact stiffness", self.cond["contact_stiffness"]))
+        fe_factors.addWidget(setup_box)
+        fe_note = QLabel("These factors drive the lower-row pressure/bending and contact diagrams.")
+        fe_note.setWordWrap(True)
+        fe_factors.addWidget(fe_note)
+        fe_factors.addStretch()
+
+        fe_viewer = QFrame(); fe_viewer.setObjectName("Card")
+        fe_view = QVBoxLayout(fe_viewer)
+        fe_view.setContentsMargins(18, 16, 18, 16)
+        fe_view.setSpacing(10)
+        fe_view.addWidget(self.header("Load Condition"))
+        self.fe_condition_guide_label = QLabel()
+        self.fe_condition_guide_label.setObjectName("MeshGuide")
+        self.fe_condition_guide_label.setFixedHeight(250)
+        self.fe_condition_guide_label.setMinimumWidth(0)
+        self.fe_condition_guide_label.setAlignment(Qt.AlignCenter)
+        self.fe_condition_guide_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        fe_view.addWidget(self.fe_condition_guide_label)
+        fe_view.addStretch()
+
+        contact_viewer = QFrame(); contact_viewer.setObjectName("Card")
+        contact_view = QVBoxLayout(contact_viewer)
+        contact_view.setContentsMargins(18, 16, 18, 16)
+        contact_view.setSpacing(10)
+        contact_view.addWidget(self.header("Contact Condition"))
+        self.fe_contact_guide_label = QLabel()
+        self.fe_contact_guide_label.setObjectName("MeshGuide")
+        self.fe_contact_guide_label.setFixedHeight(250)
+        self.fe_contact_guide_label.setMinimumWidth(0)
+        self.fe_contact_guide_label.setAlignment(Qt.AlignCenter)
+        self.fe_contact_guide_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        contact_view.addWidget(self.fe_contact_guide_label)
+        contact_view.addStretch()
+
+        top_splitter = QSplitter(Qt.Horizontal)
+        top_splitter.setObjectName("PanelSplitter")
+        top_splitter.setChildrenCollapsible(False)
+        top_splitter.setHandleWidth(10)
+        top_splitter.addWidget(mesh_cylinder_viewer)
+        top_splitter.addWidget(mesh_viewer)
+        top_splitter.addWidget(self.scroll_panel(mesh_factor_panel, min_width=270, max_width=360))
+        top_splitter.setSizes([520, 520, 300])
+        top_splitter.setStretchFactor(0, 1)
+        top_splitter.setStretchFactor(1, 1)
+        top_splitter.setStretchFactor(2, 0)
+
+        bottom_splitter = QSplitter(Qt.Horizontal)
+        bottom_splitter.setObjectName("PanelSplitter")
+        bottom_splitter.setChildrenCollapsible(False)
+        bottom_splitter.setHandleWidth(10)
+        bottom_splitter.addWidget(fe_viewer)
+        bottom_splitter.addWidget(contact_viewer)
+        bottom_splitter.addWidget(self.scroll_panel(fe_factor_panel, min_width=270, max_width=360))
+        bottom_splitter.setSizes([520, 520, 300])
+        bottom_splitter.setStretchFactor(0, 1)
+        bottom_splitter.setStretchFactor(1, 1)
+        bottom_splitter.setStretchFactor(2, 0)
+        vertical_splitter = QSplitter(Qt.Vertical)
+        vertical_splitter.setObjectName("PanelSplitter")
+        vertical_splitter.setChildrenCollapsible(False)
+        vertical_splitter.setHandleWidth(10)
+        vertical_splitter.addWidget(top_splitter)
+        vertical_splitter.addWidget(bottom_splitter)
+        vertical_splitter.setSizes([420, 420])
+        vertical_splitter.setStretchFactor(0, 1)
+        vertical_splitter.setStretchFactor(1, 1)
+        layout.addWidget(vertical_splitter, 1)
         self.add_page(tab)
         for key, widget in self.mesh_inputs.items():
             widget.setProperty("mesh_key", key)
@@ -2049,7 +2134,7 @@ class SCLASRemoteGUI(QMainWindow):
                 widget.currentIndexChanged.connect(lambda _index, k=key: self.activate_mesh_key(k))
             elif isinstance(widget, QLineEdit):
                 widget.textChanged.connect(lambda _text, k=key: self.activate_mesh_key(k))
-        for key in ["pressure", "curvature", "friction"]:
+        for key in ["pressure", "curvature", "friction", "contact_stiffness"]:
             self.cond[key].textChanged.connect(lambda _text: self.update_mesh_guide())
         self.set_mesh_input_basis()
         self.update_mesh_guide()
@@ -2061,6 +2146,7 @@ class SCLASRemoteGUI(QMainWindow):
             "eff_length": QLineEdit("234.20"),
             "pressure": QLineEdit("0.30"),
             "friction": QLineEdit("0.30"),
+            "contact_stiffness": QLineEdit("0.005"),
             "curvature": QLineEdit("5.0e-5"),
             "cycles": QSpinBox(),
             "steps": QSpinBox(),
@@ -2069,9 +2155,10 @@ class SCLASRemoteGUI(QMainWindow):
         self.cond["steps"].setRange(50, 10000); self.cond["steps"].setValue(500)
         analysis_tips = {
             "eff_length": "Auto-computed as core pitch length divided by core count. Backend uses this as the model length.",
-            "pressure": "SCLAS 710 variable P. Residual/production pressure passed to the Abaqus analysis request.",
+            "pressure": "SCLAS 711 variable P. Residual/production pressure passed to the Abaqus analysis request.",
             "friction": "Coulomb friction coefficient for armour-to-sheath and armour-to-bedding contact.",
-            "curvature": "SCLAS 710 variable BendFac. Target bending curvature/factor for the bending request.",
+            "contact_stiffness": "SCLAS 711 variable conStiff. Abaqus normal contactStiffnessScaleFactor.",
+            "curvature": "SCLAS 711 variable BendFac. Target bending curvature/factor for the bending request.",
             "cycles": "Number of loading cycles in the preview/result request.",
             "steps": "Number of output samples in the result curve.",
         }
@@ -2368,6 +2455,27 @@ class SCLASRemoteGUI(QMainWindow):
     def form_label(self, text: str) -> QWidget:
         return VariableFormLabel(text)
 
+    def compact_control_row(self, text: str, control: QWidget) -> QWidget:
+        row = QWidget()
+        row.setMinimumWidth(0)
+        row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout = QVBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+
+        label = QLabel(VariableFormLabel.rich_text(text))
+        label.setProperty("no_translate", True)
+        label.setTextFormat(Qt.RichText)
+        label.setWordWrap(True)
+        label.setMinimumWidth(0)
+        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addWidget(label)
+
+        control.setMinimumWidth(0)
+        control.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addWidget(control)
+        return row
+
     def build_layer_legend(self) -> QGroupBox:
         legend = QGroupBox("Layer Legend")
         legend.setMinimumWidth(210)
@@ -2630,13 +2738,14 @@ class SCLASRemoteGUI(QMainWindow):
         basis_by_field = mesh_req.get("basis_by_field", {})
         pressure = safe_float(self.cond["pressure"], 0.3, "Pressure")
         friction = safe_float(self.cond["friction"], 0.3, "Friction coefficient")
+        contact_stiffness = safe_float(self.cond["contact_stiffness"], 0.005, "Contact stiffness scale factor")
         bend_fac = safe_float(self.cond["curvature"], 5.0e-5, "Bend factor")
         return {
-            "source_file": r"C:\HELIX\Abaqus+_work\SCLAS_변수_정리710.xlsx",
-            "schema_date": "2026-07-10",
+            "source_file": r"C:\HELIX\Abaqus+_work\SCLAS_변수_정리711.xlsx",
+            "schema_date": "2026-07-11",
             "note": (
-                "Roc/RoI spreadsheet defaults are preserved as reference defaults. "
-                "GUI keeps physically valid conductor/insulation radii from the current model unless the user edits them."
+                "Roc maps to conductor radius and RoI maps to insulation radius. "
+                "SCLAS 711 confirmed defaults are Roc=4.0 mm and RoI=11.3 mm."
             ),
             "defaults": SCLAS_710_VARIABLE_DEFAULTS,
             "geometry_input": {
@@ -2659,7 +2768,7 @@ class SCLASRemoteGUI(QMainWindow):
             "analysis_input": {
                 "P": {"value": pressure, "json_path": "analysis_conditions.external_pressure_mpa"},
                 "FrCo": {"value": friction, "json_path": "analysis_conditions.friction_coefficient"},
-                "conStiff": {"value": None, "json_path": "analysis_conditions.contact_stiffness_scale_factor"},
+                "conStiff": {"value": contact_stiffness, "json_path": "analysis_conditions.contact_stiffness_scale_factor"},
                 "BendFac": {"value": bend_fac, "json_path": "analysis_conditions.max_curvature_1_per_m"},
             },
             "mesh_input": {
@@ -2879,7 +2988,8 @@ class SCLASRemoteGUI(QMainWindow):
                 "hydrostatic_pressure_mpa": safe_float(self.cond["pressure"], 0.3, "External pressure"),
                 "pressure_mpa": safe_float(self.cond["pressure"], 0.3, "Pressure"),
                 "friction_coefficient": safe_float(self.cond["friction"], 0.3, "Friction coefficient"),
-                "contact_stiffness_scale_factor": None,
+                "contact_stiffness_scale_factor": safe_float(self.cond["contact_stiffness"], 0.005, "Contact stiffness scale factor"),
+                "conStiff": safe_float(self.cond["contact_stiffness"], 0.005, "Contact stiffness scale factor"),
                 "max_curvature_1_per_m": safe_float(self.cond["curvature"], 5.0e-5, "Max curvature"),
                 "bend_factor": safe_float(self.cond["curvature"], 5.0e-5, "Bend factor"),
                 "curvature_unit": "1_per_m",
@@ -3255,7 +3365,7 @@ class SCLASRemoteGUI(QMainWindow):
         if settings and not current_schema:
             self.log(
                 "[SETTINGS] Legacy settings detected; keeping UI/backend preferences "
-                "and resetting SCLAS 710-controlled geometry, analysis, and mesh defaults."
+                "and resetting SCLAS 711-controlled geometry, analysis, and mesh defaults."
             )
 
         sclas710_geometry_keys = {"core_lay_angle", "inner_lay_angle", "outer_lay_angle"}
@@ -4550,9 +4660,434 @@ class SCLASRemoteGUI(QMainWindow):
     def update_mesh_guide(self) -> None:
         if not hasattr(self, "mesh_guide_label"):
             return
-        target_width = self.mesh_guide_label.contentsRect().width()
-        pixmap = self.build_mesh_condition_guide_pixmap(width=target_width)
-        self.mesh_guide_label.setPixmap(pixmap)
+        if hasattr(self, "mesh_cylinder_guide_label"):
+            cylinder_width = self.mesh_cylinder_guide_label.contentsRect().width()
+            self.set_diagram_pixmap(self.mesh_cylinder_guide_label, self.build_mesh_cylinder_guide_pixmap(width=cylinder_width))
+        mesh_width = self.mesh_guide_label.contentsRect().width()
+        self.set_diagram_pixmap(self.mesh_guide_label, self.build_mesh_generation_guide_pixmap(width=mesh_width))
+        if hasattr(self, "fe_condition_guide_label"):
+            fe_width = self.fe_condition_guide_label.contentsRect().width()
+            self.set_diagram_pixmap(self.fe_condition_guide_label, self.build_fe_condition_guide_pixmap(width=fe_width))
+        if hasattr(self, "fe_contact_guide_label"):
+            contact_width = self.fe_contact_guide_label.contentsRect().width()
+            self.set_diagram_pixmap(self.fe_contact_guide_label, self.build_contact_condition_guide_pixmap(width=contact_width))
+
+    def set_diagram_pixmap(self, label: QLabel, pixmap: QPixmap) -> None:
+        target = label.contentsRect().size()
+        if target.width() > 0 and target.height() > 0:
+            pixmap = pixmap.scaled(target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        label.setPixmap(pixmap)
+
+    def build_mesh_generation_guide_pixmap(self, width: Optional[int] = None) -> QPixmap:
+        return self.build_mesh_guide_pixmap(width)
+
+    def build_mesh_cylinder_guide_pixmap(self, width: Optional[int] = None) -> QPixmap:
+        width = int(width or 620)
+        width = max(480, min(width, 980))
+        height = 330
+        pixmap = QPixmap(width, height)
+        pixmap.fill(QColor("#f8fafc"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        try:
+            dg = self.parse_geometry()
+        except Exception:
+            dg = dict(getattr(self, "derived_geom", {}))
+        mesh_req = self.mesh_request_values(dg) if dg and hasattr(self, "mesh_inputs") else {"counts": {}, "target_sizes_mm": {}, "basis_by_field": {}}
+        counts = mesh_req.get("counts", {})
+        target_sizes = mesh_req.get("target_sizes_mm", {})
+        basis_by_field = mesh_req.get("basis_by_field", {})
+        axial_count = int(counts.get("axial", self.mesh_inputs["z_elem"].value() if hasattr(self, "mesh_inputs") else 40))
+        axial_basis = basis_by_field.get("axial", "count")
+        axial_size = target_sizes.get("axial_mm")
+        active_key = getattr(self, "active_mesh_key", "")
+        active_axial = active_key in {"z_elem", "z_size"}
+
+        painter.setPen(QPen(QColor("#d8e0ea"), 1))
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawRoundedRect(1, 1, width - 2, height - 2, 12, 12)
+
+        title_font = QFont("Segoe UI", 13)
+        title_font.setBold(True)
+        body_font = QFont("Segoe UI", 9)
+        small_font = QFont("Segoe UI", 8)
+        painter.setFont(title_font)
+        painter.setPen(QColor("#17202a"))
+        painter.drawText(22, 30, "Longitudinal Mesh Setting")
+        painter.setFont(body_font)
+        painter.setPen(QColor("#64748b"))
+        detail = f"ZAD / n_z = {axial_count}"
+        if axial_basis == "size" and axial_size is not None:
+            detail += f"  | target size = {axial_size} mm"
+        painter.drawText(22, 52, detail)
+
+        front_cx = max(126, int(width * 0.22))
+        front_cy = 184
+        outer_px = 72
+        rear_cx = width - 104
+        rear_cy = 112
+        rear_rx = 66
+        rear_ry = 62
+        top_front = QPoint(front_cx + 22, front_cy - outer_px + 2)
+        bottom_front = QPoint(front_cx + 38, front_cy + outer_px - 12)
+        top_rear = QPoint(rear_cx, rear_cy - rear_ry)
+        bottom_rear = QPoint(rear_cx, rear_cy + rear_ry)
+
+        body_gradient = QLinearGradient(top_front.x(), top_front.y(), bottom_rear.x(), bottom_rear.y())
+        body_gradient.setColorAt(0.0, QColor("#6f7f84"))
+        body_gradient.setColorAt(0.58, QColor("#52636a"))
+        body_gradient.setColorAt(1.0, QColor("#40515a"))
+        painter.setPen(QPen(QColor("#2f3b40"), 2.0))
+        painter.setBrush(QBrush(body_gradient))
+        painter.drawPolygon(QPolygon([top_front, top_rear, bottom_rear, bottom_front]))
+        painter.setBrush(QColor("#5b6c72"))
+        painter.drawEllipse(rear_cx - rear_rx, rear_cy - rear_ry, rear_rx * 2, rear_ry * 2)
+        painter.setBrush(QBrush(body_gradient))
+        painter.drawPolygon(QPolygon([top_front, top_rear, bottom_rear, bottom_front]))
+        seed_line_count = max(3, min(axial_count, 34))
+        painter.setPen(QPen(QColor("#0ea5e9" if active_axial else "#22a7f0"), 2.4 if active_axial else 1.4))
+        for i in range(1, seed_line_count):
+            t = i / seed_line_count
+            sx = int(top_front.x() + (top_rear.x() - top_front.x()) * t)
+            sy = int(top_front.y() + (top_rear.y() - top_front.y()) * t)
+            ex = int(bottom_front.x() + (bottom_rear.x() - bottom_front.x()) * t)
+            ey = int(bottom_front.y() + (bottom_rear.y() - bottom_front.y()) * t)
+            painter.drawLine(sx, sy + 8, ex, ey - 12)
+        painter.setPen(QPen(QColor("#2f3b40"), 2.0))
+        painter.drawLine(top_front, top_rear)
+        painter.drawLine(bottom_front, bottom_rear)
+
+        painter.setPen(QPen(QColor("#2f3b40"), 2.2))
+        painter.setBrush(QColor("#66777d"))
+        painter.drawEllipse(front_cx - outer_px, front_cy - outer_px, outer_px * 2, outer_px * 2)
+
+        if dg:
+            max_r = max(float(dg.get("outer_sheath_outer_radius_mm", 52.0)), 1.0)
+            scale = outer_px / max_r
+
+            def sx(x: float) -> int:
+                return int(round(front_cx + x * scale))
+
+            def sy(y: float) -> int:
+                return int(round(front_cy - y * scale))
+
+            def draw_layer(radius_key: str, color: str, pen: str = "#2f3b40") -> None:
+                radius = int(round(float(dg[radius_key]) * scale))
+                painter.setPen(QPen(QColor(pen), 1.0))
+                painter.setBrush(QColor(color))
+                painter.drawEllipse(front_cx - radius, front_cy - radius, radius * 2, radius * 2)
+
+            draw_layer("outer_sheath_outer_radius_mm", "#66777d")
+            draw_layer("outer_sheath_inner_radius_mm", "#f39a16", "#7b4a0b")
+            draw_layer("bedding_outer_radius_mm", "#36a7b6", "#18626f")
+            draw_layer("inner_sheath_outer_radius_mm", "#9aa3a5", "#5d676a")
+            draw_layer("filler_outer_radius_mm", "#39a9b6", "#18626f")
+
+            core_count = max(1, int(dg.get("core_count", 3)))
+            for i in range(core_count):
+                angle = 2.0 * math.pi * i / core_count - math.pi / 2.0
+                cx = float(dg["core_center_radius_mm"]) * math.cos(angle)
+                cy = float(dg["core_center_radius_mm"]) * math.sin(angle)
+                core_r = int(round(float(dg["core_outer_radius_mm"]) * scale))
+                ins_r = int(round(float(dg["insulation_radius_mm"]) * scale))
+                cond_r = int(round(float(dg["conductor_radius_mm"]) * scale))
+                pcx = sx(cx)
+                pcy = sy(cy)
+                painter.setPen(QPen(QColor("#4a5456"), 1.1))
+                painter.setBrush(QColor("#9aa3a5"))
+                painter.drawEllipse(pcx - core_r, pcy - core_r, core_r * 2, core_r * 2)
+                painter.setBrush(QColor("#ffdf64"))
+                painter.drawEllipse(pcx - ins_r, pcy - ins_r, ins_r * 2, ins_r * 2)
+                painter.setBrush(QColor("#06449c"))
+                painter.drawEllipse(pcx - cond_r, pcy - cond_r, cond_r * 2, cond_r * 2)
+
+            painter.setPen(QPen(QColor("#7b4a0b"), 1.2))
+            armour_count = min(96, max(1, int(dg.get("outer_armour_wire_count", 63))))
+            armour_r = int(max(2, round(float(dg.get("outer_armour_wire_radius_mm", 2.0)) * scale)))
+            armour_c = float(dg.get("outer_armour_center_radius_mm", 45.0))
+            for i in range(armour_count):
+                angle = 2.0 * math.pi * i / armour_count
+                painter.setBrush(QColor("#f39a16"))
+                painter.drawEllipse(sx(armour_c * math.cos(angle)) - armour_r, sy(armour_c * math.sin(angle)) - armour_r, armour_r * 2, armour_r * 2)
+
+        painter.setFont(small_font)
+        painter.setPen(QColor("#64748b"))
+        painter.drawText(22, height - 18, "Longitudinal mesh preview responds to Axial n_z / size; visual reference uses the user-provided GPT cylinder concept.")
+        painter.end()
+        return pixmap
+
+    def build_fe_condition_guide_pixmap(self, width: Optional[int] = None) -> QPixmap:
+        width = int(width or 920)
+        width = max(620, min(width, 1200))
+        height = 340
+        pixmap = QPixmap(width, height)
+        pixmap.fill(QColor("#f8fafc"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        try:
+            dg = self.parse_geometry()
+        except Exception:
+            dg = dict(getattr(self, "derived_geom", {}))
+
+        pressure_value = self.cond["pressure"].text() if hasattr(self, "cond") else "0.30"
+        curvature_value = self.cond["curvature"].text() if hasattr(self, "cond") else "5.0e-5"
+
+        painter.setPen(QPen(QColor("#d8e0ea"), 1))
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawRoundedRect(1, 1, width - 2, height - 2, 12, 12)
+
+        title_font = QFont("Segoe UI", 13)
+        title_font.setBold(True)
+        body_font = QFont("Segoe UI", 9)
+        small_font = QFont("Segoe UI", 8)
+        math_font = QFont(SYMBOL_FONT_FAMILY, 12)
+        math_font.setBold(True)
+
+        painter.setFont(title_font)
+        painter.setPen(QColor("#17202a"))
+        painter.drawText(22, 30, "Load Condition")
+        painter.setFont(body_font)
+        painter.setPen(QColor("#64748b"))
+        painter.drawText(22, 52, "Same regenerated cable section; this view emphasizes pressure P and endpoint bending.")
+
+        front_cx = max(128, int(width * 0.18))
+        front_cy = 194
+        outer_px = 74
+        rear_cx = width - 118
+        rear_cy = 118
+        rear_rx = 72
+        rear_ry = 66
+        top_front = QPoint(front_cx + 20, front_cy - outer_px + 3)
+        bottom_front = QPoint(front_cx + 36, front_cy + outer_px - 14)
+        top_rear = QPoint(rear_cx, rear_cy - rear_ry)
+        bottom_rear = QPoint(rear_cx, rear_cy + rear_ry)
+
+        body_gradient = QLinearGradient(top_front.x(), top_front.y(), bottom_rear.x(), bottom_rear.y())
+        body_gradient.setColorAt(0.0, QColor("#6f7f84"))
+        body_gradient.setColorAt(0.58, QColor("#52636a"))
+        body_gradient.setColorAt(1.0, QColor("#40515a"))
+        painter.setPen(QPen(QColor("#2f3b40"), 2.0))
+        painter.setBrush(QBrush(body_gradient))
+        painter.drawPolygon(QPolygon([top_front, top_rear, bottom_rear, bottom_front]))
+        painter.setBrush(QColor("#5b6c72"))
+        painter.drawEllipse(rear_cx - rear_rx, rear_cy - rear_ry, rear_rx * 2, rear_ry * 2)
+        painter.setBrush(QBrush(body_gradient))
+        painter.drawPolygon(QPolygon([top_front, top_rear, bottom_rear, bottom_front]))
+        painter.setPen(QPen(QColor("#41535b"), 1.1))
+        for i in range(7):
+            t = (i + 1) / 8.0
+            sx = int(top_front.x() + (top_rear.x() - top_front.x()) * t)
+            sy = int(top_front.y() + (top_rear.y() - top_front.y()) * t)
+            ex = int(bottom_front.x() + (bottom_rear.x() - bottom_front.x()) * t)
+            ey = int(bottom_front.y() + (bottom_rear.y() - bottom_front.y()) * t)
+            painter.drawLine(sx, sy + 9, ex, ey - 12)
+        painter.setPen(QPen(QColor("#2f3b40"), 2.0))
+        painter.drawLine(top_front, top_rear)
+        painter.drawLine(bottom_front, bottom_rear)
+
+        painter.setPen(QPen(QColor("#2f3b40"), 2.2))
+        painter.setBrush(QColor("#66777d"))
+        painter.drawEllipse(front_cx - outer_px, front_cy - outer_px, outer_px * 2, outer_px * 2)
+
+        if dg:
+            max_r = max(float(dg.get("outer_sheath_outer_radius_mm", 52.0)), 1.0)
+            scale = outer_px / max_r
+
+            def sx(x: float) -> int:
+                return int(round(front_cx + x * scale))
+
+            def sy(y: float) -> int:
+                return int(round(front_cy - y * scale))
+
+            def draw_layer(radius_key: str, color: str, pen: str = "#2f3b40") -> None:
+                radius = int(round(float(dg[radius_key]) * scale))
+                painter.setPen(QPen(QColor(pen), 1.0))
+                painter.setBrush(QColor(color))
+                painter.drawEllipse(front_cx - radius, front_cy - radius, radius * 2, radius * 2)
+
+            draw_layer("outer_sheath_outer_radius_mm", "#66777d")
+            draw_layer("outer_sheath_inner_radius_mm", "#f39a16", "#7b4a0b")
+            draw_layer("bedding_outer_radius_mm", "#36a7b6", "#18626f")
+            draw_layer("inner_sheath_outer_radius_mm", "#9aa3a5", "#5d676a")
+            draw_layer("filler_outer_radius_mm", "#39a9b6", "#18626f")
+
+            core_count = max(1, int(dg.get("core_count", 3)))
+            for i in range(core_count):
+                angle = 2.0 * math.pi * i / core_count - math.pi / 2.0
+                cx = float(dg["core_center_radius_mm"]) * math.cos(angle)
+                cy = float(dg["core_center_radius_mm"]) * math.sin(angle)
+                core_r = int(round(float(dg["core_outer_radius_mm"]) * scale))
+                ins_r = int(round(float(dg["insulation_radius_mm"]) * scale))
+                cond_r = int(round(float(dg["conductor_radius_mm"]) * scale))
+                pcx = sx(cx)
+                pcy = sy(cy)
+                painter.setPen(QPen(QColor("#4a5456"), 1.1))
+                painter.setBrush(QColor("#9aa3a5"))
+                painter.drawEllipse(pcx - core_r, pcy - core_r, core_r * 2, core_r * 2)
+                painter.setBrush(QColor("#ffdf64"))
+                painter.drawEllipse(pcx - ins_r, pcy - ins_r, ins_r * 2, ins_r * 2)
+                painter.setBrush(QColor("#06449c"))
+                painter.drawEllipse(pcx - cond_r, pcy - cond_r, cond_r * 2, cond_r * 2)
+
+            painter.setPen(QPen(QColor("#7b4a0b"), 1.3))
+            armour_count = min(96, max(1, int(dg.get("outer_armour_wire_count", 63))))
+            armour_r = int(max(2, round(float(dg.get("outer_armour_wire_radius_mm", 2.0)) * scale)))
+            armour_c = float(dg.get("outer_armour_center_radius_mm", 45.0))
+            for i in range(armour_count):
+                angle = 2.0 * math.pi * i / armour_count
+                painter.setBrush(QColor("#f39a16"))
+                painter.drawEllipse(sx(armour_c * math.cos(angle)) - armour_r, sy(armour_c * math.sin(angle)) - armour_r, armour_r * 2, armour_r * 2)
+
+        painter.setPen(QPen(QColor("#1f2937"), 1.5))
+        for i in range(7):
+            t = (i + 1) / 8.0
+            px = int(top_front.x() + (top_rear.x() - top_front.x()) * t)
+            py = int(top_front.y() + (top_rear.y() - top_front.y()) * t) + 22 + i * 5
+            painter.drawLine(px, py - 38, px - 14, py - 4)
+            painter.drawLine(px - 14, py - 4, px - 20, py - 16)
+            painter.drawLine(px - 14, py - 4, px - 2, py - 10)
+
+        painter.setFont(math_font)
+        painter.setPen(QColor("#111827"))
+        painter.drawText(top_front.x() + 22, top_front.y() - 30, "P")
+        painter.setPen(QPen(QColor("#ef4444"), 2.4))
+        painter.drawArc(front_cx - outer_px - 70, front_cy + 28, 112, 86, 190 * 16, 220 * 16)
+        painter.drawArc(rear_cx + rear_rx - 42, rear_cy - 34, 90, 86, 335 * 16, 220 * 16)
+        painter.setPen(QPen(QColor("#111827"), 1.7))
+        painter.drawLine(front_cx - outer_px - 74, front_cy + 90, front_cx - outer_px - 25, front_cy + 64)
+        painter.drawLine(rear_cx + rear_rx + 34, rear_cy + 4, rear_cx + rear_rx + 78, rear_cy - 18)
+        painter.setFont(body_font)
+        painter.setPen(QColor("#991b1b"))
+        painter.drawText(front_cx - outer_px - 42, front_cy + 132, f"P = {pressure_value} MPa")
+        painter.drawText(front_cx + 160, front_cy + 132, f"\u03ba = {curvature_value} 1/m")
+
+        painter.setPen(QColor("#64748b"))
+        painter.setFont(small_font)
+        painter.drawText(22, height - 18, "Visual reference: user-provided GPT cylinder concept; section regenerated from current Design-tab geometry.")
+        painter.end()
+        return pixmap
+
+    def build_contact_condition_guide_pixmap(self, width: Optional[int] = None) -> QPixmap:
+        width = int(width or 720)
+        width = max(520, min(width, 1100))
+        height = 340
+        pixmap = QPixmap(width, height)
+        pixmap.fill(QColor("#f8fafc"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        try:
+            dg = self.parse_geometry()
+        except Exception:
+            dg = dict(getattr(self, "derived_geom", {}))
+
+        friction_value = self.cond["friction"].text() if hasattr(self, "cond") else "0.30"
+        contact_value = self.cond["contact_stiffness"].text() if hasattr(self, "cond") else "0.005"
+
+        painter.setPen(QPen(QColor("#d8e0ea"), 1))
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawRoundedRect(1, 1, width - 2, height - 2, 12, 12)
+
+        title_font = QFont("Segoe UI", 13)
+        title_font.setBold(True)
+        body_font = QFont("Segoe UI", 9)
+        small_font = QFont("Segoe UI", 8)
+        painter.setFont(title_font)
+        painter.setPen(QColor("#17202a"))
+        painter.drawText(22, 30, "Contact Condition")
+        painter.setFont(body_font)
+        painter.setPen(QColor("#64748b"))
+        painter.drawText(22, 52, "Same section geometry; red marks show contact-pair intent.")
+
+        cx = int(width * 0.34)
+        cy = 190
+        if dg:
+            max_r = max(float(dg.get("outer_sheath_outer_radius_mm", 52.0)), 1.0)
+            scale = min((width * 0.30) / max_r, 132.0 / max_r)
+
+            def arc_rect(radius: float) -> Tuple[int, int, int, int]:
+                rr = int(round(radius * scale))
+                return cx - rr, cy - rr, rr * 2, rr * 2
+
+            def point(radius: float, deg: float) -> Tuple[int, int]:
+                a = math.radians(deg)
+                return int(cx + radius * scale * math.cos(a)), int(cy - radius * scale * math.sin(a))
+
+            def draw_disk(radius_key: str, fill: str, pen: str = "#475569") -> None:
+                radius = float(dg[radius_key])
+                rr = int(round(radius * scale))
+                painter.setPen(QPen(QColor(pen), 1.0))
+                painter.setBrush(QColor(fill))
+                painter.drawEllipse(cx - rr, cy - rr, rr * 2, rr * 2)
+
+            draw_disk("outer_sheath_outer_radius_mm", "#66777d", "#2f3b40")
+            draw_disk("outer_sheath_inner_radius_mm", "#f39a16", "#7b4a0b")
+            draw_disk("bedding_outer_radius_mm", "#36a7b6", "#18626f")
+            draw_disk("inner_sheath_outer_radius_mm", "#9aa3a5", "#5d676a")
+            draw_disk("filler_outer_radius_mm", "#39a9b6", "#18626f")
+
+            theta_lines = 36
+            outer_r = float(dg["outer_sheath_outer_radius_mm"])
+            inner_r = float(dg["filler_outer_radius_mm"])
+            painter.setPen(QPen(QColor("#334155"), 0.7))
+            for i in range(theta_lines):
+                deg = 360.0 * i / theta_lines
+                x0, y0 = point(inner_r, deg)
+                x1, y1 = point(outer_r, deg)
+                painter.drawLine(x0, y0, x1, y1)
+            painter.setPen(QPen(QColor("#334155"), 0.8))
+            for radius in [
+                float(dg["outer_sheath_outer_radius_mm"]),
+                float(dg["outer_sheath_inner_radius_mm"]),
+                float(dg["bedding_outer_radius_mm"]),
+                float(dg["inner_sheath_outer_radius_mm"]),
+                float(dg["filler_outer_radius_mm"]),
+            ]:
+                painter.drawEllipse(*arc_rect(radius))
+
+            core_count = max(1, int(dg.get("core_count", 3)))
+            for i in range(core_count):
+                deg = 360.0 * i / core_count - 90.0
+                base_r = float(dg["core_center_radius_mm"])
+                px, py = point(base_r, deg)
+                rr = int(max(10, round(float(dg["core_outer_radius_mm"]) * scale)))
+                cond = int(max(3, round(float(dg["conductor_radius_mm"]) * scale)))
+                ins = int(max(6, round(float(dg["insulation_radius_mm"]) * scale)))
+                painter.setPen(QPen(QColor("#4a5456"), 1.0))
+                painter.setBrush(QColor("#9aa3a5"))
+                painter.drawEllipse(px - rr, py - rr, rr * 2, rr * 2)
+                painter.setBrush(QColor("#ffdf64"))
+                painter.drawEllipse(px - ins, py - ins, ins * 2, ins * 2)
+                painter.setBrush(QColor("#06449c"))
+                painter.setPen(QPen(QColor("#4a5456"), 1.0))
+                painter.drawEllipse(px - cond, py - cond, cond * 2, cond * 2)
+
+            painter.setPen(QPen(QColor("#e11d48"), 4.0))
+            painter.drawArc(*arc_rect(float(dg["bedding_outer_radius_mm"])), 28 * 16, 142 * 16)
+            painter.drawArc(*arc_rect(float(dg["inner_sheath_outer_radius_mm"])), 206 * 16, 118 * 16)
+            painter.setPen(QPen(QColor("#e11d48"), 2.5, Qt.DashLine))
+            painter.drawArc(*arc_rect(float(dg["filler_outer_radius_mm"])), 20 * 16, 320 * 16)
+            painter.drawArc(*arc_rect(float(dg["outer_sheath_inner_radius_mm"])), 200 * 16, 122 * 16)
+
+        legend_x = int(width * 0.62)
+        painter.setPen(QPen(QColor("#e11d48"), 3.0))
+        painter.drawLine(legend_x, 96, legend_x + 34, 96)
+        painter.setFont(body_font)
+        painter.setPen(QColor("#17202a"))
+        painter.drawText(legend_x + 46, 101, "Surface-to-surface contact")
+        painter.setPen(QPen(QColor("#e11d48"), 2.5, Qt.DashLine))
+        painter.drawLine(legend_x, 140, legend_x + 34, 140)
+        painter.setPen(QColor("#17202a"))
+        painter.drawText(legend_x + 46, 145, "Node-to-surface contact line")
+        painter.setPen(QColor("#64748b"))
+        painter.drawText(legend_x, 202, f"mu = {friction_value}")
+        painter.drawText(legend_x, 226, f"conStiff = {contact_value}")
+        painter.setFont(small_font)
+        painter.drawText(22, height - 18, "Contact arcs are schematic markers generated from current layer radii.")
+        painter.end()
+        return pixmap
 
     def build_mesh_condition_guide_pixmap(self, width: Optional[int] = None) -> QPixmap:
         width = int(width or 980)
@@ -4698,7 +5233,7 @@ class SCLASRemoteGUI(QMainWindow):
     def build_mesh_guide_pixmap(self, width: Optional[int] = None) -> QPixmap:
         width = int(width or 820)
         width = max(420, min(width, 1100))
-        height = 260
+        height = 340
         pixmap = QPixmap(width, height)
         pixmap.fill(QColor("#f8fafc"))
         painter = QPainter(pixmap)
@@ -4738,39 +5273,33 @@ class SCLASRemoteGUI(QMainWindow):
         title_font.setBold(True)
         painter.setFont(title_font)
         painter.setPen(QColor("#17202a"))
-        painter.drawText(22, 30, "Mesh sizing guide")
+        painter.drawText(22, 30, "Cross-Section Mesh Setting")
 
         label_font = QFont("Segoe UI", 9)
         painter.setFont(label_font)
         painter.setPen(QColor("#64748b"))
-        painter.drawText(22, 50, f"Draft guide for axial, circumferential, and radial mesh settings | basis: {basis}")
+        painter.drawText(22, 50, f"Circumferential/radial mesh setting | basis: {basis}")
 
-        # Axial guide: side-view cable with division lines from the length setting.
-        x0, y0, side_w, side_h = 30, 102, min(300, width // 2 - 92), 54
-        painter.setPen(QColor("#94a3b8"))
-        painter.setBrush(QColor("#eaf2ff"))
-        painter.drawRoundedRect(x0, y0, side_w, side_h, 26, 26)
-        painter.setBrush(QColor("#dbeafe"))
-        painter.drawEllipse(x0 - 18, y0, 36, side_h)
-        painter.drawEllipse(x0 + side_w - 18, y0, 36, side_h)
-        displayed_z_div = filler_z_div if active_filler else z_div
-        line_count = min(displayed_z_div, 32)
-        painter.setPen(QPen(QColor("#1d4ed8" if active_z else "#2f80ed"), 2.4 if active_z else 1.0))
-        for i in range(1, line_count):
-            x = x0 + int(side_w * i / line_count)
-            painter.drawLine(x, y0 + 6, x, y0 + side_h - 6)
-        painter.setPen(QColor("#0f3f7a"))
-        z_label = "filler z direction" if active_filler else "z direction"
-        painter.drawText(x0 + 6, y0 - 12, f"{z_label}: {displayed_z_div} divisions")
-        painter.drawText(x0 + 8, y0 + side_h + 24, "smaller length size = more axial divisions")
+        summary_x = 28
+        summary_y = 96
+        painter.setPen(QPen(QColor("#dbe4ef"), 1))
+        painter.setBrush(QColor("#fbfdff"))
+        painter.drawRoundedRect(summary_x, summary_y, 168, 112, 10, 10)
+        painter.setFont(label_font)
+        painter.setPen(QColor("#17202a"))
+        painter.drawText(summary_x + 12, summary_y + 26, "Resolved counts")
+        painter.setPen(QColor("#475569"))
+        painter.drawText(summary_x + 12, summary_y + 52, f"Core theta: {core_div}")
+        painter.drawText(summary_x + 12, summary_y + 76, f"Armour theta: {armour_div}")
+        painter.drawText(summary_x + 12, summary_y + 100, f"Radial: {r_inner}/{r_bedding}/{r_outer}")
 
         # Geometry-based section guide. This is generated from GUI values only,
         # not from an Abaqus .inp file.
         if dg:
-            cx = int(width * 0.66)
-            cy = 134
+            cx = int(width * 0.56)
+            cy = 172
             max_r = max(float(dg.get("outer_sheath_outer_radius_mm", 60.0)), 1.0)
-            scale = min((width - cx - 54) / max_r, 102.0 / max_r)
+            scale = min((width - cx - 34) / max_r, 120.0 / max_r)
 
             def sx(x: float) -> int:
                 return int(round(cx + x * scale))
@@ -4895,6 +5424,29 @@ class SCLASRemoteGUI(QMainWindow):
             painter.drawText(cx - 132, 34, "GUI-value mesh request preview")
             painter.setPen(QColor("#475569"))
             painter.drawText(cx - 132, height - 28, f"core C={core_div} | armour C={armour_div} | R={r_inner}/{r_bedding}/{r_outer}")
+
+            painter.setPen(QPen(QColor("#ef4444"), 2.8))
+            contact_outer = int(round(float(dg["outer_armour_center_radius_mm"]) * scale))
+            contact_inner = int(round(float(dg["inner_armour_center_radius_mm"]) * scale))
+            painter.drawArc(cx - contact_outer, cy - contact_outer, contact_outer * 2, contact_outer * 2, 120 * 16, 82 * 16)
+            painter.drawArc(cx - contact_inner, cy - contact_inner, contact_inner * 2, contact_inner * 2, 296 * 16, 72 * 16)
+            painter.setBrush(QColor("#ef4444"))
+            for angle_deg in (128, 172, 306, 350):
+                angle = math.radians(angle_deg)
+                radius = contact_outer if angle_deg < 200 else contact_inner
+                painter.drawEllipse(int(cx + radius * math.cos(angle)) - 3, int(cy - radius * math.sin(angle)) - 3, 6, 6)
+
+        painter.setPen(QPen(QColor("#ef4444"), 3.0))
+        painter.drawLine(34, 256, 72, 256)
+        painter.setFont(label_font)
+        painter.setPen(QColor("#991b1b"))
+        painter.drawText(82, 261, "surface-to-surface contact")
+        painter.setBrush(QColor("#ef4444"))
+        painter.drawEllipse(48, 280, 7, 7)
+        painter.setPen(QColor("#374151"))
+        painter.drawText(82, 288, "node-to-surface contact points")
+        painter.setPen(QColor("#64748b"))
+        painter.drawText(30, 318, "Top section is for mesh seed/count decisions; actual Abaqus mesh is generated by backend.")
 
         painter.end()
         return pixmap

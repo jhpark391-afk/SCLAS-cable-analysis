@@ -353,9 +353,9 @@ def normalize_payload(data):
     data["derived_geometry_mm"] = merged_dgeo
 
     mesh = dict(data.get("mesh", {}))
-    mesh.setdefault("axial_divisions", mesh.get("ZAD", 60))
+    mesh.setdefault("axial_divisions", mesh.get("ZAD", 40))
     mesh.setdefault("core_circumferential_divisions", mesh.get("CCD", 20))
-    mesh.setdefault("bedding_sheath_circumferential_divisions", mesh.get("BSCD", 80))
+    mesh.setdefault("bedding_sheath_circumferential_divisions", mesh.get("BSCD", 64))
     mesh.setdefault("armour_circumferential_divisions", mesh.get("ACD", 3))
     mesh.setdefault("inner_sheath_radial_divisions", mesh.get("radial_divisions_per_layer", 3))
     mesh.setdefault("bedding_radial_divisions", mesh.get("radial_divisions_per_layer", mesh.get("BSRD", 3)))
@@ -388,7 +388,8 @@ def normalize_payload(data):
     ac.setdefault("effective_length_source", merged_dgeo.get("effective_length_source", "core_pitch_length_mm_divided_by_core_count"))
     ac.setdefault("residual_contact_pressure_mpa", 0.3)
     ac.setdefault("friction_coefficient", ac.get("FrCo", 0.3))
-    ac.setdefault("contact_stiffness_scale_factor", ac.get("conStiff"))
+    ac.setdefault("contact_stiffness_scale_factor", ac.get("conStiff", 0.005))
+    ac.setdefault("conStiff", ac["contact_stiffness_scale_factor"])
     ac.setdefault("max_curvature_1_per_m", ac.get("bend_factor", ac.get("BendFac", 5.0e-5)))
     ac.setdefault("bend_factor", ac["max_curvature_1_per_m"])
     ac.setdefault("curve_factors", [-0.1, -0.05, 0.0, 0.05, 0.1])
@@ -633,6 +634,7 @@ def build_abaqus_model(data, job_dir):
     pressure       = as_float(ac.get('external_pressure_mpa', ac.get('hydrostatic_pressure_mpa')), 0.0)
     friction       = as_float(ac.get('friction_coefficient'), 0.3)
     contact_beta   = as_float(ac.get('contact_regularization_beta', msh.get('contact_regularization_beta')), 0.001)
+    contact_stiffness_scale = max(as_float(ac.get('contact_stiffness_scale_factor', ac.get('conStiff')), 0.005), 1.0e-6)
     max_curvature  = as_float(ac.get('max_curvature_1_per_m'), 5.0e-5)
     curve_factors  = ac['curve_factors']
     loading_cycles = ac['loading_cycles']
@@ -995,7 +997,7 @@ def build_abaqus_model(data, job_dir):
     m.interactionProperties['IntProp-1'].NormalBehavior(
         allowSeparation=ON, clearanceAtZeroContactPressure=0.0,
         constraintEnforcementMethod=PENALTY, contactStiffness=DEFAULT,
-        contactStiffnessScaleFactor=max(contact_beta, 1.0e-6), lowerQuadraticRatio=0.33333,
+        contactStiffnessScaleFactor=contact_stiffness_scale, lowerQuadraticRatio=0.33333,
         pressureOverclosure=HARD, stiffnessBehavior=NONLINEAR, stiffnessRatio=0.01,
         upperQuadraticFactor=0.03)
     ra.regenerate()

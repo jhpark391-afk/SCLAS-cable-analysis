@@ -71,7 +71,7 @@
 * Mesh/FEA Setting 탭의 `Abaqus element type`은 `C3D8` 고정 표시로 바꾸고 `C3D4`, `B31` 선택지를 화면에서 제거했습니다.
 * Analysis Results 탭은 실행/JSON/결과 확인 중심으로 단순화했습니다.
   * 화면 표시 입력: `Effective length`, `Loading cycles`, `Result points`
-  * 참고: 당시 숨김 backend default였던 `twist`, `axial_strain`, `radial_compression`, residual contact pressure는 2026-07-11 정리에서 GUI/export payload에서 제거했습니다. Solver increment 값은 SCLAS 710 solver alias로 유지합니다.
+  * 참고: 당시 숨김 backend default였던 `twist`, `axial_strain`, `radial_compression`, residual contact pressure는 2026-07-11 정리에서 GUI/export payload에서 제거했습니다. Solver increment 값은 기존 호환 alias로 유지합니다.
 * `Research Scope / Local Behavior` 체크박스 묶음은 일반 화면에서 숨겼고, payload에는 현재 구현 범위인 bending/pressure 중심 scope만 남깁니다.
 * Backend mode는 `FAST GUI preview`, `Export job package only`, `Run local/shared-folder command`만 표시합니다. SSH/scp 원격 설정은 코드 호환용으로 남기되 화면에서는 숨겼습니다.
 * Run Controls에 `Import Backend JSON` 버튼을 추가해 기존 `input_data.json`을 GUI 값으로 다시 불러오는 정보 교환 루프를 명확히 했습니다.
@@ -189,14 +189,15 @@ graph TD
 1. **복합 하중 구속 조건 자동화**: Torsion(비틀림) 및 인장력을 Cyclic Bending(반복 굽힘)과 다중 스텝으로 조합 적용하는 아바쿠스 제어 자동화.
 2. **국부 지표 ODB 세부 파싱**: CPRESS(접촉압력), COPEN(접촉이격), CSLIP(마찰슬립량) 등의 미세 국부 필드값을 ODB에서 자동으로 분리 후처리하여 시각화.
 
-# 2026-07-11 SCLAS 710 변수표 반영
+# 2026-07-11 SCLAS 711 변수표 반영
 
-* 기준 파일: `C:\HELIX\Abaqus+_work\SCLAS_변수_정리710.xlsx`
-* GUI payload에 `sclas_710_variable_contract`를 추가해 엑셀 약어와 현재 JSON path를 함께 기록합니다.
-* Analysis 기본값을 710 기준으로 조정했습니다: `P=0.30 MPa`, `FrCo=0.30`, `BendFac=5.0e-5`.
-* Mesh 입력을 710 약어 구조로 확장했습니다: `ZAD=60`, `CCD=20`, `BSCD=80`, `ACD=3`, `BSRD=3`, `FD1~FD4=2/2/4/6`.
+* 기준 파일: `C:\HELIX\Abaqus+_work\SCLAS_변수_정리711.xlsx`
+* GUI payload에 변수 계약 블록을 추가해 엑셀 약어와 현재 JSON path를 함께 기록합니다. 기존 호환을 위해 JSON key 이름은 `sclas_710_variable_contract`를 유지합니다.
+* Analysis 기본값을 711 기준으로 조정했습니다: `P=0.30 MPa`, `FrCo=0.30`, `conStiff=0.005`, `BendFac=5.0e-5`.
+* Mesh 입력을 711 약어 구조로 확장했습니다: `ZAD=40`, `CCD=20`, `BSCD=64`, `ACD=3`, `BSRD=3`, `FD1~FD4=2/2/4/6`.
+* Mesh 탭의 Count/Size 콤보 폭을 넓혀 `Count`가 `Cou`로 잘리는 문제를 수정했습니다.
 * `code/abaqus_runner.py`는 새 alias를 받아도 기존 backend key로 normalize하도록 보강했습니다.
-* 주의: 엑셀의 `Roc=11`, `RoI=4` 기본값은 현재 GUI/backend 수식에서 conductor radius가 insulation radius보다 커지는 충돌을 만들 수 있어, 화면 기본값은 기존 물리적으로 유효한 `r_cond=4.00`, `r_ins=11.30`, `R_core=15.30`을 유지하고 계약 note에 기록합니다.
+* 보광 확인 기준으로 `Roc=4.0 mm`는 conductor radius, `RoI=11.3 mm`는 insulation radius로 매핑합니다.
 
 ---
 # 2026-07-11 Mesh row별 Count/Size 선택 및 INP import UI 제거
@@ -208,9 +209,9 @@ graph TD
 * 좌측 패널의 `Import Abaqus INP` 버튼과 INP summary 박스는 제거했습니다. 실제 Abaqus 결과/mesh 검토는 backend 산출물과 Results/diagnostics 흐름에서 확인합니다.
 
 ---
-# 2026-07-11 SCLAS 710 변수표 기준 정크 변수 제거
+# 2026-07-11 SCLAS 711 변수표 기준 정크 변수 제거
 
-* `C:\HELIX\Abaqus+_work\SCLAS_변수_정리710.xlsx` 기준으로 GUI/export 변수 목록을 다시 줄였습니다.
+* `C:\HELIX\Abaqus+_work\SCLAS_변수_정리711.xlsx` 기준으로 GUI/export 변수 목록을 다시 줄였습니다.
 * 더 이상 `input_data.json`에 내보내지 않는 항목:
   * `study_scope`, `numerical_model`, `equivalent_properties`
   * `analysis_conditions.residual_contact_pressure_mpa`

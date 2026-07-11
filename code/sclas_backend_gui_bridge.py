@@ -89,6 +89,7 @@ def backend_payload_gui_values(payload):
             "eff_length": first_present(analysis, "effective_length_mm"),
             "pressure": first_present(analysis, "external_pressure_mpa", "hydrostatic_pressure_mpa", "pressure_mpa", "P"),
             "friction": first_present(analysis, "friction_coefficient", "FrCo"),
+            "contact_stiffness": first_present(analysis, "contact_stiffness_scale_factor", "conStiff") or 0.005,
             "curvature": first_present(analysis, "max_curvature_1_per_m", "bend_factor", "BendFac"),
             "cycles": first_present(analysis, "loading_cycles"),
             "steps": first_present(analysis, "solver_steps"),

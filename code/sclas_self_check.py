@@ -141,6 +141,8 @@ def rich_backend_payload() -> dict:
             "hydrostatic_pressure_mpa": 40.0,
             "residual_contact_pressure_mpa": 0.3,
             "friction_coefficient": 0.22,
+            "contact_stiffness_scale_factor": 0.005,
+            "conStiff": 0.005,
             "max_curvature_1_per_m": 0.08,
             "curve_factors": [-0.1, -0.05, 0.0, 0.05, 0.1],
             "max_twist_rad_per_m": 0.05,
@@ -990,6 +992,8 @@ def check_backend_json_gui_bridge_contract() -> None:
             fail(f"Backend GUI bridge did not map core radius for {name}: {geometry}")
         if analysis.get("pressure") is None:
             fail(f"Backend GUI bridge did not map external/hydrostatic pressure for {name}")
+        if analysis.get("contact_stiffness") is None:
+            fail(f"Backend GUI bridge did not map contact stiffness scale factor for {name}")
         if mesh.get("z_elem") is None or mesh.get("c_elem_core") is None:
             fail(f"Backend GUI bridge did not map mesh divisions for {name}: {mesh}")
         if "filler_z_elem" in mesh:

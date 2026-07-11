@@ -15,13 +15,13 @@
 
 보광이 피드백의 핵심은 "많이 보여주는 GUI"가 아니라 "필요한 입력만 남기고, 각 입력이 backend 어디에 쓰이는지 설명 가능한 GUI"로 정리하는 것이다.
 
-## 1.1 2026-07-10 변수표 반영 메모
+## 1.1 2026-07-11 변수표 반영 메모
 
-`SCLAS_변수_정리710.xlsx`의 약어는 `input_data.json`의 `sclas_710_variable_contract`에 그대로 기록한다. 다만 해당 파일의 `Roc=11`, `RoI=4` 기본값은 현재 GUI/backend 형상 수식에서 conductor radius가 insulation radius보다 커지는 충돌을 만들 수 있으므로, GUI 화면 기본값은 기존 물리적으로 유효한 `r_cond=4.00`, `r_ins=11.30`, `R_core=15.30`을 유지한다. 이 차이는 `sclas_710_variable_contract.note`에 명시한다.
+`SCLAS_변수_정리711.xlsx`의 약어는 `input_data.json`의 변수 계약 블록에 그대로 기록한다. 기존 호환을 위해 JSON key 이름은 `sclas_710_variable_contract`를 유지하지만, `source_file`과 `schema_date`는 711 기준으로 저장한다. 보광 확인 기준으로 `Roc=4.0 mm`는 conductor radius, `RoI=11.3 mm`는 insulation radius로 매핑한다.
 
 ## 2. 현재 남겨야 할 User Input 후보
 
-아래 값들은 `C:\HELIX\Abaqus+_work\SCLAS_변수_정리710.xlsx`를 기준으로 다시 맞춘 값이다. 기존 backend 호환 key는 유지하되, `input_data.json`에는 `sclas_710_variable_contract`와 약어 alias도 같이 저장한다.
+아래 값들은 `C:\HELIX\Abaqus+_work\SCLAS_변수_정리711.xlsx`를 기준으로 다시 맞춘 값이다. 기존 backend 호환 key는 유지하되, `input_data.json`에는 변수 계약 블록과 약어 alias도 같이 저장한다.
 
 | Tab | Section | GUI Label | Code key | Default | Unit | JSON path | 확인 필요 |
 |---|---|---|---|---:|---|---|---|
@@ -36,20 +36,21 @@
 | Design | Armour | Inner armour number `n_ia` | `no_ia` | 55 | count | `armour.inner_wire_count` | 55 default 확정 필요 |
 | Design | Armour | Outer armour radius `r_oa` | `r_oa` | 2.00 | mm | `armour.outer_wire_radius_mm` | 보광 모델 기준 |
 | Design | Armour | Outer armour number `n_oa` | `no_oa` | 63 | count | `armour.outer_wire_count` | 63 default 확정 필요 |
-| Design | Helix Pitch Angle | Core helix pitch angle `alpha_core` / `CHA` | `core_lay_angle` | 9.00 | deg | `armour.core_lay_angle_deg` | SCLAS 710 기준 |
+| Design | Helix Pitch Angle | Core helix pitch angle `alpha_core` / `CHA` | `core_lay_angle` | 9.00 | deg | `armour.core_lay_angle_deg` | SCLAS 711 기준 |
 | Design | Helix Pitch Angle | Inner armour helix pitch angle `alpha_ia` / `IAHA` | `inner_lay_angle` | -20.1 | deg | `armour.inner_armour_lay_angle_deg` | 부호 보존, pitch 계산은 절댓값 사용 |
 | Design | Helix Pitch Angle | Outer armour helix pitch angle `alpha_oa` | `outer_lay_angle` | 19.6 | deg | `armour.outer_armour_lay_angle_deg` | pitch angle 정의/부호 확인 |
 | Design | Materials | 8-row material table | `table` | paper defaults | GPa, -, kg/m^3 | `materials[]` | 8개 material 기본값 확정 |
-| Finite Element Analysis Setting | Analysis Structure Setup | Pressure `P` | `pressure` | 0.30 | MPa | `analysis_conditions.external_pressure_mpa`, `analysis_conditions.pressure_mpa` | SCLAS 710 `P` |
+| Finite Element Analysis Setting | Analysis Structure Setup | Pressure `P` | `pressure` | 0.30 | MPa | `analysis_conditions.external_pressure_mpa`, `analysis_conditions.pressure_mpa` | SCLAS 711 `P` |
 | Finite Element Analysis Setting | Analysis Structure Setup | Bend factor / curvature `BendFac` | `curvature` | 5.0e-5 | 1/m | `analysis_conditions.max_curvature_1_per_m`, `analysis_conditions.bend_factor` | 현재는 같은 GUI 입력으로 전달 |
-| Finite Element Analysis Setting | Analysis Structure Setup | Friction coefficient `FrCo` / `mu` | `friction` | 0.30 | - | `analysis_conditions.friction_coefficient` | SCLAS 710 `FrCo` |
+| Finite Element Analysis Setting | Analysis Structure Setup | Friction coefficient `FrCo` / `mu` | `friction` | 0.30 | - | `analysis_conditions.friction_coefficient` | SCLAS 711 `FrCo` |
+| Finite Element Analysis Setting | Analysis Structure Setup | Contact stiffness scale factor `conStiff` | `contact_stiffness` | 0.005 | - | `analysis_conditions.contact_stiffness_scale_factor`, `analysis_conditions.conStiff` | Abaqus `NormalBehavior.contactStiffnessScaleFactor` |
 | Finite Element Analysis Setting | Mesh Setting Guide | Per-row mesh basis | `mesh_basis_by_field` | count per row | count/size | `mesh.mesh_input_basis_by_field` | 각 mesh 변수별 개수/목표 크기 입력 방식 선택 |
-| Finite Element Analysis Setting | Mesh Setting Guide | z-axis divisions `ZAD` | `z_elem` | 60 | count | `mesh.axial_divisions` | 모든 component 공통 z 방향 |
+| Finite Element Analysis Setting | Mesh Setting Guide | z-axis divisions `ZAD` | `z_elem` | 40 | count | `mesh.axial_divisions` | 모든 component 공통 z 방향 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Core circumferential divisions `CCD` | `c_elem_core` | 20 | count | `mesh.core_circumferential_divisions` | core 전용 |
-| Finite Element Analysis Setting | Mesh Setting Guide | Bedding/Sheath circumferential divisions `BSCD` | `c_elem_bedding_sheath` | 80 | count | `mesh.bedding_sheath_circumferential_divisions` | inner sheath, bedding, outer sheath |
+| Finite Element Analysis Setting | Mesh Setting Guide | Bedding/Sheath circumferential divisions `BSCD` | `c_elem_bedding_sheath` | 64 | count | `mesh.bedding_sheath_circumferential_divisions` | inner sheath, bedding, outer sheath |
 | Finite Element Analysis Setting | Mesh Setting Guide | Armour circumferential divisions `ACD` | `c_elem_armour` | 3 | count | `mesh.armour_circumferential_divisions` | armour wire 단면 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Inner sheath `n_r` divisions | `r_elem_inner_sheath` | 3 | count | `mesh.inner_sheath_radial_divisions` | radial division 기준 |
-| Finite Element Analysis Setting | Mesh Setting Guide | Bedding/Sheath radial divisions `BSRD` | `r_elem_bedding` | 3 | count | `mesh.bedding_radial_divisions`, `mesh.bedding_sheath_radial_divisions` | SCLAS 710 alias |
+| Finite Element Analysis Setting | Mesh Setting Guide | Bedding/Sheath radial divisions `BSRD` | `r_elem_bedding` | 3 | count | `mesh.bedding_radial_divisions`, `mesh.bedding_sheath_radial_divisions` | SCLAS 711 alias |
 | Finite Element Analysis Setting | Mesh Setting Guide | Outer sheath `n_r` divisions | `r_elem_outer_sheath` | 3 | count | `mesh.outer_sheath_radial_divisions` | radial division 기준 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Target axial size | `z_size` | 5.85 | mm | `mesh.target_sizes_mm.axial_mm` | size mode에서 `mesh.axial_divisions`로 환산 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Target core/sheath circumferential size | `c_size_core` | 13.50 | mm | `mesh.target_sizes_mm.core_sheath_circumferential_mm` | size mode에서 `mesh.core_circumferential_divisions`로 환산 |
@@ -80,7 +81,7 @@
 
 ## 4. GUI/export에서 제거한 값
 
-아래 값들은 `SCLAS_변수_정리710.xlsx`의 사용자 입력 변수표에 없거나 후속 연구용/호환용 metadata라서 GUI 위젯과 `input_data.json` export에서 제거했다. 기존 과거 JSON을 읽는 경우에는 backend runner가 자체 default/fallback으로 처리한다.
+아래 값들은 `SCLAS_변수_정리711.xlsx`의 사용자 입력 변수표에 없거나 후속 연구용/호환용 metadata라서 GUI 위젯과 `input_data.json` export에서 제거했다. 기존 과거 JSON을 읽는 경우에는 backend runner가 자체 default/fallback으로 처리한다.
 
 | 항목 | 이전 상태 | 현재 처리 |
 |---|---|---|
@@ -98,7 +99,7 @@
 | `numerical_model` | 문헌 note metadata | export 제거, 별도 문서에서 관리 |
 | `equivalent_properties` | GUI preview용 EI 추정값 | export 제거, FAST preview 내부 계산으로만 사용 |
 | `mesh.requested_element_type` | GUI 표시값 `C3D8` | 유지하되 선택형 combo가 아니라 고정 표시 |
-| solver increments | SCLAS 710 solver 변수 | `solver.*`와 `solver.sclas_710_aliases`로 유지 |
+| solver increments | SCLAS 711 solver 변수 | `solver.*`와 기존 호환 alias로 유지 |
 | output request field list | backend 결과 요청 | backend 구현 기준으로 유지 |
 | run mode flags | 실행 제어값 | GUI job 생성에 필요하므로 유지 |
 
@@ -138,7 +139,7 @@
 1. `P=0.30 MPa`가 생산 잔여 압력/외압 중 어느 물리량인지 backend 명명과 최종 정리한다.
 2. `BendFac=5.0e-5`가 `max_curvature_1_per_m`와 같은 의미인지, 또는 별도 curve factor인지 확인한다.
 3. friction coefficient `FrCo=0.30`을 모든 contact pair에 공통 적용하는 것이 맞는가?
-4. `conStiff`는 아직 null로 두고 backend 내부/default로 처리해도 되는가?
+4. `conStiff=0.005`를 Abaqus normal contact stiffness scale factor로 적용하는 현재 매핑이 보광 backend 기준과 맞는가?
 5. residual contact pressure, twist, axial strain, radial compression은 GUI/export에서 제거했으므로, 필요 시 별도 전문가/후속 연구 계약으로 다시 추가할지 결정한다.
 
 ## 6. GUI 코드 구조 지도
