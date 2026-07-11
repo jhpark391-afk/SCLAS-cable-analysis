@@ -225,21 +225,19 @@ def pitch_length_from_angle(center_radius_mm: float, angle_deg: float, fallback_
     return abs(2.0 * math.pi * float(center_radius_mm) / tangent)
 
 
-def signed_pitch_length_from_angle(center_radius_mm: float, angle_deg: float, fallback_mm: float) -> float:
-    angle_rad = float(angle_deg) * math.pi / 180.0
-    tangent = math.tan(angle_rad)
-    if abs(tangent) < 1.0e-9:
-        return float(fallback_mm)
-    return 2.0 * math.pi * float(center_radius_mm) / tangent
+def runner_helix_pitch_length_system(
+    coc: float,
+    co_ia: float,
+    co_oa: float,
+    no_ia: int,
+    no_oa: int,
+    cha: float,
+    iaha: float,
+    oaha: float,
+) -> dict:
+    from abaqus_runner import helix_pitch_length_system
 
-
-def automatic_effective_length_from_pitch(pitch_core: float, pitch_inner: float, pitch_outer: float, no_ia: int, no_oa: int) -> float:
-    no_ia = max(1, int(no_ia))
-    no_oa = max(1, int(no_oa))
-    return (
-        float(pitch_core) / 3.0
-        + ((no_ia + no_oa) / 6.0) * (abs(float(pitch_inner)) / no_ia + abs(float(pitch_outer)) / no_oa)
-    ) / 3.0
+    return helix_pitch_length_system(coc, co_ia, co_oa, no_ia, no_oa, cha, iaha, oaha)
 
 
 def lay_angle_from_pitch(center_radius_mm: float, pitch_length_mm: float, fallback_deg: float) -> float:
@@ -396,6 +394,11 @@ def hysteresis_loss(k: np.ndarray, m_knm: np.ndarray) -> float:
 # -----------------------------------------------------------------------------
 
 class AnalysisWorker(QThread):
+    RUN_EVENT_PREFIXES = (
+        "[ABAQUS] INP file formed",
+        "[ABAQUS] Analysis started",
+        "[ABAQUS] Analysis completed",
+    )
     plot_sig = pyqtSignal(np.ndarray, np.ndarray)
     metrics_sig = pyqtSignal(dict)
     summary_sig = pyqtSignal(dict)
@@ -410,11 +413,13 @@ class AnalysisWorker(QThread):
         self.job_root = job_root
         self.remote_cfg = remote_cfg
         self.job_dir: Optional[Path] = None
+        self.minimal_backend_log = mode == "LOCAL_COMMAND"
 
     def run(self) -> None:
         try:
             self.job_dir = create_job_package(self.job_root, self.payload)
-            self.log_sig.emit(f"[JOB] Created job package: {self.job_dir}")
+            if not self.minimal_backend_log:
+                self.log_sig.emit(f"[JOB] Created job package: {self.job_dir}")
             self.progress_sig.emit(15)
 
             if self.mode == "FAST":
@@ -451,9 +456,9 @@ class AnalysisWorker(QThread):
                 or "copper" in str(material.get("material", "")).lower()
                 or "conductor" in str(material.get("name", "")).lower()
             ),
-            materials[0] if materials else {"elastic_modulus_GPa": 108.0},
+            materials[0] if materials else {"elastic_modulus_GPa": 110.0},
         )
-        e_pa = float(conductor.get("elastic_modulus_GPa", 108.0)) * 1.0e9
+        e_pa = float(conductor.get("elastic_modulus_GPa", 110.0)) * 1.0e9
         r_cond_m = float(dg.get("conductor_radius_mm", self.payload["geometry_mm"].get("conductor_radius_mm", 4.0))) / 1000.0
         core_center_m = float(dg.get("core_center_radius_mm", self.payload["geometry_mm"].get("core_center_radius_mm", 17.67))) / 1000.0
         core_count = int(self.payload.get("geometry_mm", {}).get("core_count", 3))
@@ -490,12 +495,13 @@ class AnalysisWorker(QThread):
         command = self.remote_cfg.get("local_command", "").strip()
         if not command:
             raise ValueError("Local backend command is empty.")
-        self.log_sig.emit(f"[LOCAL] Running backend command in job folder: {command}")
         self.progress_sig.emit(35)
         proc = subprocess.run(command, shell=True, cwd=str(self.job_dir), text=True, capture_output=True)
         if proc.stdout:
-            self.log_sig.emit(proc.stdout.strip())
-        if proc.stderr:
+            for line in proc.stdout.splitlines():
+                if line.startswith(self.RUN_EVENT_PREFIXES):
+                    self.log_sig.emit(line.strip())
+        if proc.stderr and proc.returncode != 0:
             self.log_sig.emit(proc.stderr.strip())
         if proc.returncode != 0:
             raise RuntimeError(f"Local command failed with exit code {proc.returncode}.")
@@ -554,8 +560,9 @@ class AnalysisWorker(QThread):
         self.metrics_sig.emit(metrics)
         self.summary_sig.emit(summary)
         self.progress_sig.emit(100)
-        self.log_sig.emit("[RESULT] Loaded result_data.csv successfully.")
-        if (self.job_dir / "result_summary.json").exists():
+        if not self.minimal_backend_log:
+            self.log_sig.emit("[RESULT] Loaded result_data.csv successfully.")
+        if not self.minimal_backend_log and (self.job_dir / "result_summary.json").exists():
             self.log_sig.emit("[RESULT] Loaded result_summary.json successfully.")
         self.finished_sig.emit(str(self.job_dir))
 
@@ -606,6 +613,36 @@ def force_displacement_summary(summary: dict) -> dict:
 
 def is_force_displacement_preview(summary: dict) -> bool:
     return result_curve_mode(summary) == "rp_u1_rf1_preview"
+
+
+def is_rp_u1_rf1_moment_curvature(summary: dict) -> bool:
+    return result_curve_mode(summary) == "rp_u1_rf1_moment_curvature"
+
+
+def max_bending_stress_from_summary(summary: dict):
+    if not isinstance(summary, dict):
+        return None
+    candidates = [
+        summary.get("odb_local_field_summary"),
+        summary.get("local_field_summary"),
+    ]
+    odb = summary.get("odb_extraction")
+    if isinstance(odb, dict):
+        candidates.append(odb.get("local_field_summary"))
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        metrics = candidate.get("metrics")
+        if not isinstance(metrics, dict):
+            continue
+        for key in ("stress_mises_max", "stress_component_abs_max"):
+            value = metrics.get(key)
+            try:
+                if value is not None:
+                    return float(value)
+            except (TypeError, ValueError):
+                pass
+    return None
 
 
 def create_job_package(job_root: Path, payload: dict) -> Path:
@@ -1203,8 +1240,8 @@ class SCLASRemoteGUI(QMainWindow):
         if hasattr(self, "table"):
             self.style_material_headers()
         if hasattr(self, "plot_canvas"):
-            self.plot_canvas.setLabel("left", self.ui_text("Bending Moment M"), units="kN.m")
-            self.plot_canvas.setLabel("bottom", self.ui_text("Curvature \u03ba"), units="1/m")
+            self.plot_canvas.setLabel("left", f"{self.ui_text('Bending Moment M')} (kN.m)")
+            self.plot_canvas.setLabel("bottom", f"{self.ui_text('Curvature \u03ba')} (m^-1)")
         if hasattr(self, "summary_text"):
             if self.last_summary_data:
                 self.summary_text.setPlainText(self.format_summary(self.last_summary_data))
@@ -1493,7 +1530,7 @@ class SCLASRemoteGUI(QMainWindow):
         left = QVBoxLayout(panel_inputs)
         left.setContentsMargins(18, 16, 18, 16)
         left.setSpacing(10)
-        left.addWidget(self.header("Cable Geometry Inputs"))
+        left.addWidget(self.header("Geometry properties"))
         self.inputs = {
             "r_cond": QLineEdit("4.00"),
             "r_insu": QLineEdit("11.30"),
@@ -1528,22 +1565,22 @@ class SCLASRemoteGUI(QMainWindow):
             (
                 "Sheath / Bedding",
                 [
-                    ("Inner sheath t_is (mm)", "tis"),
+                    ("Inner sheath thickness t_is (mm)", "tis"),
                     ("Bedding thickness t_bedding (mm)", "bedding_thickness"),
-                    ("Outer sheath t_os (mm)", "tos"),
+                    ("Outer sheath thickness t_os (mm)", "tos"),
                 ],
             ),
             (
                 "Armour",
                 [
                     ("Inner armour radius r_ia (mm)", "r_ia"),
-                    ("Inner armour number n_ia", "no_ia"),
+                    ("Number of inner armour n_ia", "no_ia"),
                     ("Outer armour radius r_oa (mm)", "r_oa"),
-                    ("Outer armour number n_oa", "no_oa"),
+                    ("Number of outer armour n_oa", "no_oa"),
                 ],
             ),
             (
-                "Helix Pitch Angle",
+                "Helical Pitch Angle",
                 [
                     ("Core lay angle α_core (deg)", "core_lay_angle"),
                     ("Inner armour lay angle α_ia (deg)", "inner_lay_angle"),
@@ -1552,13 +1589,13 @@ class SCLASRemoteGUI(QMainWindow):
             ),
         ]
         for idx, (section_title, _section_rows) in enumerate(geometry_sections):
-            if section_title == "Helix Pitch Angle":
+            if section_title == "Helical Pitch Angle":
                 geometry_sections[idx] = (
                     section_title,
                     [
-                        ("Core helix pitch angle alpha_core (deg)", "core_lay_angle"),
-                        ("Inner armour helix pitch angle alpha_ia (deg)", "inner_lay_angle"),
-                        ("Outer armour helix pitch angle alpha_oa (deg)", "outer_lay_angle"),
+                        ("Core helical pitch angle α_core (deg)", "core_lay_angle"),
+                        ("Inner armour helical pitch angle α_ia (deg)", "inner_lay_angle"),
+                        ("Outer armour helical pitch angle α_oa (deg)", "outer_lay_angle"),
                     ],
                 )
         for section_title, section_rows in geometry_sections:
@@ -1575,7 +1612,7 @@ class SCLASRemoteGUI(QMainWindow):
                 section_form.addRow(self.form_label(label), self.inputs[key])
             left.addWidget(section_box)
 
-        derived_box = QGroupBox("Derived Pitch / Period")
+        derived_box = QGroupBox("Calculation of pitch length and effective length")
         derived_grid = QGridLayout(derived_box)
         derived_grid.setContentsMargins(12, 10, 12, 10)
         derived_grid.setHorizontalSpacing(10)
@@ -1586,7 +1623,6 @@ class SCLASRemoteGUI(QMainWindow):
             ("Calculated pitch p_inner", "inner_armour_input_pitch_length_mm"),
             ("Calculated pitch p_outer", "outer_armour_input_pitch_length_mm"),
             ("Effective length Dep", "effective_length_mm"),
-            ("Length formula", "effective_length_formula_summary"),
         ]
         for row, (label, key) in enumerate(derived_rows):
             name = QLabel(label)
@@ -1638,14 +1674,13 @@ class SCLASRemoteGUI(QMainWindow):
         panel_mat.setMinimumHeight(360)
         mid = QVBoxLayout(panel_mat)
         mid.setContentsMargins(12, 10, 12, 12)
-        self.table = QTableWidget(8, 5)
+        self.table = QTableWidget(9, 4)
         self.table.setAlternatingRowColors(True)
         self.table.setHorizontalHeaderLabels([
             "Layer",
             "Material",
-            "Young's modulus\nE (GPa)",
+            "Young's modulus\nE (MPa)",
             "Poisson's ratio\n\u03bd",
-            "Density\n\u03c1 (kg/m^3)",
         ])
         self.style_material_headers()
         self.table.verticalHeader().setVisible(False)
@@ -1658,7 +1693,6 @@ class SCLASRemoteGUI(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.init_material_table()
         mid.addWidget(self.table)
         material_section = self.collapsible_section("Material Properties", panel_mat, expanded=False)
@@ -1680,10 +1714,16 @@ class SCLASRemoteGUI(QMainWindow):
         self.view_solid.setMinimumHeight(260)
         self.view_solid.setBackgroundColor("#f7f8fa")
         self.view_solid.setCameraPosition(distance=180, elevation=90, azimuth=0)
+        self.view_solid.setVisible(False)
+        self.section_preview_label = QLabel()
+        self.section_preview_label.setObjectName("MeshGuide")
+        self.section_preview_label.setMinimumHeight(360)
+        self.section_preview_label.setAlignment(Qt.AlignCenter)
+        self.section_preview_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         preview_body = QHBoxLayout()
         preview_body.setContentsMargins(0, 0, 0, 0)
         preview_body.setSpacing(14)
-        preview_body.addWidget(self.view_solid, 1)
+        preview_body.addWidget(self.section_preview_label, 1)
         preview_body.addWidget(self.build_layer_legend(), 0)
         right.addLayout(preview_body, 1)
 
@@ -1703,6 +1743,9 @@ class SCLASRemoteGUI(QMainWindow):
                 w.textChanged.connect(self.trigger_rebuild)
             else:
                 w.valueChanged.connect(self.trigger_rebuild)
+        QTimer.singleShot(0, self.rebuild_solid_geometry)
+        QTimer.singleShot(80, self.reset_solid_view)
+        QTimer.singleShot(120, self.update_section_preview_pixmap)
 
     def mesh_count_size_stack(self, count_key: str, size_key: str) -> QWidget:
         control = QWidget()
@@ -1929,15 +1972,15 @@ class SCLASRemoteGUI(QMainWindow):
         mesh_factors.setContentsMargins(14, 12, 14, 12)
         mesh_factors.setSpacing(8)
         mesh_factors.addWidget(self.header("Mesh Generation Factors"))
-        primary_mesh_box = QGroupBox("Primary mesh controls")
+        primary_mesh_box = QGroupBox("Local seed controls")
         primary_mesh_layout = QVBoxLayout(primary_mesh_box)
         primary_mesh_layout.setContentsMargins(12, 14, 12, 12)
         primary_mesh_layout.setSpacing(8)
         primary_mesh_layout.addWidget(self.compact_control_row("Element type", self.mesh_inputs["elem_type"]))
-        primary_mesh_layout.addWidget(self.compact_control_row("Axial n_z / size", self.mesh_count_size_stack("z_elem", "z_size")))
-        primary_mesh_layout.addWidget(self.compact_control_row("Core n_theta / size", self.mesh_count_size_stack("c_elem_core", "c_size_core")))
-        primary_mesh_layout.addWidget(self.compact_control_row("Bedding/Sheath n_theta / size", self.mesh_count_size_stack("c_elem_bedding_sheath", "c_size_bedding_sheath")))
-        primary_mesh_layout.addWidget(self.compact_control_row("Armour n_theta / size", self.mesh_count_size_stack("c_elem_armour", "c_size_armour")))
+        primary_mesh_layout.addWidget(self.compact_control_row("Longitudinal Direction", self.mesh_count_size_stack("z_elem", "z_size")))
+        primary_mesh_layout.addWidget(self.compact_control_row("Core Circumferential Direction", self.mesh_count_size_stack("c_elem_core", "c_size_core")))
+        primary_mesh_layout.addWidget(self.compact_control_row("Bedding/Sheath Circumferential Direction", self.mesh_count_size_stack("c_elem_bedding_sheath", "c_size_bedding_sheath")))
+        primary_mesh_layout.addWidget(self.compact_control_row("Armour Circumferential Direction", self.mesh_count_size_stack("c_elem_armour", "c_size_armour")))
         mesh_factors.addWidget(primary_mesh_box)
         filler_box = QFrame()
         filler_layout = QVBoxLayout(filler_box)
@@ -1999,15 +2042,15 @@ class SCLASRemoteGUI(QMainWindow):
         fe_factors = QVBoxLayout(fe_factor_panel)
         fe_factors.setContentsMargins(14, 12, 14, 12)
         fe_factors.setSpacing(8)
-        fe_factors.addWidget(self.header("Finite Element Factors"))
-        setup_box = QGroupBox("Analysis Structure Setup")
+        fe_factors.addWidget(self.header("Analysis Condition"))
+        setup_box = QFrame()
         setup_layout = QVBoxLayout(setup_box)
-        setup_layout.setContentsMargins(12, 14, 12, 12)
+        setup_layout.setContentsMargins(0, 4, 0, 0)
         setup_layout.setSpacing(8)
-        setup_layout.addWidget(self.compact_control_row("Pressure P (MPa)", self.cond["pressure"]))
-        setup_layout.addWidget(self.compact_control_row("Curvature k (1/m)", self.cond["curvature"]))
-        setup_layout.addWidget(self.compact_control_row("Friction mu", self.cond["friction"]))
-        setup_layout.addWidget(self.compact_control_row("Contact stiffness", self.cond["contact_stiffness"]))
+        setup_layout.addWidget(self.compact_control_row("Pressure (MPa)", self.cond["pressure"]))
+        setup_layout.addWidget(self.compact_control_row("Curvature (1/mm)", self.cond["curvature"]))
+        setup_layout.addWidget(self.compact_control_row("Friction Coefficient", self.cond["friction"]))
+        setup_layout.addWidget(self.compact_control_row("Contact stiffness scale factor", self.cond["contact_stiffness"]))
         fe_factors.addWidget(setup_box)
         fe_note = QLabel("These factors drive the lower-row pressure/bending and contact diagrams.")
         fe_note.setWordWrap(True)
@@ -2146,7 +2189,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.radio_package = QRadioButton("Export job package only")
         self.radio_local = QRadioButton("Run local/shared-folder command")
         self.radio_remote = QRadioButton("Run remote computer via SSH/scp")
-        self.radio_fast.setChecked(True)
+        self.radio_local.setChecked(True)
         self.radio_remote.setVisible(False)
         for r in [self.radio_fast, self.radio_package, self.radio_local]:
             r.setToolTip("Choose how the current input package should be handled.")
@@ -2181,7 +2224,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_validate = QPushButton("Validate inputs")
         self.btn_json = QPushButton("Export JSON")
         self.btn_load_backend_json = QPushButton("Import Backend JSON")
-        self.btn_run = QPushButton("Run / Create Job")
+        self.btn_run = QPushButton("Run Analysis")
         self.btn_run.setObjectName("RunBtn")
         self.btn_load_result = QPushButton("Load result CSV")
         self.btn_validate.clicked.connect(self.validate_inputs_dialog)
@@ -2198,49 +2241,43 @@ class SCLASRemoteGUI(QMainWindow):
         buttons.addWidget(self.btn_json, 0, 1)
         buttons.addWidget(self.btn_load_backend_json, 1, 0)
         buttons.addWidget(self.btn_load_result, 1, 1)
-        buttons.addWidget(self.btn_run, 2, 0, 1, 2)
         run_layout.addLayout(buttons)
 
         self.progress = QProgressBar(); self.progress.setValue(0)
-        run_layout.addWidget(self.progress)
         self.lbl_hw = QLabel("HW: CPU - | RAM -")
-        run_layout.addWidget(self.lbl_hw)
-        run_layout.addWidget(QLabel("System log"))
         self.console = QTextEdit(); self.console.setReadOnly(True); self.console.setMaximumHeight(130)
-        run_layout.addWidget(self.console)
         left.addWidget(self.collapsible_section("Run Controls", run_box, expanded=True))
         left.addStretch()
 
         result_panel = QFrame(); result_panel.setObjectName("Card")
         right = QVBoxLayout(result_panel)
         result_header = QHBoxLayout()
-        self.result_title_label = self.header("Moment-Curvature Result")
+        self.result_title_label = self.header("Hysteresis Loop Result")
         result_header.addWidget(self.result_title_label)
         result_header.addStretch()
+        self.btn_plot_hysteresis = QPushButton("Plot Hysteresis Loop")
         self.btn_export_plot = QPushButton("Export PNG")
         self.btn_compare_csv = QPushButton("Compare CSV")
         self.btn_clear_compare = QPushButton("Clear")
         self.btn_focus_plot = QPushButton("Focus Plot")
         self.btn_focus_plot.setCheckable(True)
+        self.btn_plot_hysteresis.setToolTip("Select an Abaqus ODB file, save Excel XML, then plot its hysteresis loop.")
         self.btn_export_plot.setToolTip("Save the current plot view as a PNG image.")
         self.btn_compare_csv.setToolTip("Overlay another result_data.csv for FAST/Abaqus comparison.")
         self.btn_clear_compare.setToolTip("Remove all comparison curves from the plot.")
         self.btn_focus_plot.setToolTip("Hide detail panels and give the result plot more vertical space.")
+        self.btn_plot_hysteresis.clicked.connect(self.plot_hysteresis_loop_from_odb)
         self.btn_export_plot.clicked.connect(self.export_plot_png)
         self.btn_compare_csv.clicked.connect(self.compare_result_csv_dialog)
         self.btn_clear_compare.clicked.connect(self.clear_compare_curves)
         self.btn_focus_plot.toggled.connect(self.set_plot_focus)
-        result_header.addWidget(self.btn_focus_plot)
-        result_header.addWidget(self.btn_export_plot)
-        result_header.addWidget(self.btn_compare_csv)
-        result_header.addWidget(self.btn_clear_compare)
         right.addLayout(result_header)
         self.plot_canvas = pg.PlotWidget(background="#1e1e1e")
-        self.plot_canvas.setMinimumHeight(520)
+        self.plot_canvas.setMinimumHeight(640)
         self.plot_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.plot_canvas.showGrid(x=True, y=True, alpha=0.13)
-        self.plot_canvas.setLabel("left", "Bending Moment M", units="kN.m")
-        self.plot_canvas.setLabel("bottom", "Curvature \u03ba", units="1/m")
+        self.plot_canvas.setLabel("left", "Bending Moment M (kN.m)")
+        self.plot_canvas.setLabel("bottom", "Curvature \u03ba (m^-1)")
         self.plot_canvas.getAxis("left").setTextPen("#a7a7a7")
         self.plot_canvas.getAxis("bottom").setTextPen("#a7a7a7")
         self.plot_canvas.getAxis("left").setPen("#555555")
@@ -2248,17 +2285,34 @@ class SCLASRemoteGUI(QMainWindow):
         self.plot_legend = self.plot_canvas.addLegend(offset=(12, 12))
         self.curve = self.plot_canvas.plot(pen=pg.mkPen(color="#8ab4ff", width=2.8), name="Primary")
         right.addWidget(self.plot_canvas, 100)
+
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 8, 0, 0)
+        action_row.setSpacing(10)
+        self.btn_run.setMinimumHeight(42)
+        self.btn_plot_hysteresis.setMinimumHeight(42)
+        action_row.addWidget(self.btn_run, 1)
+        action_row.addWidget(self.btn_plot_hysteresis, 1)
+        right.addLayout(action_row)
+
+        right.addWidget(QLabel("System Log"))
+        self.console.setMaximumHeight(150)
+        right.addWidget(self.console)
+
+        self.lbl_max_bending_stress = self.metric_box("Maximum Bending Stress", "-")
+        right.addWidget(self.lbl_max_bending_stress)
+
         self.metric_panel = QFrame()
         self.metric_panel.setObjectName("MetricStrip")
         metric_layout = QHBoxLayout(self.metric_panel)
         metric_layout.setContentsMargins(0, 0, 0, 0)
-        self.lbl_peak = self.metric_box("Peak |M|", "-")
+        self.lbl_peak = self.metric_box("Maximum Bending Moment", "-")
         self.lbl_loss = self.metric_box("Loop loss proxy", "-")
         self.lbl_points = self.metric_box("Points", "-")
         metric_layout.addWidget(self.lbl_peak)
         metric_layout.addWidget(self.lbl_loss)
         metric_layout.addWidget(self.lbl_points)
-        right.addWidget(self.metric_panel)
+        self.metric_panel.setVisible(False)
 
         self.compare_panel = QFrame()
         self.compare_panel.setObjectName("MetricStrip")
@@ -2272,14 +2326,14 @@ class SCLASRemoteGUI(QMainWindow):
         compare_layout.addWidget(self.lbl_compare_count)
         compare_layout.addWidget(self.lbl_compare_peak_delta)
         compare_layout.addWidget(self.lbl_compare_loss_delta)
-        right.addWidget(self.compare_panel)
+        self.compare_panel.setVisible(False)
 
         self.summary_text = QTextEdit()
         self.summary_text.setObjectName("SummaryText")
         self.summary_text.setReadOnly(True)
         self.summary_text.setMaximumHeight(155)
         self.summary_text.setPlainText(self.summary_placeholder_text())
-        right.addWidget(self.summary_text)
+        self.summary_text.setVisible(False)
 
         self.input_preview_box = QGroupBox("Abaqus Input Preview")
         preview_layout = QVBoxLayout(self.input_preview_box)
@@ -2299,7 +2353,7 @@ class SCLASRemoteGUI(QMainWindow):
         self.input_preview_text.setReadOnly(True)
         self.input_preview_text.setMaximumHeight(230)
         preview_layout.addWidget(self.input_preview_text)
-        right.addWidget(self.input_preview_box)
+        self.input_preview_box.setVisible(False)
 
         self.history_box = QGroupBox("Recent Jobs")
         history_layout = QGridLayout(self.history_box)
@@ -2385,12 +2439,15 @@ class SCLASRemoteGUI(QMainWindow):
         advanced_jobs_layout.addWidget(self.btn_inspect_job_preset, 4, 2)
         advanced_jobs_layout.addWidget(self.btn_inspect_job_folder, 5, 0, 1, 3)
         history_layout.addWidget(self.collapsible_section("Advanced Diagnostics", advanced_jobs_box, expanded=False), 3, 0, 1, 3)
-        right.addWidget(self.history_box)
+        self.history_box.setVisible(False)
 
-        left_scroll = self.scroll_panel(left_panel, min_width=360)
+        self.hidden_analysis_controls = left_panel
+        self.hidden_analysis_controls.setParent(tab)
+        self.hidden_analysis_controls.hide()
+
         result_scroll = self.scroll_panel(result_panel)
 
-        layout.addWidget(self.panel_splitter(result_scroll, left_scroll, [980, 430]), 1)
+        layout.addWidget(result_scroll, 1)
         self.add_page(tab)
         self.install_input_preview_autorefresh()
         self.refresh_input_preview()
@@ -2466,9 +2523,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.table.setHorizontalHeaderLabels([
             "Layer",
             "Material",
-            "Young's modulus\nE (GPa)",
+            "Young's modulus\nE (MPa)",
             "Poisson's ratio\n\u03bd",
-            "Density\n\u03c1 (kg/m^3)",
         ])
         default_font = QFont(APP_FONT_FAMILY, 9)
         default_font.setWeight(QFont.DemiBold)
@@ -2478,7 +2534,7 @@ class SCLASRemoteGUI(QMainWindow):
             item = self.table.horizontalHeaderItem(column)
             if item is None:
                 continue
-            if column in (2, 3, 4):
+            if column in (2, 3):
                 item.setFont(symbol_font)
                 item.setForeground(QBrush(QColor("#0b5cad")))
             else:
@@ -2504,14 +2560,15 @@ class SCLASRemoteGUI(QMainWindow):
 
     def init_material_table(self) -> None:
         materials = [
-            ("Conductor", "Copper", 108.0, 0.33, 8960, QColor("#1d3270")),
-            ("Insulation", "XLPE", 1.2, 0.46, 940, QColor("#dfcf75")),
-            ("Core Shield", "HDPE", 16.0, 0.44, 11340, QColor("#87949a")),
-            ("Filler", "PP", 0.8, 0.48, 1200, QColor("#5f96a4")),
-            ("Inner Sheath", "HDPE", 1.5, 0.45, 1300, QColor("#76868d")),
-            ("Armour", "Steel", 210.0, 0.30, 7850, QColor("#d39135")),
-            ("Bedding", "PFR", 0.5, 0.49, 1100, QColor("#26333a")),
-            ("Outer Sheath", "HDPE", 1.4, 0.45, 1300, QColor("#6b7d87")),
+            ("Conductor", "Copper", 110000.0, 0.30, 8960, QColor("#1d3270")),
+            ("Insulation", "XLPE", 350.0, 0.40, 940, QColor("#dfcf75")),
+            ("Core Shield", "HDPE", 1380.0, 0.40, 11340, QColor("#87949a")),
+            ("Filler", "PP", 1300.0, 0.40, 1200, QColor("#5f96a4")),
+            ("Inner Sheath", "HDPE", 1380.0, 0.40, 1300, QColor("#76868d")),
+            ("Inner Armour", "Steel", 210000.0, 0.30, 7850, QColor("#d39135")),
+            ("Bedding", "PFR", 512.0, 0.40, 1100, QColor("#26333a")),
+            ("Outer Armour", "Steel", 210000.0, 0.30, 7850, QColor("#e0a247")),
+            ("Outer Sheath", "HDPE", 1380.0, 0.40, 1300, QColor("#6b7d87")),
         ]
         for row, (name, material, e, nu, density, color) in enumerate(materials):
             layer_item = QTableWidgetItem(name)
@@ -2520,7 +2577,7 @@ class SCLASRemoteGUI(QMainWindow):
             self.table.setItem(row, 1, QTableWidgetItem(material))
             self.table.setItem(row, 2, QTableWidgetItem(str(e)))
             self.table.setItem(row, 3, QTableWidgetItem(str(nu)))
-            self.table.setItem(row, 4, QTableWidgetItem(str(density)))
+            layer_item.setData(Qt.UserRole, density)
 
     def color_icon(self, color: QColor) -> QPixmap:
         pix = QPixmap(16, 16)
@@ -2542,9 +2599,9 @@ class SCLASRemoteGUI(QMainWindow):
         noa_input = int(self.inputs["no_oa"].value())
         core_count = 3
         self.inputs["core_count"].setValue(core_count)
-        core_lay_angle = safe_float(self.inputs["core_lay_angle"], 9.0, "Core helix pitch angle")
-        inner_lay_angle = safe_float(self.inputs["inner_lay_angle"], -20.1, "Inner armour helix pitch angle")
-        outer_lay_angle = safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour helix pitch angle")
+        core_lay_angle = safe_float(self.inputs["core_lay_angle"], 9.0, "Core helical pitch angle")
+        inner_lay_angle = safe_float(self.inputs["inner_lay_angle"], -20.1, "Inner armour helical pitch angle")
+        outer_lay_angle = safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour helical pitch angle")
 
         if not (0 < rc < ri <= roc):
             raise ValueError("Geometry must satisfy 0 < conductor_radius < insulation_radius <= core_outer_radius.")
@@ -2578,19 +2635,23 @@ class SCLASRemoteGUI(QMainWindow):
         self.inputs["no_oa"].blockSignals(False)
         nia = nia_input if nia_input > 0 else nia_limit
         noa = noa_input if noa_input > 0 else noa_limit
-        core_pitch_length = signed_pitch_length_from_angle(coc, core_lay_angle, 702.6)
-        inner_input_pitch_length = signed_pitch_length_from_angle(co_ia, inner_lay_angle, -677.94737)
-        outer_input_pitch_length = signed_pitch_length_from_angle(co_oa, outer_lay_angle, 776.55789)
-        effective_length = automatic_effective_length_from_pitch(
-            core_pitch_length,
-            inner_input_pitch_length,
-            outer_input_pitch_length,
+        pitch_system = runner_helix_pitch_length_system(
+            coc,
+            co_ia,
+            co_oa,
             nia,
             noa,
+            core_lay_angle,
+            inner_lay_angle,
+            outer_lay_angle,
         )
+        core_pitch_length = float(pitch_system["pitch_core"])
+        inner_input_pitch_length = float(pitch_system["pitch_inner"])
+        outer_input_pitch_length = float(pitch_system["pitch_outer"])
+        effective_length = float(pitch_system["effective_length_mm"])
         period_design = {
             "source": "automatic_py_pitch_angle_Dep_formula",
-            "strategy": "direct_angle_pitch_and_Dep_formula",
+            "strategy": "runner_helix_pitch_length_system",
             "formula_pitch_core": "pitch_core = 2*pi*CoC/tan(pi/180*CHA)",
             "formula_pitch_inner": "pitch_inner = 2*pi*CoIA/tan(pi/180*IAHA)",
             "formula_pitch_outer": "pitch_outer = 2*pi*CoOA/tan(pi/180*OAHA)",
@@ -2665,7 +2726,7 @@ class SCLASRemoteGUI(QMainWindow):
                 "inner_armour_input_pitch_length_mm": f"{format_mm(dg['inner_armour_input_pitch_length_mm'])} mm",
                 "outer_armour_input_pitch_length_mm": f"{format_mm(dg['outer_armour_input_pitch_length_mm'])} mm",
                 "effective_length_mm": f"{format_mm(dg['effective_length_mm'])} mm",
-                "effective_length_formula_summary": "Dep = (p_core/3 + ((NoIA+NoOA)/6)*(|p_inner|/NoIA + |p_outer|/NoOA))/3",
+                "effective_length_formula_summary": "runner: helix_pitch_length_system()",
             }
             for key, text in labels.items():
                 if key in self.pitch_summary_labels:
@@ -3036,13 +3097,16 @@ class SCLASRemoteGUI(QMainWindow):
             material_item = self.table.item(row, 1)
             name = name_item.text().strip() if name_item else f"Layer {row + 1}"
             material = material_item.text().strip() if material_item else ""
+            density = name_item.data(Qt.UserRole) if name_item is not None else 0.0
+            e_mpa = table_float(self.table, row, 2, 1000.0, f"{name} E")
             rows.append({
                 "index": row + 1,
                 "name": name,
                 "material": material,
-                "elastic_modulus_GPa": table_float(self.table, row, 2, 1.0, f"{name} E"),
+                "elastic_modulus_MPa": e_mpa,
+                "elastic_modulus_GPa": e_mpa / 1000.0,
                 "poisson_ratio": table_float(self.table, row, 3, 0.3, f"{name} nu"),
-                "density_kg_m3": table_float(self.table, row, 4, 0.0, f"{name} density"),
+                "density_kg_m3": float(density or 0.0),
             })
         return rows
 
@@ -3160,7 +3224,7 @@ class SCLASRemoteGUI(QMainWindow):
             f"armour_circumferential_divisions: {mesh['armour_circumferential_divisions']}",
             f"filler_profile_divisions FD1/FD2/FD3/FD4: {mesh['filler_profile_divisions']['short_line']}/{mesh['filler_profile_divisions']['long_line']}/{mesh['filler_profile_divisions']['short_arc']}/{mesh['filler_profile_divisions']['long_arc']}",
             "",
-            "[Analysis Conditions]",
+            "[Analysis Condition]",
             f"effective_length_mm: {analysis['effective_length_mm']:.5g}",
             f"external_pressure_mpa: {analysis['external_pressure_mpa']:.5g}",
             f"bend_factor/max_curvature_1_per_m: {analysis['max_curvature_1_per_m']:.5g}",
@@ -3214,8 +3278,10 @@ class SCLASRemoteGUI(QMainWindow):
             self.refresh_input_preview(payload)
             job_root = Path(self.job_root_input.text().strip()).expanduser()
             mode = self.selected_mode()
+            self.current_run_mode = mode
             self.console.clear()
-            self.log(f"[SYS] Starting mode: {mode}")
+            if mode != "LOCAL_COMMAND":
+                self.log(f"[SYS] Starting mode: {mode}")
             self.set_badge(self.lbl_model_status, "Model: valid", "good")
             self.set_badge(self.lbl_result_status, "Result: running", "busy")
             self.progress.setValue(0)
@@ -3336,7 +3402,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_run.setEnabled(True)
         if job_dir:
             self.last_job_dir = job_dir
-            self.log(f"[SYS] Job folder: {job_dir}")
+            if getattr(self, "current_run_mode", "") != "LOCAL_COMMAND":
+                self.log(f"[SYS] Job folder: {job_dir}")
             self.set_badge(self.lbl_result_status, "Result: ready", "good")
             self.refresh_job_history()
         else:
@@ -3352,7 +3419,7 @@ class SCLASRemoteGUI(QMainWindow):
             self.set_badge(self.lbl_result_status, "Result: error", "error")
             QMessageBox.critical(self, "CSV load error", str(exc))
 
-    def load_result_bundle(self, csv_path: Path, source: str = "RESULT_LOAD") -> None:
+    def load_result_bundle(self, csv_path: Path, source: str = "RESULT_LOAD", log_load: bool = True) -> None:
         k, m = read_result_csv(csv_path)
         metrics = make_metrics(k, m, source=source)
         summary = read_json(csv_path.with_name("result_summary.json"), metrics)
@@ -3365,7 +3432,84 @@ class SCLASRemoteGUI(QMainWindow):
         self.update_metrics(metrics, summary)
         self.update_summary_panel(summary)
         self.set_badge(self.lbl_result_status, "Result: loaded", "good")
-        self.log(f"[RESULT] Loaded {csv_path}")
+        if log_load:
+            self.log(f"[RESULT] Loaded {csv_path}")
+
+    def abaqus_python_command(self, script_path: Path, odb_path: Path, job_dir: Path, extra_args: str = "") -> str:
+        local_command = self.local_command_input.text().strip() or default_local_backend_command()
+        lowered = local_command.lower()
+        launcher = local_command
+        for marker in (" cae ", " python "):
+            index = lowered.find(marker)
+            if index > 0:
+                launcher = local_command[:index].strip()
+                break
+        command = (
+            f'{launcher} python "{script_path}" "{odb_path}" '
+            f'--job-dir "{job_dir}"'
+        )
+        if extra_args:
+            command += " " + extra_args
+        return command
+
+    def newest_odb_in_dir(self, job_dir: Path) -> Optional[Path]:
+        odb_files = sorted(job_dir.glob("*.odb"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+        return odb_files[0] if odb_files else None
+
+    def default_odb_job_dir(self) -> Optional[Path]:
+        if self.last_job_dir:
+            path = Path(self.last_job_dir)
+            if self.newest_odb_in_dir(path):
+                return path
+        selected = self.selected_history_job() if hasattr(self, "job_history_combo") else None
+        if selected and self.newest_odb_in_dir(selected):
+            return selected
+        return None
+
+    def plot_hysteresis_loop_from_odb(self) -> None:
+        try:
+            start_dir = str(Path(self.last_job_dir) if self.last_job_dir else DEFAULT_JOB_ROOT)
+            path, _ = QFileDialog.getOpenFileName(self, "Open Abaqus ODB", start_dir, "Abaqus ODB Files (*.odb);;All Files (*)")
+            if not path:
+                return
+            odb_path = Path(path)
+            job_dir = odb_path.parent
+
+            script_path = job_dir / "sclas_odb_extractor.py"
+            if not script_path.exists():
+                shutil.copy2(ODB_EXTRACTOR_TEMPLATE, script_path)
+
+            command = self.abaqus_python_command(
+                script_path,
+                odb_path,
+                job_dir,
+                extra_args='--skip-local-fields --excel "ODB_RP_Curvature_Moment.xls"',
+            )
+            self.set_badge(self.lbl_result_status, "Result: extracting", "busy")
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                proc = subprocess.run(command, shell=True, cwd=str(job_dir), text=True, capture_output=True)
+            finally:
+                QApplication.restoreOverrideCursor()
+            if proc.returncode != 0:
+                detail = (proc.stderr or proc.stdout or "").strip()
+                raise RuntimeError("ODB hysteresis extraction failed.\n" + detail)
+
+            result_csv = job_dir / "result_data.csv"
+            if not result_csv.exists():
+                raise FileNotFoundError("ODB processor did not create result_data.csv")
+            self.load_result_bundle(result_csv, source="SCLAS_ABAQUS_ODB_EXTRACTOR", log_load=False)
+            self.refresh_job_history()
+            self.log(f"[RESULT] Hysteresis loop plotted from ODB: {odb_path.name}")
+            QMessageBox.information(
+                self,
+                "Hysteresis loop plotted",
+                "Created ODB_RP_Curvature_Moment.xls and plotted result_data.csv with the unified ODB extractor.",
+            )
+        except Exception as exc:
+            QApplication.restoreOverrideCursor()
+            self.set_badge(self.lbl_result_status, "Result: error", "error")
+            QMessageBox.critical(self, "ODB plot error", str(exc))
 
     def refresh_job_history(self) -> None:
         if not hasattr(self, "job_history_combo"):
@@ -3990,12 +4134,14 @@ class SCLASRemoteGUI(QMainWindow):
                 self.table.setItem(row, 0, QTableWidgetItem(str(material["name"])))
             if "material" in material:
                 self.table.setItem(row, 1, QTableWidgetItem(str(material["material"])))
+            if "elastic_modulus_MPa" in material:
+                self.table.setItem(row, 2, QTableWidgetItem(str(material["elastic_modulus_MPa"])))
             if "elastic_modulus_GPa" in material:
-                self.table.setItem(row, 2, QTableWidgetItem(str(material["elastic_modulus_GPa"])))
+                self.table.setItem(row, 2, QTableWidgetItem(str(float(material["elastic_modulus_GPa"]) * 1000.0)))
             if "poisson_ratio" in material:
                 self.table.setItem(row, 3, QTableWidgetItem(str(material["poisson_ratio"])))
-            if "density_kg_m3" in material:
-                self.table.setItem(row, 4, QTableWidgetItem(str(material["density_kg_m3"])))
+            if "density_kg_m3" in material and self.table.item(row, 0) is not None:
+                self.table.item(row, 0).setData(Qt.UserRole, float(material["density_kg_m3"]))
             updated += 1
 
         self.parse_geometry()
@@ -4077,9 +4223,10 @@ class SCLASRemoteGUI(QMainWindow):
             plot_y = m / 1.0e9
         else:
             if hasattr(self, "result_title_label"):
-                self.result_title_label.setText("Moment-Curvature Result")
-            self.plot_canvas.setLabel("left", "Bending Moment M", units="kN.m")
-            self.plot_canvas.setLabel("bottom", "Curvature \u03ba", units="1/m")
+                self.result_title_label.setText("Hysteresis Loop Result")
+            moment_unit = "N.m" if is_rp_u1_rf1_moment_curvature(summary or {}) else "kN.m"
+            self.plot_canvas.setLabel("left", f"Bending Moment M ({moment_unit})")
+            self.plot_canvas.setLabel("bottom", "Curvature \u03ba (m^-1)")
             try:
                 self.plot_canvas.getAxis("bottom").enableAutoSIPrefix(True)
                 self.plot_canvas.getAxis("left").enableAutoSIPrefix(True)
@@ -4096,6 +4243,9 @@ class SCLASRemoteGUI(QMainWindow):
 
     def update_metrics(self, data: dict, summary: dict = None) -> None:
         self.current_metrics = dict(data)
+        if hasattr(self, "lbl_max_bending_stress"):
+            stress = max_bending_stress_from_summary(summary or {})
+            self.lbl_max_bending_stress.value_label.setText("-" if stress is None else f"{stress:.4g} MPa")
         if is_force_displacement_preview(summary or {}):
             force_summary = force_displacement_summary(summary or {})
             self.lbl_peak.title_label.setText("Peak |RF1|")
@@ -4105,9 +4255,10 @@ class SCLASRemoteGUI(QMainWindow):
             self.lbl_peak.value_label.setText(f"{peak:.4g} N")
             self.lbl_loss.value_label.setText(f"{loss:.4g} N.mm")
         else:
-            self.lbl_peak.title_label.setText("Peak |M|")
+            self.lbl_peak.title_label.setText("Maximum Bending Moment")
             self.lbl_loss.title_label.setText("Loop loss proxy")
-            self.lbl_peak.value_label.setText(f"{data['max_abs_moment_kn_m']:.4g} kN.m")
+            moment_unit = "N.m" if is_rp_u1_rf1_moment_curvature(summary or {}) else "kN.m"
+            self.lbl_peak.value_label.setText(f"{data['max_abs_moment_kn_m']:.4g} {moment_unit}")
             self.lbl_loss.value_label.setText(f"{data['hysteresis_loss_kj_per_m_proxy']:.4g}")
         self.lbl_points.value_label.setText(str(data["num_points"]))
         self.update_compare_panel()
@@ -4241,6 +4392,7 @@ class SCLASRemoteGUI(QMainWindow):
         derived = data.get("derived_placeholder_metrics", {})
         force_summary = force_displacement_summary(data)
         force_preview = is_force_displacement_preview(data)
+        moment_unit = "N.m" if is_rp_u1_rf1_moment_curvature(data) else "kN.m"
         if self.ui_language == "KO":
             if force_preview:
                 lines = [
@@ -4258,7 +4410,7 @@ class SCLASRemoteGUI(QMainWindow):
                     f"출처: {data.get('source', '-')}",
                     f"상태: {data.get('status', 'loaded')}",
                     f"계산 시각: {data.get('computed_at', '-')}",
-                    f"최대 |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} kN.m",
+                    f"최대 |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} {moment_unit}",
                     f"루프 손실: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
                     f"데이터 수: {data.get('num_points', '-')}",
                     f"메시 상태: {mesh_status}",
@@ -4280,7 +4432,7 @@ class SCLASRemoteGUI(QMainWindow):
                     f"Source: {data.get('source', '-')}",
                     f"Status: {data.get('status', 'loaded')}",
                     f"Computed: {data.get('computed_at', '-')}",
-                    f"Peak |M|: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} kN.m",
+                    f"Maximum bending moment: {float(data.get('max_abs_moment_kn_m', 0.0)):.6g} {moment_unit}",
                     f"Loop loss: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
                     f"Points: {data.get('num_points', '-')}",
                     f"Mesh status: {mesh_status}",
@@ -4417,7 +4569,15 @@ class SCLASRemoteGUI(QMainWindow):
             verts = [[cx, cy, z_front]] + [[cx + r * np.cos(a), cy + r * np.sin(a), z_front] for a in t]
             faces = [[0, i, i + 1] for i in range(1, len(t))]
             faces.append([0, len(t), 1])
-            return gl.GLMeshItem(vertexes=np.array(verts), faces=np.array(faces), faceColors=np.tile(color, (len(faces), 1)), smooth=False, shader=None)
+            return gl.GLMeshItem(
+                vertexes=np.array(verts, dtype=float),
+                faces=np.array(faces, dtype=int),
+                faceColors=np.tile(np.array(color, dtype=float), (len(faces), 1)),
+                smooth=False,
+                drawEdges=True,
+                edgeColor=(0.12, 0.16, 0.20, 0.55),
+                shader=None,
+            )
         md = gl.MeshData.cylinder(rows=1, cols=48, radius=[r, r], length=50.0)
         item = gl.GLMeshItem(meshdata=md, smooth=True, color=color, shader="shaded")
         item.translate(cx, cy, z_front - 50.0)
@@ -4472,6 +4632,102 @@ class SCLASRemoteGUI(QMainWindow):
                     self.add_solid(dg["conductor_radius_mm"], cx, cy, 0.8, [0.11, 0.20, 0.44, 1.0])
         except Exception as exc:
             self.log(f"[GEOMETRY] {exc}")
+        self.update_section_preview_pixmap()
+
+    def update_section_preview_pixmap(self) -> None:
+        if not hasattr(self, "section_preview_label"):
+            return
+        width = self.section_preview_label.contentsRect().width()
+        height = self.section_preview_label.contentsRect().height()
+        self.set_diagram_pixmap(self.section_preview_label, self.build_section_preview_pixmap(width, height))
+
+    def build_section_preview_pixmap(self, width: Optional[int] = None, height: Optional[int] = None) -> QPixmap:
+        width = max(620, int(width or 920))
+        height = max(320, int(height or 420))
+        pixmap = QPixmap(width, height)
+        pixmap.fill(QColor("#f7f8fa"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        try:
+            dg = self.parse_geometry()
+        except Exception:
+            dg = dict(getattr(self, "derived_geom", {}))
+
+        painter.setPen(QPen(QColor("#edf1f5"), 1))
+        painter.setBrush(QColor("#fbfcfe"))
+        painter.drawRoundedRect(1, 1, width - 2, height - 2, 12, 12)
+        if not dg:
+            painter.setPen(QColor("#64748b"))
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, "Section preview will appear after geometry is valid.")
+            painter.end()
+            return pixmap
+
+        cx = int(width * 0.46)
+        cy = int(height * 0.52)
+        max_r = max(float(dg.get("outer_sheath_outer_radius_mm", 52.0)), 1.0)
+        radius_px = int(min(width * 0.32, height * 0.42))
+        scale = radius_px / max_r
+
+        def px(x: float) -> int:
+            return int(round(cx + x * scale))
+
+        def py(y: float) -> int:
+            return int(round(cy - y * scale))
+
+        def draw_disc(radius_mm: float, color: str, pen: str = "#43515a", alpha: int = 255) -> None:
+            radius = max(1, int(round(float(radius_mm) * scale)))
+            fill = QColor(color)
+            fill.setAlpha(alpha)
+            painter.setPen(QPen(QColor(pen), 1.0))
+            painter.setBrush(fill)
+            painter.drawEllipse(cx - radius, cy - radius, radius * 2, radius * 2)
+
+        if self.layer_visible("outer_sheath"):
+            draw_disc(dg["outer_sheath_outer_radius_mm"], "#66777d", "#2f3b40", 235)
+        if self.layer_visible("outer_armour"):
+            armour_count = min(96, max(1, int(dg.get("outer_armour_wire_count", 63))))
+            armour_r = max(2, int(round(float(dg.get("outer_armour_wire_radius_mm", 2.0)) * scale)))
+            armour_c = float(dg.get("outer_armour_center_radius_mm", 45.0))
+            painter.setPen(QPen(QColor("#7b4a0b"), 1.0))
+            painter.setBrush(QColor("#f39a16"))
+            for i in range(armour_count):
+                a = 2.0 * math.pi * i / armour_count
+                painter.drawEllipse(px(armour_c * math.cos(a)) - armour_r, py(armour_c * math.sin(a)) - armour_r, armour_r * 2, armour_r * 2)
+        if self.layer_visible("bedding"):
+            draw_disc(dg["bedding_outer_radius_mm"], "#26333a", "#1f2933", 215)
+        if self.layer_visible("inner_armour"):
+            armour_count = min(96, max(1, int(dg.get("inner_armour_wire_count", 55))))
+            armour_r = max(2, int(round(float(dg.get("inner_armour_wire_radius_mm", 2.0)) * scale)))
+            armour_c = float(dg.get("inner_armour_center_radius_mm", 34.0))
+            painter.setPen(QPen(QColor("#7b4a0b"), 1.0))
+            painter.setBrush(QColor("#f0a43a"))
+            for i in range(armour_count):
+                a = 2.0 * math.pi * i / armour_count
+                painter.drawEllipse(px(armour_c * math.cos(a)) - armour_r, py(armour_c * math.sin(a)) - armour_r, armour_r * 2, armour_r * 2)
+        if self.layer_visible("inner_sheath"):
+            draw_disc(dg["inner_sheath_outer_radius_mm"], "#76868d", "#4c5960", 220)
+            draw_disc(dg["inner_sheath_inner_radius_mm"], "#eef3f5", "#c9d3da", 255)
+        if self.layer_visible("filler"):
+            draw_disc(dg["filler_outer_radius_mm"], "#5f96a4", "#316b78", 155)
+        if self.layer_visible("cores"):
+            core_count = max(1, int(dg.get("core_count", 3)))
+            for i in range(core_count):
+                a = 2.0 * math.pi * i / core_count - math.pi / 2.0
+                ccx = float(dg["core_center_radius_mm"]) * math.cos(a)
+                ccy = float(dg["core_center_radius_mm"]) * math.sin(a)
+                core_r = max(2, int(round(float(dg["core_outer_radius_mm"]) * scale)))
+                ins_r = max(2, int(round(float(dg["insulation_radius_mm"]) * scale)))
+                cond_r = max(2, int(round(float(dg["conductor_radius_mm"]) * scale)))
+                pcx, pcy = px(ccx), py(ccy)
+                painter.setPen(QPen(QColor("#4a5456"), 1.0))
+                painter.setBrush(QColor("#87949a"))
+                painter.drawEllipse(pcx - core_r, pcy - core_r, core_r * 2, core_r * 2)
+                painter.setBrush(QColor("#dfcf75"))
+                painter.drawEllipse(pcx - ins_r, pcy - ins_r, ins_r * 2, ins_r * 2)
+                painter.setBrush(QColor("#1d3270"))
+                painter.drawEllipse(pcx - cond_r, pcy - cond_r, cond_r * 2, cond_r * 2)
+        painter.end()
+        return pixmap
 
     def add_solid(self, r, cx, cy, z, color) -> None:
         item = self.create_solid_mesh(r, cx, cy, z, color)
@@ -4661,7 +4917,7 @@ class SCLASRemoteGUI(QMainWindow):
 
         painter.setFont(small_font)
         painter.setPen(QColor("#64748b"))
-        painter.drawText(22, height - 18, "Longitudinal mesh preview responds to Axial n_z / size; visual reference uses the user-provided GPT cylinder concept.")
+        painter.drawText(22, height - 18, "Longitudinal mesh preview responds to Longitudinal Direction settings.")
         painter.end()
         return pixmap
 
@@ -5444,9 +5700,9 @@ class SCLASRemoteGUI(QMainWindow):
                     f"Mesh input basis: {basis}",
                     f"Global axial n_z divisions: {z_rows}",
                     f"Filler n_z divisions: {filler_z_rows} (same as global axial n_z)",
-                    f"Core n_theta divisions CCD: {core_cols}",
-                    f"Bedding/Sheath n_theta divisions BSCD: {bedding_sheath_cols}",
-                    f"Armour n_theta divisions: {armour_cols}",
+                    f"Core circumferential direction divisions CCD: {core_cols}",
+                    f"Bedding/Sheath circumferential direction divisions BSCD: {bedding_sheath_cols}",
+                    f"Armour circumferential direction divisions: {armour_cols}",
                     f"Filler FD1/FD2/FD3/FD4: {counts['filler_short_line']}/{counts['filler_long_line']}/{counts['filler_short_arc']}/{counts['filler_long_arc']}",
                     "Sheath/Bedding radial seed: backend fixed",
                     "Circumferential multiples of 4 are recommended for demos, not enforced.",

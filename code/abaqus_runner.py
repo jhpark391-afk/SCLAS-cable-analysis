@@ -308,13 +308,16 @@ def helix_pitch_length_system(coc, co_ia, co_oa, no_ia, no_oa, cha, iaha, oaha):
     pitch_core = pitch(coc, cha, 702.6)
     pitch_inner = pitch(co_ia, iaha, -677.94737)
     pitch_outer = pitch(co_oa, oaha, 776.55789)
-    no_ia_dec = Decimal(max(1, as_int(no_ia, 55)))
-    no_oa_dec = Decimal(max(1, as_int(no_oa, 63)))
+    no_ia_int = max(1, as_int(no_ia, 55))
+    no_oa_int = max(1, as_int(no_oa, 63))
+    no_ia_dec = Decimal(no_ia_int)
+    no_oa_dec = Decimal(no_oa_int)
+    armour_count_factor = Decimal((no_ia_int + no_oa_int) // 6)
     depth = float(
         pitch_core / Decimal(3)
-        + Decimal((float(no_ia_dec) + float(no_oa_dec)) / 6.0)
-        * (abs(pitch_inner) / no_ia_dec + abs(pitch_outer) / no_oa_dec)
-    ) / 3.0
+        + armour_count_factor
+        * (abs(pitch_inner) / Decimal(no_ia_dec) + abs(pitch_outer) / Decimal(no_oa_dec))
+    ) / 3
     return {
         "pitch_core": pitch_core,
         "pitch_inner": pitch_inner,
@@ -715,749 +718,1121 @@ def fallback_summary(data, mesh_status, curvature, moment_kn_m):
     }
 
 
-def build_abaqus_model(data, job_dir):
-    geo  = data['geometry_mm']
-    dgeo = data['derived_geometry_mm']
-    arm  = data['armour']
-    ac   = data['analysis_conditions']
-    sol  = data['solver']
-    msh  = data['mesh']
-    out  = data['output_requests']
-    mod  = data['modeling']
+def _as_float(value, default):
+    try:
+        if value is None:
+            return float(default)
+        return float(value)
+    except Exception:
+        return float(default)
 
-    Roc  = Decimal(str(geo['conductor_radius_mm']))
-    RoI  = Decimal(str(geo['insulation_radius_mm']))
-    RoC  = Decimal(str(geo['core_outer_radius_mm']))
-    TIS  = Decimal(str(geo['inner_sheath_thickness_mm']))
-    TOS  = Decimal(str(geo['outer_sheath_thickness_mm']))
-    RoIA = Decimal(str(arm['inner_wire_radius_mm']))
-    RoOA = Decimal(str(arm['outer_wire_radius_mm']))
-    TB   = Decimal(str(dgeo['bedding_thickness_mm']))
+
+def _as_int(value, default):
+    try:
+        if value is None:
+            return int(default)
+        return int(float(value))
+    except Exception:
+        return int(default)
+
+
+def _mat_by_index_or_alias(materials, index, aliases):
+    for item in materials:
+        try:
+            if int(item.get('index')) == int(index):
+                return item
+        except Exception:
+            pass
+    alias_text = [str(a).lower() for a in aliases]
+    for item in materials:
+        text = (str(item.get('name', '')) + ' ' + str(item.get('material', ''))).replace('_', ' ').lower()
+        if any(alias in text for alias in alias_text):
+            return item
+    raise KeyError('Required material not found: index=%s aliases=%s' % (index, ','.join(aliases)))
+
+
+def build_abaqus_model(data, job_dir):
+    """Build and run the Abaqus model using the automatic.py body.
+
+    Intended as a candidate for review only. Production code still lives in
+    code/abaqus_runner.py.
+    """
+    geo = data.get('geometry_mm', {})
+    dgeo = data.get('derived_geometry_mm', {})
+    arm = data.get('armour', {})
+    ac = data.get('analysis_conditions', {})
+    sol = data.get('solver', {})
+    msh = data.get('mesh', {})
+
+    Roc  = Decimal(str(_as_float(geo.get('conductor_radius_mm', geo.get('Roc')), 4.0)))
+    RoI  = Decimal(str(_as_float(geo.get('insulation_radius_mm', geo.get('RoI')), 11.3)))
+    RoC  = Decimal(str(_as_float(geo.get('core_outer_radius_mm', geo.get('RoC')), 15.3)))
+    TIS  = Decimal(str(_as_float(geo.get('inner_sheath_thickness_mm', geo.get('TIS')), 4.5)))
+    TOS  = Decimal(str(_as_float(geo.get('outer_sheath_thickness_mm', geo.get('TOS')), 4.5)))
+    RoIA = Decimal(str(_as_float(arm.get('inner_wire_radius_mm', arm.get('RoIA')), 2.0)))
+    RoOA = Decimal(str(_as_float(arm.get('outer_wire_radius_mm', arm.get('RoOA')), 2.0)))
+    TB   = Decimal(str(_as_float(dgeo.get('bedding_thickness_mm', geo.get('bedding_thickness_mm', geo.get('TB'))), 0.6)))
 
     CoC  = Decimal(round((2*sqrt(3)*float(RoC)/3), 5))
     IRIS = RoC + CoC
     ORIS = IRIS + TIS
-    GAP  = Decimal(str(geo.get('clearance_gap_mm', 0.0)))
-    CoIA = RoIA + ORIS + GAP
+    CoIA = RoIA + ORIS
     IRB  = CoIA + RoIA
     ORB  = IRB + TB
-    CoOA = RoOA + ORB + GAP
+    CoOA = RoOA + ORB
     IROS = CoOA + RoOA
     OROS = IROS + TOS
     scale = RoC / Decimal('15.3')
 
-    if 'inner_wire_count' not in arm or arm['inner_wire_count'] == 0:
-        NoIA = Decimal(int(pi / asin(float(RoIA) / float(CoIA))))
-    else:
-        NoIA = Decimal(str(arm['inner_wire_count']))
+    NoIA = _as_int(arm.get('inner_wire_count', arm.get('NoIA')), 55)
+    NoOA = _as_int(arm.get('outer_wire_count', arm.get('NoOA')), 63)
 
-    if 'outer_wire_count' not in arm or arm['outer_wire_count'] == 0:
-        NoOA = Decimal(int(pi / asin(float(RoOA) / float(CoOA))))
-    else:
-        NoOA = Decimal(str(arm['outer_wire_count']))
+    RAoIA = round(Decimal(360) / Decimal(NoIA), 5)
+    RAoOA = round(Decimal(360) / Decimal(NoOA), 5)
 
-    RAoIA = round(Decimal(360) / NoIA, 5)
-    RAoOA = round(Decimal(360) / NoOA, 5)
-    core_lay_angle = as_float(arm.get('core_lay_angle_deg'), 9.0)
-    inner_lay_angle = as_float(arm.get('inner_armour_lay_angle_deg', arm.get('inner_lay_angle_deg')), -20.1)
-    outer_lay_angle = as_float(arm.get('outer_armour_lay_angle_deg', arm.get('outer_lay_angle_deg')), 19.6)
-    pitch_system = helix_pitch_length_system(CoC, CoIA, CoOA, int(NoIA), int(NoOA),
-        core_lay_angle, inner_lay_angle, outer_lay_angle)
-    pitch_core = float(pitch_system['pitch_core'])
-    pitch_inner = float(pitch_system['pitch_inner'])
-    pitch_outer = float(pitch_system['pitch_outer'])
+    P = _as_float(ac.get('external_pressure_mpa', ac.get('hydrostatic_pressure_mpa', ac.get('P'))), 0.3)
+    FrCo = _as_float(ac.get('friction_coefficient', ac.get('FrCo')), 0.2)
+    BendFac = _as_float(ac.get('max_curvature_1_per_m', ac.get('bend_factor', ac.get('BendFac'))), 5e-05)
 
-    depth          = float(pitch_system['effective_length_mm'])
-    pressure       = as_float(ac.get('external_pressure_mpa', ac.get('hydrostatic_pressure_mpa')), 0.0)
-    friction       = as_float(ac.get('friction_coefficient'), 0.3)
-    contact_beta   = as_float(ac.get('contact_regularization_beta', msh.get('contact_regularization_beta')), 0.001)
-    contact_stiffness_scale = max(as_float(ac.get('contact_stiffness_scale_factor', ac.get('conStiff')), 0.05), 1.0e-6)
-    max_curvature  = as_float(ac.get('max_curvature_1_per_m'), 5.0e-5)
-    curve_factors  = ac['curve_factors']
-    loading_cycles = ac['loading_cycles']
+    pstep = sol.get('pressure_step', {}) if isinstance(sol.get('pressure_step', {}), dict) else {}
+    bstep = sol.get('bending_step', {}) if isinstance(sol.get('bending_step', {}), dict) else {}
+    inIncP = _as_float(pstep.get('initial_increment', sol.get('initial_increment', sol.get('inIncP'))), 1e-05)
+    minIncP = _as_float(pstep.get('minimum_increment', sol.get('minimum_increment', sol.get('minIncP'))), 1e-10)
+    maxIncP = _as_float(pstep.get('maximum_increment', sol.get('maximum_increment', sol.get('maxIncP'))), 0.1)
+    maxNumIncP = _as_int(pstep.get('max_num_increments', sol.get('max_num_increments', sol.get('maxNumIncP'))), 10000)
 
-    pressure_step = sol.get('pressure_step', {})
-    bending_step = sol.get('bending_step', {})
-    p_initialInc = as_float(pressure_step.get('initial_increment'), as_float(sol.get('initial_increment'), 1.0e-5))
-    p_minInc     = as_float(pressure_step.get('minimum_increment'), as_float(sol.get('minimum_increment'), 1.0e-10))
-    p_maxInc     = as_float(pressure_step.get('maximum_increment'), 0.1)
-    p_maxNumInc  = as_int(pressure_step.get('max_num_increments'), as_int(sol.get('max_num_increments'), 10000))
-    b_initialInc = as_float(bending_step.get('initial_increment'), as_float(sol.get('initial_increment'), 1.0e-5))
-    b_minInc     = as_float(bending_step.get('minimum_increment'), as_float(sol.get('minimum_increment'), 1.0e-10))
-    b_maxInc     = as_float(bending_step.get('maximum_increment'), as_float(sol.get('maximum_increment'), 0.05))
-    b_maxNumInc  = as_int(bending_step.get('max_num_increments'), as_int(sol.get('max_num_increments'), 10000))
-    cpu_count    = max(1, as_int(sol.get('cpu_count', sol.get('CPU')), 12))
-    stabilization = as_float(sol.get('stabilization_factor'), 0.0002)
+    inIncB = _as_float(bstep.get('initial_increment', sol.get('initial_increment', sol.get('inIncB'))), 1e-05)
+    minIncB = _as_float(bstep.get('minimum_increment', sol.get('minimum_increment', sol.get('minIncB'))), 1e-10)
+    maxIncB = _as_float(bstep.get('maximum_increment', sol.get('maximum_increment', sol.get('maxIncB'))), 0.05)
+    maxNumIncB = _as_int(bstep.get('max_num_increments', sol.get('max_num_increments', sol.get('maxNumIncB'))), 10000)
 
-    axial_div       = msh['axial_divisions']
-    core_circ_div   = msh['core_circumferential_divisions']
-    armour_circ_div = msh['armour_circumferential_divisions']
-    sheath_radial_div = max(1, as_int(msh.get('bedding_sheath_radial_divisions', msh.get('BSRD')), 3))
+    ZAD = _as_int(msh.get('axial_divisions', msh.get('ZAD')), 40)
+    ZADMeshType = _as_int(msh.get('ZADMeshType'), 1)
+    CCD = _as_int(msh.get('core_circumferential_divisions', msh.get('CCD')), 20)
+    BSCD = _as_int(msh.get('bedding_sheath_circumferential_divisions', msh.get('BSCD')), 64)
+    ACD = _as_int(msh.get('armour_circumferential_divisions', msh.get('ACD')), 3)
+    CCDMeshType = _as_int(msh.get('CCDMeshType'), 1)
+    BSCDMeshType = _as_int(msh.get('BSCDMeshType'), 1)
+    ACDMeshType = _as_int(msh.get('ACDMeshType'), 1)
+    BSRD = _as_int(msh.get('BSRD'), 3)
+    BSRDMeshType = _as_int(msh.get('BSRDMeshType'), 1)
+    filler_profile = msh.get('filler_profile_divisions', {}) if isinstance(msh.get('filler_profile_divisions', {}), dict) else {}
+    FD1 = _as_int(filler_profile.get('short_line', msh.get('FD1')), 2)
+    FD2 = _as_int(filler_profile.get('long_line', msh.get('FD2')), 2)
+    FD3 = _as_int(filler_profile.get('short_arc', msh.get('FD3')), 4)
+    FD4 = _as_int(filler_profile.get('long_arc', msh.get('FD4')), 6)
+    FDMeshType = _as_int(msh.get('FDMeshType'), 1)
 
-    field_output   = out['field']
-    history_output = out['history']
-    simple_bending_smoke = bool(msh.get('lab_smoke_reduced_mesh', False))
+    CHA = _as_float(arm.get('core_lay_angle_deg', arm.get('CHA')), 9.0)
+    IAHA = _as_float(arm.get('inner_armour_lay_angle_deg', arm.get('inner_lay_angle_deg', arm.get('IAHA'))), -20.1)
+    OAHA = _as_float(arm.get('outer_armour_lay_angle_deg', arm.get('outer_lay_angle_deg', arm.get('OAHA'))), 19.6)
 
-    L         = Decimal(str(depth))
-    coef_dof2 = float(L * L / 2)
-    coef_dof4 = float(-L)
+    pitch_core = 2*Decimal(pi)* Decimal(CoC)/ Decimal(tan(pi/180*CHA))
+    pitch_inner = 2*Decimal(pi)* Decimal(CoIA)/ Decimal(tan(pi/180*IAHA))
+    pitch_outer = 2*Decimal(pi)* Decimal(CoOA)/ Decimal(tan(pi/180*OAHA))
 
-    job_name = 'Cable_Bending'
-
-    mdb.Model(name='Model-1')
-    m  = mdb.models['Model-1']
-    ra = m.rootAssembly
+    Dep = float(pitch_core/3 +
+       Decimal((NoIA+NoOA)/6)*(abs(pitch_inner)/Decimal(NoIA) + abs(pitch_outer)/Decimal(NoOA)
+        ))/3
+    conStiff = _as_float(ac.get('contact_stiffness_scale_factor', ac.get('conStiff')), 0.05)
+    CPU = _as_int(sol.get('cpu_count', sol.get('CPU')), 12)
 
     mat_data = data['materials']
-    mat_aliases = {
-        'Conductor':   ['conductor', 'copper'],
-        'Insulation':  ['insulation', 'xlpe'],
-        'CoreShield':  ['core shield', 'coreshield'],
-        'InnerSheath': ['inner sheath', 'innersheath'],
-        'InnerArmour': ['armour', 'armor', 'steel', 'inner armour', 'inner armor'],
-        'Bedding':     ['bedding', 'pfr'],
-        'OuterArmour': ['armour', 'armor', 'steel', 'outer armour', 'outer armor'],
-        'OuterSheath': ['outer sheath', 'outersheath'],
-        'Filler':      ['filler', 'pp'],
+    mat_map = {
+        'Conductor':   (1, ['conductor', 'copper']),
+        'Insulation':  (2, ['insulation', 'xlpe']),
+        'CoreShield':  (3, ['core shield', 'coreshield']),
+        'InnerSheath': (5, ['inner sheath', 'innersheath']),
+        'InnerArmour': (6, ['inner armour', 'inner armor', 'steel', 'armour', 'armor']),
+        'Bedding':     (7, ['bedding', 'pfr']),
+        'OuterArmour': (8, ['outer armour', 'outer armor', 'steel', 'armour', 'armor']),
+        'OuterSheath': (9, ['outer sheath', 'outersheath']),
+        'Filler':      (4, ['filler', 'pp']),
     }
 
-    def _mat_text(item):
-        parts = [
-            str(item.get('name', '')),
-            str(item.get('material', '')),
-        ]
-        return ' '.join(parts).replace('_', ' ').lower()
+    old_cwd = os.getcwd()
+    job_dir = os.path.abspath(str(job_dir))
+    if not os.path.isdir(job_dir):
+        os.makedirs(job_dir)
+    os.chdir(job_dir)
+    cae_path = os.path.join(job_dir, 'Cable_Bending.cae')
+    try:
+        mdb.Model(name='Model-1')
+        m  = mdb.models['Model-1']
+        ra = m.rootAssembly
 
-    def _find_material(aliases):
-        for item in mat_data:
-            text = _mat_text(item)
-            for alias in aliases:
-                if alias in text:
-                    return item
-        raise KeyError('Required material not found: ' + ', '.join(aliases))
+        mat_data = data['materials']
+        mat_map = {
+            'Conductor':   1,
+            'Insulation':  2,
+            'CoreShield':  3,
+            'InnerSheath': 5,
+            'InnerArmour': 6,
+            'Bedding':     7,
+            'OuterArmour': 8,
+            'OuterSheath': 9,
+            'Filler':      4,
+        }
 
-    materials = []
-    for name, aliases in mat_aliases.items():
-        mat = _find_material(aliases)
-        E  = mat['elastic_modulus_GPa'] * 1000
-        nu = mat['poisson_ratio']
-        materials.append((name, E, nu))
+        materials = []
+        for name, idx in mat_map.items():
+            mat = next(i for i in mat_data if i['index'] == idx)
+            E  = mat['elastic_modulus_GPa'] * 1000
+            nu = mat['poisson_ratio']
+            materials.append((name, E, nu))
 
-    for name, E, nu in materials:
-        m.Material(name=name)
-        m.materials[name].Elastic(table=((E, nu), ))
-        m.HomogeneousSolidSection(material=name, name=name, thickness=None)
+        for name, E, nu in materials:
+            m.Material(name=name)
+            m.materials[name].Elastic(table=((E, nu), ))
+            m.HomogeneousSolidSection(material=name, name=name, thickness=None)
 
-    m.ConstrainedSketch(name='__profile__', sheetSize=235.0)
-    sk = m.sketches['__profile__']
-    sk.Spot(point=(0.0, 0.0))
-    sk.CircleByCenterPerimeter(center=(0.0, float(CoC)), point1=(0.0, float(CoC+Roc)))
-    m.Part(dimensionality=THREE_D, name='Conductor', type=DEFORMABLE_BODY)
-    p = m.parts['Conductor']
-    p.BaseSolidExtrude(depth=depth, pitch=pitch_core, sketch=sk)
-    p.Set(cells=p.cells[:], name='Conductor')
-    p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
-        region=p.sets['Conductor'], sectionName='Conductor', thicknessAssignment=FROM_SECTION)
-    del m.sketches['__profile__']
+        m.ConstrainedSketch(name='__profile__', sheetSize=200.0)
+        sk = m.sketches['__profile__']
+        sk.Spot(point=(0.0, 0.0))
+        sk.CircleByCenterPerimeter(center=(0.0, float(CoC)), point1=(0.0, float(CoC+Roc)))
+        m.Part(dimensionality=THREE_D, name='Conductor', type=DEFORMABLE_BODY)
+        p = m.parts['Conductor']
+        p.BaseSolidExtrude(depth=Dep, pitch=float(pitch_core), sketch=sk)
+        p.Set(cells=p.cells[:], name='Conductor')
+        p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
+            region=p.sets['Conductor'], sectionName='Conductor', thicknessAssignment=FROM_SECTION)
+        del m.sketches['__profile__']
 
-    m.ConstrainedSketch(name='__profile__', sheetSize=235.0)
-    sk = m.sketches['__profile__']
-    sk.Spot(point=(0.0, 0.0))
-    sk.CircleByCenterPerimeter(center=(0.0, float(CoC)), point1=(0.0, float(CoC+RoI)))
-    sk.CircleByCenterPerimeter(center=(0.0, float(CoC)), point1=(0.0, float(CoC+Roc)))
-    m.Part(dimensionality=THREE_D, name='Insulation', type=DEFORMABLE_BODY)
-    p = m.parts['Insulation']
-    p.BaseSolidExtrude(depth=depth, pitch=pitch_core, sketch=sk)
-    p.Set(cells=p.cells[:], name='Insulation')
-    p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
-        region=p.sets['Insulation'], sectionName='Insulation', thicknessAssignment=FROM_SECTION)
-    del m.sketches['__profile__']
+        m.ConstrainedSketch(name='__profile__', sheetSize=200.0)
+        sk = m.sketches['__profile__']
+        sk.Spot(point=(0.0, 0.0))
+        sk.CircleByCenterPerimeter(center=(0.0, float(CoC)), point1=(0.0, float(CoC+RoI)))
+        sk.CircleByCenterPerimeter(center=(0.0, float(CoC)), point1=(0.0, float(CoC+Roc)))
+        m.Part(dimensionality=THREE_D, name='Insulation', type=DEFORMABLE_BODY)
+        p = m.parts['Insulation']
+        p.BaseSolidExtrude(depth=Dep, pitch=float(pitch_core), sketch=sk)
+        p.Set(cells=p.cells[:], name='Insulation')
+        p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
+            region=p.sets['Insulation'], sectionName='Insulation', thicknessAssignment=FROM_SECTION)
+        del m.sketches['__profile__']
 
-    m.ConstrainedSketch(name='__profile__', sheetSize=235.0)
-    sk = m.sketches['__profile__']
-    sk.Spot(point=(0.0, 0.0))
-    sk.CircleByCenterPerimeter(center=(0.0, float(CoC)), point1=(0.0, float(CoC+RoI)))
-    sk.CircleByCenterPerimeter(center=(0.0, float(CoC)), point1=(0.0, float(IRIS)))
-    m.Part(dimensionality=THREE_D, name='CoreShield', type=DEFORMABLE_BODY)
-    p = m.parts['CoreShield']
-    p.BaseSolidExtrude(depth=depth, pitch=pitch_core, sketch=sk)
-    p.Set(cells=p.cells[:], name='CoreShield')
-    p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
-        region=p.sets['CoreShield'], sectionName='CoreShield', thicknessAssignment=FROM_SECTION)
-    del m.sketches['__profile__']
+        m.ConstrainedSketch(name='__profile__', sheetSize=200.0)
+        sk = m.sketches['__profile__']
+        sk.Spot(point=(0.0, 0.0))
+        sk.CircleByCenterPerimeter(center=(0.0, float(CoC)), point1=(0.0, float(CoC+RoI)))
+        sk.CircleByCenterPerimeter(center=(0.0, float(CoC)), point1=(0.0, float(IRIS)))
+        m.Part(dimensionality=THREE_D, name='CoreShield', type=DEFORMABLE_BODY)
+        p = m.parts['CoreShield']
+        p.BaseSolidExtrude(depth=Dep, pitch=float(pitch_core), sketch=sk)
+        p.Set(cells=p.cells[:], name='CoreShield')
+        p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
+            region=p.sets['CoreShield'], sectionName='CoreShield', thicknessAssignment=FROM_SECTION)
+        del m.sketches['__profile__']
 
-    for i in range(3):
-        ra.Instance(dependent=ON, name='Conductor-%d' % (i+1), part=m.parts['Conductor'])
-        ra.Instance(dependent=ON, name='Insulation-%d' % (i+1), part=m.parts['Insulation'])
-        ra.Instance(dependent=ON, name='CoreShield-%d' % (i+1), part=m.parts['CoreShield'])
-        ra.InstanceFromBooleanMerge(domain=GEOMETRY,
-            instances=(ra.instances['CoreShield-%d' % (i+1)],
-                       ra.instances['Insulation-%d' % (i+1)],
-                       ra.instances['Conductor-%d' % (i+1)]),
-            keepIntersections=ON, name='Core', originalInstances=SUPPRESS)
+        for i in range(3):
+            ra.Instance(dependent=ON, name='Conductor-%d' % (i+1), part=m.parts['Conductor'])
+            ra.Instance(dependent=ON, name='Insulation-%d' % (i+1), part=m.parts['Insulation'])
+            ra.Instance(dependent=ON, name='CoreShield-%d' % (i+1), part=m.parts['CoreShield'])
+            ra.InstanceFromBooleanMerge(domain=GEOMETRY,
+                instances=(ra.instances['CoreShield-%d' % (i+1)],
+                           ra.instances['Insulation-%d' % (i+1)],
+                           ra.instances['Conductor-%d' % (i+1)]),
+                keepIntersections=ON, name='Core', originalInstances=SUPPRESS)
 
-    p = m.parts['Core']
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#29 ]', ), ), number=axial_div)
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#40 ]', ), ), number=core_circ_div)
-    p.setMeshControls(algorithm=MEDIAL_AXIS,
-        regions=p.cells.getSequenceFromMask(('[#7 ]', ), ))
-    p.generateMesh(seedConstraintOverride=ON)
-    p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
-        secondOrderAccuracy=OFF, distortionControl=DEFAULT),
-        ElemType(elemCode=C3D6, elemLibrary=STANDARD),
-        ElemType(elemCode=C3D4, elemLibrary=STANDARD)),
-        regions=(p.cells.getSequenceFromMask(('[#7 ]', ), ), ))
+        p = m.parts['Core']
+        if CCDMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#29 ]', ), ), number=CCD)
+        elif CCDMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#29 ]', ), ), size=CCD)
+        if ZADMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#40 ]', ), ), number=ZAD)
+        elif ZADMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#40 ]', ), ), size=ZAD)
+        p.setMeshControls(algorithm=MEDIAL_AXIS,
+            regions=p.cells.getSequenceFromMask(('[#7 ]', ), ))
 
-    for i in range(3):
-        ra.rotate(angle=120 * i, axisDirection=(0.0, 0.0, 1.0),
-            axisPoint=(0.0, 0.0, 0.0), instanceList=('Core-%d' % (i+1),))
+        p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
+            secondOrderAccuracy=OFF, distortionControl=DEFAULT),
+            ElemType(elemCode=C3D6, elemLibrary=STANDARD),
+            ElemType(elemCode=C3D4, elemLibrary=STANDARD)),
+            regions=(p.cells[:], ))
+        p.generateMesh()
+        for i in range(3):
+            ra.rotate(angle=120 * i, axisDirection=(0.0, 0.0, 1.0),
+                axisPoint=(0.0, 0.0, 0.0), instanceList=('Core-%d' % (i+1),))
 
-    m.ConstrainedSketch(name='__profile__', sheetSize=235.0)
-    sk = m.sketches['__profile__']
-    sk.Spot(point=(0.0, 0.0))
-    sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(IRIS)))
-    sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(ORIS)))
-    m.Part(dimensionality=THREE_D, name='InnerSheath', type=DEFORMABLE_BODY)
-    p = m.parts['InnerSheath']
-    p.BaseSolidExtrude(depth=depth, sketch=sk)
-    p.Set(cells=p.cells[:], name='InnerSheath')
-    p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
-        region=p.sets['InnerSheath'], sectionName='InnerSheath', thicknessAssignment=FROM_SECTION)
-    del m.sketches['__profile__']
+        m.ConstrainedSketch(name='__profile__', sheetSize=200.0)
+        sk = m.sketches['__profile__']
+        sk.Spot(point=(0.0, 0.0))
+        sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(IRIS)))
+        sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(ORIS)))
+        m.Part(dimensionality=THREE_D, name='InnerSheath', type=DEFORMABLE_BODY)
+        p = m.parts['InnerSheath']
+        p.BaseSolidExtrude(depth=Dep, sketch=sk)
+        p.Set(cells=p.cells[:], name='InnerSheath')
+        p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
+            region=p.sets['InnerSheath'], sectionName='InnerSheath', thicknessAssignment=FROM_SECTION)
+        del m.sketches['__profile__']
 
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#5 ]', ), ), number=core_circ_div)
-    p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=YZPLANE)
-    p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=XZPLANE)
-    p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#1 ]', ), ),
-        datumPlane=p.datums[5])
-    p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#3 ]', ), ),
-        datumPlane=p.datums[4])
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#8001000 ]', ), ), number=axial_div)
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#2000000 ]', ), ), number=sheath_radial_div)
-    p.generateMesh()
+        datum_yz =p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=YZPLANE)
+        datum_xz = p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=XZPLANE)
+        p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#1 ]', ), ),
+            datumPlane=p.datums[datum_yz.id])
+        p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#3 ]', ), ),
+            datumPlane=p.datums[datum_xz.id])
+        if ZADMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#5 ]', ), ), number=ZAD)
+        elif ZADMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#5 ]', ), ), size=ZAD)
 
-    ra.Instance(dependent=ON, name='InnerSheath', part=m.parts['InnerSheath'])
+        if BSCDMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#10500800 ]', ), ), number=int(BSCD/4))
+        elif BSCDMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#10500800 ]', ), ), size=BSCD)
 
-    m.ConstrainedSketch(name='__profile__', sheetSize=235.0)
-    sk = m.sketches['__profile__']
-    sk.Spot(point=(0.0, 0.0))
-    sk.ArcByCenterEnds(center=(0.0, float(CoIA)),
-        direction=COUNTERCLOCKWISE,
-        point1=(0.0, float(IRB)),
-        point2=(0.0, float(ORIS)))
-    sk.ArcByCenterEnds(center=(0.0, float(CoIA)),
-        direction=CLOCKWISE,
-        point1=(0.0, float(IRB)),
-        point2=(0.0, float(ORIS)))
-    m.Part(dimensionality=THREE_D, name='InnerArmour', type=DEFORMABLE_BODY)
-    p = m.parts['InnerArmour']
-    p.BaseSolidExtrude(depth=depth, pitch=pitch_inner, sketch=sk)
-    p.Set(cells=p.cells[:], name='InnerArmour')
-    p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
-        region=p.sets['InnerArmour'], sectionName='InnerArmour', thicknessAssignment=FROM_SECTION)
-    del m.sketches['__profile__']
 
-    p.Set(edges=p.edges.getSequenceFromMask(('[#8 ]', ), ), name='IAL')
-    p.Set(edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), name='IAO')
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#11 ]', ), ), number=armour_circ_div)
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), number=axial_div)
-    p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
-        secondOrderAccuracy=OFF, distortionControl=DEFAULT),
-        ElemType(elemCode=C3D6, elemLibrary=STANDARD),
-        ElemType(elemCode=C3D4, elemLibrary=STANDARD)),
-        regions=(p.cells.getSequenceFromMask(('[#1 ]', ), ), ))
-    p.setMeshControls(algorithm=MEDIAL_AXIS,
-        regions=p.cells.getSequenceFromMask(('[#1 ]', ), ))
-    p.generateMesh()
 
-    for i in range(int(NoIA)):
-        ra.Instance(dependent=ON, name='InnerArmour-%d' % (i+1), part=m.parts['InnerArmour'])
-        ra.rotate(angle=float(RAoIA) * i, axisDirection=(0.0, 0.0, 1.0),
-            axisPoint=(0.0, 0.0, 0.0), instanceList=('InnerArmour-%d' % (i+1),))
 
-    m.ConstrainedSketch(name='__profile__', sheetSize=235.0)
-    sk = m.sketches['__profile__']
-    sk.Spot(point=(0.0, 0.0))
-    sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(IRB)))
-    sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(ORB)))
-    m.Part(dimensionality=THREE_D, name='Bedding', type=DEFORMABLE_BODY)
-    p = m.parts['Bedding']
-    p.BaseSolidExtrude(depth=depth, sketch=sk)
-    p.Set(cells=p.cells[:], name='Bedding')
-    p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
-        region=p.sets['Bedding'], sectionName='Bedding', thicknessAssignment=FROM_SECTION)
-    del m.sketches['__profile__']
 
-    p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=YZPLANE)
-    p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=XZPLANE)
-    p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#1 ]', ), ),
-        datumPlane=p.datums[4])
-    p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#3 ]', ), ),
-        datumPlane=p.datums[3])
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#5 ]', ), ), number=core_circ_div)
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#a1a02500 ]', ), ), number=axial_div)
-    p.generateMesh()
-    p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
-        secondOrderAccuracy=OFF, distortionControl=DEFAULT),
-        ElemType(elemCode=C3D6, elemLibrary=STANDARD),
-        ElemType(elemCode=C3D4, elemLibrary=STANDARD)),
-        regions=(p.cells.getSequenceFromMask(('[#f ]', ), ), ))
 
-    ra.Instance(dependent=ON, name='Bedding', part=m.parts['Bedding'])
+        if BSRDMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#2000000 ]', ), ), number=BSRD)
+        elif BSRDMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#2000000 ]', ), ), size=BSRD)
 
-    m.ConstrainedSketch(name='__profile__', sheetSize=235.0)
-    sk = m.sketches['__profile__']
-    sk.Spot(point=(0.0, 0.0))
-    sk.ArcByCenterEnds(center=(0.0, float(CoOA)),
-        direction=COUNTERCLOCKWISE,
-        point1=(0.0, float(IROS)),
-        point2=(0.0, float(ORB)))
-    sk.ArcByCenterEnds(center=(0.0, float(CoOA)),
-        direction=CLOCKWISE,
-        point1=(0.0, float(IROS)),
-        point2=(0.0, float(ORB)))
-    m.Part(dimensionality=THREE_D, name='OuterArmour', type=DEFORMABLE_BODY)
-    p = m.parts['OuterArmour']
-    p.BaseSolidExtrude(depth=depth, pitch=pitch_outer, sketch=sk)
-    p.Set(cells=p.cells[:], name='OuterArmour')
-    p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
-        region=p.sets['OuterArmour'], sectionName='OuterArmour', thicknessAssignment=FROM_SECTION)
-    del m.sketches['__profile__']
+        p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
+            secondOrderAccuracy=OFF, distortionControl=DEFAULT),
+            ElemType(elemCode=C3D6, elemLibrary=STANDARD),
+            ElemType(elemCode=C3D4, elemLibrary=STANDARD)),
+            regions=(p.cells[:], ))
+        p.generateMesh()
 
-    p.Set(edges=p.edges.getSequenceFromMask(('[#8 ]', ), ), name='OAL')
-    p.Set(edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), name='OAO')
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#11 ]', ), ), number=armour_circ_div)
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), number=axial_div)
-    p.setMeshControls(algorithm=MEDIAL_AXIS,
-        regions=p.cells.getSequenceFromMask(('[#1 ]', ), ))
-    p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
-        secondOrderAccuracy=OFF, distortionControl=DEFAULT),
-        ElemType(elemCode=C3D6, elemLibrary=STANDARD),
-        ElemType(elemCode=C3D4, elemLibrary=STANDARD)),
-        regions=(p.cells.getSequenceFromMask(('[#1 ]', ), ), ))
-    p.generateMesh()
+        ra.Instance(dependent=ON, name='InnerSheath', part=m.parts['InnerSheath'])
 
-    for i in range(int(NoOA)):
-        ra.Instance(dependent=ON, name='OuterArmour-%d' % (i+1), part=m.parts['OuterArmour'])
-        ra.rotate(angle=float(RAoOA) * i, axisDirection=(0.0, 0.0, 1.0),
-            axisPoint=(0.0, 0.0, 0.0), instanceList=('OuterArmour-%d' % (i+1),))
+        m.ConstrainedSketch(name='__profile__', sheetSize=200.0)
+        sk = m.sketches['__profile__']
+        sk.Spot(point=(0.0, 0.0))
+        sk.ArcByCenterEnds(center=(0.0, float(CoIA)),
+            direction=COUNTERCLOCKWISE,
+            point1=(0.0, float(IRB)),
+            point2=(0.0, float(ORIS)))
+        sk.ArcByCenterEnds(center=(0.0, float(CoIA)),
+            direction=CLOCKWISE,
+            point1=(0.0, float(IRB)),
+            point2=(0.0, float(ORIS)))
+        m.Part(dimensionality=THREE_D, name='InnerArmour', type=DEFORMABLE_BODY)
+        p = m.parts['InnerArmour']
+        p.BaseSolidExtrude(depth=Dep, pitch=float(pitch_inner), sketch=sk)
+        p.Set(cells=p.cells[:], name='InnerArmour')
+        p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
+            region=p.sets['InnerArmour'], sectionName='InnerArmour', thicknessAssignment=FROM_SECTION)
+        del m.sketches['__profile__']
 
-    m.ConstrainedSketch(name='__profile__', sheetSize=235.0)
-    sk = m.sketches['__profile__']
-    sk.Spot(point=(0.0, 0.0))
-    sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(IROS)))
-    sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(OROS)))
-    m.Part(dimensionality=THREE_D, name='OuterSheath', type=DEFORMABLE_BODY)
-    p = m.parts['OuterSheath']
-    p.BaseSolidExtrude(depth=depth, pitch=0, sketch=sk)
-    p.Set(cells=p.cells[:], name='OuterSheath')
-    p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
-        region=p.sets['OuterSheath'], sectionName='OuterSheath', thicknessAssignment=FROM_SECTION)
-    del m.sketches['__profile__']
 
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#5 ]', ), ), number=core_circ_div)
-    p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=YZPLANE)
-    p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=XZPLANE)
-    p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#1 ]', ), ),
-        datumPlane=p.datums[4])
-    p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#3 ]', ), ),
-        datumPlane=p.datums[5])
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#4008000 ]', ), ), number=axial_div)
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#80000 ]', ), ), number=sheath_radial_div)
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#50554800 ]', ), ), number=axial_div)
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#a1a02500 ]', ), ), number=axial_div)
-    p.generateMesh()
+        p.Set(edges=mdb.models['Model-1'].parts['InnerArmour'].edges.getSequenceFromMask((
+            '[#8 ]', ), ), name='IAL')
+        p.Set(edges=mdb.models['Model-1'].parts['InnerArmour'].edges.getSequenceFromMask((
+            '[#2 ]', ), ), name='IAO')
 
-    ra.Instance(dependent=ON, name='OuterSheath', part=m.parts['OuterSheath'])
+        if ACDMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#11 ]', ), ), number=ACD)
+        elif ACDMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#11 ]', ), ), size=ACD)
 
-    m.ConstrainedSketch(name='__profile__', sheetSize=235.0)
-    sk = m.sketches['__profile__']
-    sk.Spot(point=(0.0, 0.0))
 
-    sk.Line(point1=(-1.29772369663124 * float(scale), -15.0 * float(scale)),
-        point2=(1.29772369679995 * float(scale), -15.0 * float(scale)))
-    sk.Line(point1=(-15.0 * float(scale), -29.3567337128366 * float(scale)),
-        point2=(-15.0 * float(scale), -24.1305185109377 * float(scale)))
-    sk.Line(point1=(15.0 * float(scale), -29.3567337128366 * float(scale)),
-        point2=(15.0 * float(scale), -24.1305185109377 * float(scale)))
-    sk.ArcByCenterEnds(center=(-15.3000015266274 * float(scale), -8.83346 * float(scale)),
-        direction=COUNTERCLOCKWISE,
-        point1=(-15.0 * float(scale), -24.1305185109377 * float(scale)),
-        point2=(-1.29772369663124 * float(scale), -15.0 * float(scale)))
-    sk.ArcByCenterEnds(center=(15.3000015266274 * float(scale), -8.83346 * float(scale)),
-        direction=CLOCKWISE,
-        point1=(15.0 * float(scale), -24.1305185109377 * float(scale)),
-        point2=(1.29772369679995 * float(scale), -15.0 * float(scale)))
-    sk.ArcByCenterEnds(center=(0.0, 0.0),
-        direction=COUNTERCLOCKWISE,
-        point1=(-15.0 * float(scale), -29.3567337128366 * float(scale)),
-        point2=(15.0 * float(scale), -29.3567337128366 * float(scale)))
 
-    m.Part(dimensionality=THREE_D, name='Filler', type=DEFORMABLE_BODY)
-    p = m.parts['Filler']
-    p.BaseSolidExtrude(depth=depth, pitch=pitch_core, sketch=sk)
-    p.Set(cells=p.cells[:], name='Filler')
-    p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
-        region=p.sets['Filler'], sectionName='Filler', thicknessAssignment=FROM_SECTION)
-    del m.sketches['__profile__']
+        if ACDMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), number=ZAD)
+        elif ACDMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), size=ZAD)
 
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#100 ]', ), ), number=axial_div)
-    p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#92491 ]', ), ), number=axial_div)
-    p.generateMesh(seedConstraintOverride=ON)
-    for i in range(3):
-        ra.Instance(dependent=ON, name='Filler-%d' % (i+1), part=m.parts['Filler'])
-        ra.rotate(angle=120 * i, axisDirection=(0.0, 0.0, 1.0),
-            axisPoint=(0.0, 0.0, 0.0), instanceList=('Filler-%d' % (i+1),))
-    ra.regenerate()
-    ra.regenerate()
+        p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
+            secondOrderAccuracy=OFF, distortionControl=DEFAULT),
+            ElemType(elemCode=C3D6, elemLibrary=STANDARD),
+            ElemType(elemCode=C3D4, elemLibrary=STANDARD)),
+            regions=(p.cells[:], ))
+        p.generateMesh()
 
-    all_instances = ['Core-1', 'Core-2', 'Core-3', 'InnerSheath', 'Bedding', 'OuterSheath']
-    for i in range(int(NoIA)):
-        all_instances.append('InnerArmour-%d' % (i+1))
-    for i in range(int(NoOA)):
-        all_instances.append('OuterArmour-%d' % (i+1))
-    for i in range(3):
-        all_instances.append('Filler-%d' % (i+1))
 
-    m.parts['Bedding'].Surface(name='BeddingO', side1Faces=m.parts['Bedding'].faces.getSequenceFromMask(('[#12088 ]', ), ))
-    m.parts['Bedding'].Surface(name='BeddingI', side1Faces=m.parts['Bedding'].faces.getSequenceFromMask(('[#28110 ]', ), ))
-    m.parts['Core'].Surface(name='CO', side1Faces=m.parts['Core'].faces.getSequenceFromMask(('[#20 ]', ), ))
-    m.parts['Filler'].Surface(name='FO', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#8 ]', ), ))
-    m.parts['Filler'].Surface(name='FL', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#20 ]', ), ))
-    m.parts['Filler'].Surface(name='FR', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#2 ]', ), ))
-    m.parts['InnerArmour'].Surface(name='IAS', side1Faces=m.parts['InnerArmour'].faces.getSequenceFromMask(('[#1 ]', ), ))
-    m.parts['InnerSheath'].Surface(name='ISO', side1Faces=m.parts['InnerSheath'].faces.getSequenceFromMask(('[#12088 ]', ), ))
-    m.parts['InnerSheath'].Surface(name='IAI', side1Faces=m.parts['InnerSheath'].faces.getSequenceFromMask(('[#28110 ]', ), ))
-    m.parts['OuterArmour'].Surface(name='OAS', side1Faces=m.parts['OuterArmour'].faces.getSequenceFromMask(('[#1 ]', ), ))
-    m.parts['OuterSheath'].Surface(name='OSI', side1Faces=m.parts['OuterSheath'].faces.getSequenceFromMask(('[#28110 ]', ), ))
-    ra.regenerate()
 
-    m.ContactProperty('IntProp-1')
-    m.interactionProperties['IntProp-1'].TangentialBehavior(
-        dependencies=0, directionality=ISOTROPIC, elasticSlipStiffness=None,
-        formulation=PENALTY, fraction=contact_beta, maximumElasticSlip=FRACTION,
-        pressureDependency=OFF, shearStressLimit=None, slipRateDependency=OFF,
-        table=((friction, ), ), temperatureDependency=OFF)
-    m.interactionProperties['IntProp-1'].NormalBehavior(
-        allowSeparation=ON, clearanceAtZeroContactPressure=0.0,
-        constraintEnforcementMethod=PENALTY, contactStiffness=DEFAULT,
-        contactStiffnessScaleFactor=contact_stiffness_scale, lowerQuadraticRatio=0.33333,
-        pressureOverclosure=HARD, stiffnessBehavior=NONLINEAR, stiffnessRatio=0.01,
-        upperQuadraticFactor=0.03)
-    ra.regenerate()
+        for i in range(NoIA):
+            ra.Instance(dependent=ON, name='InnerArmour-%d' % (i+1), part=m.parts['InnerArmour'])
+            ra.rotate(angle=float(RAoIA) * i, axisDirection=(0.0, 0.0, 1.0),
+                axisPoint=(0.0, 0.0, 0.0), instanceList=('InnerArmour-%d' % (i+1),))
 
-    armour_contact_pair_status = 'included'
-    contact_pair_status = 'included'
-    if simple_bending_smoke:
-        contact_pair_status = 'skipped_reduced_smoke'
-    else:
-        for i in range(1, int(NoIA) + 1):
-            m.SurfaceToSurfaceContactStd(name='InnerSheath-InnerArmour-%d' % i,
-                createStepName='Initial', master=ra.instances['InnerSheath'].surfaces['ISO'],
+        m.ConstrainedSketch(name='__profile__', sheetSize=200.0)
+        sk = m.sketches['__profile__']
+        sk.Spot(point=(0.0, 0.0))
+        sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(IRB)))
+        sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(ORB)))
+        m.Part(dimensionality=THREE_D, name='Bedding', type=DEFORMABLE_BODY)
+        p = m.parts['Bedding']
+        p.BaseSolidExtrude(depth=Dep, sketch=sk)
+        p.Set(cells=p.cells[:], name='Bedding')
+        p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
+            region=p.sets['Bedding'], sectionName='Bedding', thicknessAssignment=FROM_SECTION)
+        del m.sketches['__profile__']
+
+        datum_yz =p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=YZPLANE)
+        datum_xz = p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=XZPLANE)
+        p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#1 ]', ), ),
+            datumPlane=p.datums[datum_yz.id])
+        p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#3 ]', ), ),
+            datumPlane=p.datums[datum_xz.id])
+        if ZADMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#5 ]', ), ), number=ZAD)
+        elif ZADMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#5 ]', ), ), size=ZAD)
+        if BSCDMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#10500800 ]', ), ), number=int(BSCD/4))
+        elif BSCDMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#10500800 ]', ), ), size=BSCD)
+
+        p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
+            secondOrderAccuracy=OFF, distortionControl=DEFAULT),
+            ElemType(elemCode=C3D6, elemLibrary=STANDARD),
+            ElemType(elemCode=C3D4, elemLibrary=STANDARD)),
+            regions=(p.cells[:], ))
+        p.generateMesh()
+
+
+        ra.Instance(dependent=ON, name='Bedding', part=m.parts['Bedding'])
+
+        m.ConstrainedSketch(name='__profile__', sheetSize=200.0)
+        sk = m.sketches['__profile__']
+        sk.Spot(point=(0.0, 0.0))
+        sk.ArcByCenterEnds(center=(0.0, float(CoOA)),
+            direction=COUNTERCLOCKWISE,
+            point1=(0.0, float(IROS)),
+            point2=(0.0, float(ORB)))
+        sk.ArcByCenterEnds(center=(0.0, float(CoOA)),
+            direction=CLOCKWISE,
+            point1=(0.0, float(IROS)),
+            point2=(0.0, float(ORB)))
+        m.Part(dimensionality=THREE_D, name='OuterArmour', type=DEFORMABLE_BODY)
+        p = m.parts['OuterArmour']
+        p.BaseSolidExtrude(depth=Dep, pitch=float(pitch_outer), sketch=sk)
+        p.Set(cells=p.cells[:], name='OuterArmour')
+        p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
+            region=p.sets['OuterArmour'], sectionName='OuterArmour', thicknessAssignment=FROM_SECTION)
+        del m.sketches['__profile__']
+
+        p.Set(edges=p.edges.getSequenceFromMask(('[#8 ]', ), ), name='OAL')
+        p.Set(edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), name='OAO')
+
+        if ACDMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#11 ]', ), ), number=ACD)
+        elif ACDMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#11 ]', ), ), size=ACD)
+        if ZADMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), number=ZAD)
+        elif ZADMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), size=ZAD)
+
+        p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
+            secondOrderAccuracy=OFF, distortionControl=DEFAULT),
+            ElemType(elemCode=C3D6, elemLibrary=STANDARD),
+            ElemType(elemCode=C3D4, elemLibrary=STANDARD)),
+            regions=(p.cells[:], ))
+        p.generateMesh()
+
+        for i in range(NoOA):
+            ra.Instance(dependent=ON, name='OuterArmour-%d' % (i+1), part=m.parts['OuterArmour'])
+            ra.rotate(angle=float(RAoOA) * i, axisDirection=(0.0, 0.0, 1.0),
+                axisPoint=(0.0, 0.0, 0.0), instanceList=('OuterArmour-%d' % (i+1),))
+
+        m.ConstrainedSketch(name='__profile__', sheetSize=200.0)
+        sk = m.sketches['__profile__']
+        sk.Spot(point=(0.0, 0.0))
+        sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(IROS)))
+        sk.CircleByCenterPerimeter(center=(0.0, 0.0), point1=(0.0, float(OROS)))
+        m.Part(dimensionality=THREE_D, name='OuterSheath', type=DEFORMABLE_BODY)
+        p = m.parts['OuterSheath']
+        p.BaseSolidExtrude(depth=Dep, pitch=0, sketch=sk)
+        p.Set(cells=p.cells[:], name='OuterSheath')
+        p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
+            region=p.sets['OuterSheath'], sectionName='OuterSheath', thicknessAssignment=FROM_SECTION)
+        del m.sketches['__profile__']
+
+        datum_yz =p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=YZPLANE)
+        datum_xz = p.DatumPlaneByPrincipalPlane(offset=0.0, principalPlane=XZPLANE)
+        p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#1 ]', ), ),
+            datumPlane=p.datums[datum_yz.id])
+        p.PartitionCellByDatumPlane(cells=p.cells.getSequenceFromMask(('[#3 ]', ), ),
+            datumPlane=p.datums[datum_xz.id])
+
+        if ZADMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#5 ]', ), ), number=ZAD)
+        elif ZADMeshType == 1:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#5 ]', ), ), size=ZAD)
+
+        if BSCDMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#10500800 ]', ), ), number=int(BSCD/4))
+        elif BSCDMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#10500800 ]', ), ), size=BSCD)
+
+        if BSRDMeshType == 1:    
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#80000 ]', ), ), number=BSRD)
+        elif BSRDMeshType == 2: 
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#80000 ]', ), ), size=BSRD)
+
+        p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
+            secondOrderAccuracy=OFF, distortionControl=DEFAULT),
+            ElemType(elemCode=C3D6, elemLibrary=STANDARD),
+            ElemType(elemCode=C3D4, elemLibrary=STANDARD)),
+            regions=(p.cells[:], ))
+        p.generateMesh()
+
+        ra.Instance(dependent=ON, name='OuterSheath', part=m.parts['OuterSheath'])
+
+        m.ConstrainedSketch(name='__profile__', sheetSize=200.0)
+        sk = m.sketches['__profile__']
+        sk.Spot(point=(0.0, 0.0))
+
+        sk.Line(point1=(-1.29772369663124 * float(scale), -15.0 * float(scale)),
+            point2=(1.29772369679995 * float(scale), -15.0 * float(scale)))
+        sk.Line(point1=(-15.0 * float(scale), -29.3567337128366 * float(scale)),
+            point2=(-15.0 * float(scale), -24.1305185109377 * float(scale)))
+        sk.Line(point1=(15.0 * float(scale), -29.3567337128366 * float(scale)),
+            point2=(15.0 * float(scale), -24.1305185109377 * float(scale)))
+        sk.ArcByCenterEnds(center=(-15.3000015266274 * float(scale), -8.83346 * float(scale)),
+            direction=COUNTERCLOCKWISE,
+            point1=(-15.0 * float(scale), -24.1305185109377 * float(scale)),
+            point2=(-1.29772369663124 * float(scale), -15.0 * float(scale)))
+        sk.ArcByCenterEnds(center=(15.3000015266274 * float(scale), -8.83346 * float(scale)),
+            direction=CLOCKWISE,
+            point1=(15.0 * float(scale), -24.1305185109377 * float(scale)),
+            point2=(1.29772369679995 * float(scale), -15.0 * float(scale)))
+        sk.ArcByCenterEnds(center=(0.0, 0.0),
+            direction=COUNTERCLOCKWISE,
+            point1=(-15.0 * float(scale), -29.3567337128366 * float(scale)),
+            point2=(15.0 * float(scale), -29.3567337128366 * float(scale)))
+
+        m.Part(dimensionality=THREE_D, name='Filler', type=DEFORMABLE_BODY)
+        p = m.parts['Filler']
+        p.BaseSolidExtrude(depth=Dep, pitch=float(pitch_core), sketch=sk)
+        p.Set(cells=p.cells[:], name='Filler')
+        p.SectionAssignment(offset=0.0, offsetField='', offsetType=MIDDLE_SURFACE,
+            region=p.sets['Filler'], sectionName='Filler', thicknessAssignment=FROM_SECTION)
+        del m.sketches['__profile__']
+
+        if FDMeshType == 1:
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#5 ]', ), ), number=FD1)
+
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#a280 ]', ), ), number=FD2)
+
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#30050 ]', ), ), number=FD3)
+
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#1400 ]', ), ), number=FD4)
+
+            p.seedEdgeByNumber(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#492a ]', ), ), number=ZAD)
+
+        elif FDMeshType == 2:
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#5 ]', ), ), size=FD1)
+
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#a280 ]', ), ), size=FD2)
+
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#30050 ]', ), ), size=FD3)
+
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#1400 ]', ), ), size=FD4)
+
+            p.seedEdgeBySize(constraint=FINER,
+                edges=p.edges.getSequenceFromMask(('[#492a ]', ), ), size=ZAD)
+
+        p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
+            secondOrderAccuracy=OFF, distortionControl=DEFAULT),
+            ElemType(elemCode=C3D6, elemLibrary=STANDARD),
+            ElemType(elemCode=C3D4, elemLibrary=STANDARD)),
+            regions=(p.cells[:], ))
+        p.generateMesh()
+
+        for i in range(3):
+            ra.Instance(dependent=ON, name='Filler-%d' % (i+1), part=m.parts['Filler'])
+            ra.rotate(angle=120 * i, axisDirection=(0.0, 0.0, 1.0),
+                axisPoint=(0.0, 0.0, 0.0), instanceList=('Filler-%d' % (i+1),))
+
+        ra.regenerate()
+
+        all_instances = ['Core-1', 'Core-2', 'Core-3', 'InnerSheath', 'Bedding', 'OuterSheath']
+        for i in range(NoIA):
+            all_instances.append('InnerArmour-%d' % (i+1))
+        for i in range(NoOA):
+            all_instances.append('OuterArmour-%d' % (i+1))
+        for i in range(3):
+            all_instances.append('Filler-%d' % (i+1))
+
+
+        m.parts['Bedding'].Surface(name='BeddingO', side1Faces=m.parts['Bedding'].faces.getSequenceFromMask(('[#12088 ]', ), ))
+        m.parts['Bedding'].Surface(name='BeddingI', side1Faces=m.parts['Bedding'].faces.getSequenceFromMask(('[#28110 ]', ), ))
+        m.parts['Core'].Surface(name='CO', side1Faces=m.parts['Core'].faces.getSequenceFromMask(('[#20 ]', ), ))
+        m.parts['Filler'].Surface(name='FO', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#8 ]', ), ))
+        m.parts['Filler'].Surface(name='FL', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#20 ]', ), ))
+        m.parts['Filler'].Surface(name='FR', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#2 ]', ), ))
+        m.parts['InnerArmour'].Surface(name='IAS', side1Faces=m.parts['InnerArmour'].faces.getSequenceFromMask(('[#1 ]', ), ))
+        m.parts['InnerSheath'].Surface(name='ISO', side1Faces=m.parts['InnerSheath'].faces.getSequenceFromMask(('[#12088 ]', ), ))
+        m.parts['InnerSheath'].Surface(name='IAI', side1Faces=m.parts['InnerSheath'].faces.getSequenceFromMask(('[#28110 ]', ), ))
+        m.parts['OuterArmour'].Surface(name='OAS', side1Faces=m.parts['OuterArmour'].faces.getSequenceFromMask(('[#1 ]', ), ))
+        m.parts['OuterSheath'].Surface(name='OSI', side1Faces=m.parts['OuterSheath'].faces.getSequenceFromMask(('[#28110 ]', ), ))
+        ra.regenerate()
+
+        m.ContactProperty('IntProp-1')
+        m.interactionProperties['IntProp-1'].TangentialBehavior(
+            dependencies=0, directionality=ISOTROPIC, elasticSlipStiffness=None,
+            formulation=PENALTY, fraction=0.001, maximumElasticSlip=FRACTION,
+            pressureDependency=OFF, shearStressLimit=None, slipRateDependency=OFF,
+            table=((FrCo, ), ), temperatureDependency=OFF)
+
+
+
+
+        m.interactionProperties['IntProp-1'].NormalBehavior(
+            allowSeparation=ON, clearanceAtZeroContactPressure=0.0,
+            constraintEnforcementMethod=PENALTY, contactStiffness=DEFAULT,
+            contactStiffnessScaleFactor=conStiff, lowerQuadraticRatio=0.33333,
+            pressureOverclosure=HARD, stiffnessBehavior=NONLINEAR, stiffnessRatio=0.01,
+            upperQuadraticFactor=0.03)
+        ra.regenerate()
+        # --------------------------------------------------
+        # Surface-to-edge contact interactions
+        # Original-style contact definition
+        # --------------------------------------------------
+
+        # Inner Armour contacts
+        for i in range(1, int(NoIA)+1):
+
+            m.SurfaceToSurfaceContactStd(
+                name='InnerSheath-InnerArmour-%d' % i,
+                createStepName='Initial',
+                master=ra.instances['InnerSheath'].surfaces['ISO'],
                 slave=ra.instances['InnerArmour-%d' % i].sets['IAL'],
-                interactionProperty='IntProp-1', sliding=SMALL,
-                enforcement=NODE_TO_SURFACE, adjustMethod=OVERCLOSED,
-                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
-                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
-            m.SurfaceToSurfaceContactStd(name='Bedding-InnerArmour-%d' % i,
-                createStepName='Initial', master=ra.instances['Bedding'].surfaces['BeddingI'],
+                interactionProperty='IntProp-1',
+                sliding=SMALL,
+                enforcement=NODE_TO_SURFACE,
+                adjustMethod=OVERCLOSED,
+                initialClearance=OMIT,
+                clearanceRegion=None,
+                datumAxis=None,
+                smooth=0.2,
+                surfaceSmoothing=NONE,
+                thickness=ON,
+                tied=OFF
+            )
+
+            m.SurfaceToSurfaceContactStd(
+                name='Bedding-InnerArmour-%d' % i,
+                createStepName='Initial',
+                master=ra.instances['Bedding'].surfaces['BeddingI'],
                 slave=ra.instances['InnerArmour-%d' % i].sets['IAO'],
-                interactionProperty='IntProp-1', sliding=SMALL,
-                enforcement=NODE_TO_SURFACE, adjustMethod=OVERCLOSED,
-                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
-                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
+                interactionProperty='IntProp-1',
+                sliding=SMALL,
+                enforcement=NODE_TO_SURFACE,
+                adjustMethod=OVERCLOSED,
+                initialClearance=OMIT,
+                clearanceRegion=None,
+                datumAxis=None,
+                smooth=0.2,
+                surfaceSmoothing=NONE,
+                thickness=ON,
+                tied=OFF
+            )
 
-        for i in range(1, int(NoOA) + 1):
-            m.SurfaceToSurfaceContactStd(name='Bedding-OuterArmour-%d' % i,
-                createStepName='Initial', master=ra.instances['Bedding'].surfaces['BeddingO'],
+
+        # Outer Armour contacts
+        for i in range(1, int(NoOA)+1):
+
+            m.SurfaceToSurfaceContactStd(
+                name='Bedding-OuterArmour-%d' % i,
+                createStepName='Initial',
+                master=ra.instances['Bedding'].surfaces['BeddingO'],
                 slave=ra.instances['OuterArmour-%d' % i].sets['OAL'],
-                interactionProperty='IntProp-1', sliding=SMALL,
-                enforcement=NODE_TO_SURFACE, adjustMethod=OVERCLOSED,
-                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
-                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
-            m.SurfaceToSurfaceContactStd(name='OuterSheath-OuterArmour-%d' % i,
-                createStepName='Initial', master=ra.instances['OuterSheath'].surfaces['OSI'],
-                slave=ra.instances['OuterArmour-%d' % i].sets['OAO'],
-                interactionProperty='IntProp-1', sliding=SMALL,
-                enforcement=NODE_TO_SURFACE, adjustMethod=OVERCLOSED,
-                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
-                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
+                interactionProperty='IntProp-1',
+                sliding=SMALL,
+                enforcement=NODE_TO_SURFACE,
+                adjustMethod=OVERCLOSED,
+                initialClearance=OMIT,
+                clearanceRegion=None,
+                datumAxis=None,
+                smooth=0.2,
+                surfaceSmoothing=NONE,
+                thickness=ON,
+                tied=OFF
+            )
 
+            m.SurfaceToSurfaceContactStd(
+                name='OuterSheath-OuterArmour-%d' % i,
+                createStepName='Initial',
+                master=ra.instances['OuterSheath'].surfaces['OSI'],
+                slave=ra.instances['OuterArmour-%d' % i].sets['OAO'],
+                interactionProperty='IntProp-1',
+                sliding=SMALL,
+                enforcement=NODE_TO_SURFACE,
+                adjustMethod=OVERCLOSED,
+                initialClearance=OMIT,
+                clearanceRegion=None,
+                datumAxis=None,
+                smooth=0.2,
+                surfaceSmoothing=NONE,
+                thickness=ON,
+                tied=OFF
+            )
+        # --------------------------------------------------
+        # Core / Filler to InnerSheath contact interactions
+        # Surface-to-surface contact definition
+        # --------------------------------------------------
+
+        # Core outer surface to InnerSheath inner surface
         for i in range(1, 4):
-            m.SurfaceToSurfaceContactStd(name='InnerSheath-Core-%d' % i,
-                createStepName='Initial', master=ra.instances['InnerSheath'].surfaces['IAI'],
+
+            m.SurfaceToSurfaceContactStd(
+                name='InnerSheath-Core-%d' % i,
+                createStepName='Initial',
+                master=ra.instances['InnerSheath'].surfaces['IAI'],
                 slave=ra.instances['Core-%d' % i].surfaces['CO'],
-                interactionProperty='IntProp-1', sliding=SMALL,
-                enforcement=SURFACE_TO_SURFACE, adjustMethod=OVERCLOSED,
-                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
-                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
-            m.SurfaceToSurfaceContactStd(name='InnerSheath-FillerOuter-%d' % i,
-                createStepName='Initial', master=ra.instances['InnerSheath'].surfaces['IAI'],
+                interactionProperty='IntProp-1',
+                sliding=SMALL,
+                enforcement=SURFACE_TO_SURFACE,
+                adjustMethod=OVERCLOSED,
+                initialClearance=OMIT,
+                clearanceRegion=None,
+                datumAxis=None,
+                smooth=0.2,
+                surfaceSmoothing=NONE,
+                thickness=ON,
+                tied=OFF
+            )
+
+
+        # Filler outer curved surface to InnerSheath inner surface
+        for i in range(1, 4):
+
+            m.SurfaceToSurfaceContactStd(
+                name='InnerSheath-FillerOuter-%d' % i,
+                createStepName='Initial',
+                master=ra.instances['InnerSheath'].surfaces['IAI'],
                 slave=ra.instances['Filler-%d' % i].surfaces['FO'],
-                interactionProperty='IntProp-1', sliding=SMALL,
-                enforcement=SURFACE_TO_SURFACE, adjustMethod=OVERCLOSED,
-                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
-                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
+                interactionProperty='IntProp-1',
+                sliding=SMALL,
+                enforcement=SURFACE_TO_SURFACE,
+                adjustMethod=OVERCLOSED,
+                initialClearance=OMIT,
+                clearanceRegion=None,
+                datumAxis=None,
+                smooth=0.2,
+                surfaceSmoothing=NONE,
+                thickness=ON,
+                tied=OFF
+            )
+
+        # --------------------------------------------------
+        # Core to Filler side contact interactions
+        # Surface-to-surface contact definition
+        # --------------------------------------------------
 
         core_filler_pairs = (
-            (1, 'FL', 2), (1, 'FR', 3),
-            (2, 'FL', 3), (2, 'FR', 1),
-            (3, 'FL', 1), (3, 'FR', 2),
+            (1, 'FL', 2),
+            (1, 'FR', 3),
+            (2, 'FL', 3),
+            (2, 'FR', 1),
+            (3, 'FL', 1),
+            (3, 'FR', 2),
         )
+
         for filler_id, filler_side, core_id in core_filler_pairs:
+
             m.SurfaceToSurfaceContactStd(
                 name='Core-%d-Filler-%d-%s' % (core_id, filler_id, filler_side),
-                createStepName='Initial', master=ra.instances['Core-%d' % core_id].surfaces['CO'],
+                createStepName='Initial',
+                master=ra.instances['Core-%d' % core_id].surfaces['CO'],
                 slave=ra.instances['Filler-%d' % filler_id].surfaces[filler_side],
-                interactionProperty='IntProp-1', sliding=SMALL,
-                enforcement=SURFACE_TO_SURFACE, adjustMethod=OVERCLOSED,
-                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
-                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
+                interactionProperty='IntProp-1',
+                sliding=SMALL,
+                enforcement=SURFACE_TO_SURFACE,
+                adjustMethod=OVERCLOSED,
+                initialClearance=OMIT,
+                clearanceRegion=None,
+                datumAxis=None,
+                smooth=0.2,
+                surfaceSmoothing=NONE,
+                thickness=ON,
+                tied=OFF
+            )
+        # --------------------------------------------------
+        # Core to Core self-contact
+        # Core-1, Core-2, Core-3 outer surfaces are combined
+        # into one assembly-level surface.
+        # --------------------------------------------------
 
         core_self_faces = None
+
         for i in range(1, 4):
             faces_i = ra.instances['Core-%d' % i].surfaces['CO'].faces
             core_self_faces = faces_i if core_self_faces is None else core_self_faces + faces_i
-        if core_self_faces is not None:
-            ra.Surface(name='CoreSelfSurf', side1Faces=core_self_faces)
-            m.SelfContactStd(name='Core-SelfContact', createStepName='Initial',
-                surface=ra.surfaces['CoreSelfSurf'], interactionProperty='IntProp-1',
-                thickness=ON)
+
+        ra.Surface(
+            name='CoreSelfSurf',
+            side1Faces=core_self_faces
+        )
+
+        m.SelfContactStd(
+            name='Core-SelfContact',
+            createStepName='Initial',
+            surface=ra.surfaces['CoreSelfSurf'],
+            interactionProperty='IntProp-1',
+            thickness=ON
+        )
+
         ra.regenerate()
 
-    front_seq = None
-    back_seq = None
-    for inst_name in all_instances:
-        inst = ra.instances[inst_name]
-        for f in inst.faces:
-            pt = f.pointOn[0]
-            if abs(pt[2] - 0.0) < 1e-3:
-                single = inst.faces.findAt((pt, ))
-                front_seq = single if front_seq is None else front_seq + single
-            elif abs(pt[2] - depth) < 1e-3:
-                single = inst.faces.findAt((pt, ))
-                back_seq = single if back_seq is None else back_seq + single
-
-    ra.ReferencePoint(point=(0.0, 0.0, 0.0))
-    rp2_key = latest_reference_point_key(ra)
-    ra.ReferencePoint(point=(0.0, 0.0, depth))
-    rp1_key = latest_reference_point_key(ra)
-    ra.ReferencePoint(point=(float(OROS) + 30.0, 0.0, 0.0))
-    rp3_key = latest_reference_point_key(ra)
-
-    ra.Set(name='m_Set-1', referencePoints=(ra.referencePoints[rp1_key], ))
-    ra.Set(name='m_Set-2', referencePoints=(ra.referencePoints[rp2_key], ))
-    ra.Set(name='RP', referencePoints=(ra.referencePoints[rp3_key], ))
-
-    ra.Surface(side1Faces=back_seq, name='s_Surf-1')
-    ra.Surface(side1Faces=front_seq, name='s_Surf-2')
-
-    m.Coupling(controlPoint=ra.sets['m_Set-1'], couplingType=KINEMATIC,
-        influenceRadius=WHOLE_SURFACE, localCsys=None, name='Constraint-1',
-        surface=ra.surfaces['s_Surf-1'], u1=ON, u2=ON, u3=ON, ur1=ON, ur2=ON, ur3=ON)
-    m.Coupling(controlPoint=ra.sets['m_Set-2'], couplingType=KINEMATIC,
-        influenceRadius=WHOLE_SURFACE, localCsys=None, name='Constraint-2',
-        surface=ra.surfaces['s_Surf-2'], u1=ON, u2=ON, u3=ON, ur1=ON, ur2=ON, ur3=ON)
-
-    m.Equation(name='Constraint-3', terms=((1.0, 'm_Set-1', 1), (-1.0, 'm_Set-2', 1)))
-    m.Equation(name='Constraint-4', terms=((1.0, 'm_Set-1', 2), (-1.0, 'm_Set-2', 2), (coef_dof2, 'RP', 1)))
-    m.Equation(name='Constraint-5', terms=((1.0, 'm_Set-1', 3), (-1.0, 'm_Set-2', 3)))
-    m.Equation(name='Constraint-6', terms=((1.0, 'm_Set-1', 4), (-1.0, 'm_Set-2', 4), (coef_dof4, 'RP', 1)))
-    m.Equation(name='Constraint-7', terms=((1.0, 'm_Set-1', 5), (-1.0, 'm_Set-2', 5)))
-    m.Equation(name='Constraint-8', terms=((1.0, 'm_Set-1', 6), (-1.0, 'm_Set-2', 6)))
-
-    m.constraints.changeKey(fromName='Constraint-3', toName='DOF1')
-    m.constraints.changeKey(fromName='Constraint-4', toName='DOF2')
-    m.constraints.changeKey(fromName='Constraint-5', toName='DOF3')
-    m.constraints.changeKey(fromName='Constraint-6', toName='DOF4')
-    m.constraints.changeKey(fromName='Constraint-7', toName='DOF5')
-    m.constraints.changeKey(fromName='Constraint-8', toName='DOF6')
-
-    m.constraints['DOF1'].suppress()
-    m.constraints['DOF3'].suppress()
-    m.constraints['DOF5'].suppress()
-    m.constraints['DOF6'].suppress()
-    boundary_condition_mode = 'periodic_equation_external_rp'
-    if simple_bending_smoke:
-        m.constraints['DOF2'].suppress()
-        m.constraints['DOF4'].suppress()
-        boundary_condition_mode = 'reduced_smoke_direct_end_rotation'
-        m.DisplacementBC(amplitude=UNSET, createStepName='Initial',
-            distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
-            name='BC-Smoke-FixedFront', region=ra.sets['m_Set-2'],
-            u1=0.0, u2=0.0, u3=0.0, ur1=0.0, ur2=0.0, ur3=0.0)
 
 
-    m.StaticStep(adaptiveDampingRatio=0.05,
-        continueDampingFactors=False, initialInc=p_initialInc, maxInc=p_maxInc,
-        maxNumInc=p_maxNumInc, minInc=p_minInc, matrixSolver=DIRECT_UNSYMMETRIC,
-        name='Pressure', previous='Initial',
-        stabilizationMagnitude=stabilization,
-        stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
+        rp = ra.ReferencePoint(point=(float(OROS) + 30.0, 0.0, 0.0))
+        ra.Set(name='RP', referencePoints=(ra.referencePoints[rp.id], ))
 
-    pressure_load_status = 'skipped_zero_magnitude'
-    if abs(float(pressure)) > 1.0e-12:
+        left_nodes = None
+        right_nodes = None
+
+        tol = 1.0e-3
+        box = 1.0e9
+        dep_f = float(Dep)
+
+        for inst_name in all_instances:
+            inst = ra.instances[inst_name]
+
+            nodes_right_i = inst.nodes.getByBoundingBox(
+                xMin=-box,
+                yMin=-box,
+                zMin=-tol,
+                xMax=box,
+                yMax=box,
+                zMax=tol
+            )
+
+            nodes_left_i = inst.nodes.getByBoundingBox(
+                xMin=-box,
+                yMin=-box,
+                zMin=dep_f - tol,
+                xMax=box,
+                yMax=box,
+                zMax=dep_f + tol
+            )
+
+            if len(nodes_right_i) > 0:
+                right_nodes = nodes_right_i if right_nodes is None else right_nodes + nodes_right_i
+
+            if len(nodes_left_i) > 0:
+                left_nodes = nodes_left_i if left_nodes is None else left_nodes + nodes_left_i
+
+        if right_nodes is None:
+            raise ValueError('No nodes found at z = Dep for Right Surface Node Set.')
+
+        if left_nodes is None:
+            raise ValueError('No nodes found at z = 0 for Left Surface Node Set.')
+
+        ra.Set(
+            name='Left Surface Node Set',
+            nodes=left_nodes
+        )
+
+        ra.Set(
+            name='Right Surface Node Set',
+            nodes=right_nodes
+        )
+
+
+        # --------------------------------------------------
+        # Pair left and right nodes by closest x-y coordinates
+        # --------------------------------------------------
+
+        left_node_data = []
+        right_node_data = []
+
+        for node in ra.sets['Left Surface Node Set'].nodes:
+            left_node_data.append((
+                node.instanceName,
+                node.label,
+                node.coordinates[0],
+                node.coordinates[1],
+                node.coordinates[2]
+            ))
+
+        for node in ra.sets['Right Surface Node Set'].nodes:
+            right_node_data.append((
+                node.instanceName,
+                node.label,
+                node.coordinates[0],
+                node.coordinates[1],
+                node.coordinates[2]
+            ))
+
+        if len(left_node_data) == 0:
+            raise ValueError('No left nodes found for pairing.')
+
+        if len(right_node_data) == 0:
+            raise ValueError('No right nodes found for pairing.')
+
+        if len(left_node_data) != len(right_node_data):
+            pass
+
+        used_right = {}
+        node_pairs = []
+
+        for ldata in left_node_data:
+            l_inst, l_label, lx, ly, lz = ldata
+
+            best_j = None
+            best_dist2 = None
+
+            for j, rdata in enumerate(right_node_data):
+                if j in used_right:
+                    continue
+
+                r_inst, r_label, rx, ry, rz = rdata
+
+                dx = lx - rx
+                dy = ly - ry
+                dist2 = dx*dx + dy*dy
+
+                if best_dist2 is None or dist2 < best_dist2:
+                    best_dist2 = dist2
+                    best_j = j
+
+            if best_j is None:
+                raise ValueError('No available right node found for pairing.')
+
+            used_right[best_j] = True
+            node_pairs.append((ldata, right_node_data[best_j], best_dist2))
+
+        num_pairs = len(node_pairs)
+
+        max_pair_dist = 0.0
+        for pair in node_pairs:
+            d = pair[2] ** 0.5
+            if d > max_pair_dist:
+                max_pair_dist = d
+
+        # --------------------------------------------------
+        # Create individual node sets for paired nodes
+        # --------------------------------------------------
+
+        for i, pair in enumerate(node_pairs):
+            ldata, rdata, dist2 = pair
+
+            l_inst_name, l_label, lx, ly, lz = ldata
+            r_inst_name, r_label, rx, ry, rz = rdata
+
+            l_inst = ra.instances[l_inst_name]
+            r_inst = ra.instances[r_inst_name]
+
+            l_nodes = l_inst.nodes.sequenceFromLabels((l_label,))
+            r_nodes = r_inst.nodes.sequenceFromLabels((r_label,))
+
+            left_set = 'Left Surface Node-%d' % (i + 1)
+            right_set = 'Right Surface Node-%d' % (i + 1)
+
+            if left_set in ra.sets.keys():
+                del ra.sets[left_set]
+
+            if right_set in ra.sets.keys():
+                del ra.sets[right_set]
+
+            ra.Set(name=left_set, nodes=l_nodes)
+            ra.Set(name=right_set, nodes=r_nodes)
+
+        for cname in m.constraints.keys():
+            if cname.startswith('PBC '):
+                del m.constraints[cname]
+
+
+        for i in range(1, num_pairs + 1):
+
+            left_set = 'Left Surface Node-%d' % i
+            right_set = 'Right Surface Node-%d' % i
+
+            left_node = ra.sets[left_set].nodes[0]
+            right_node = ra.sets[right_set].nodes[0]
+
+            y_left = left_node.coordinates[1]
+            y_right = right_node.coordinates[1]
+            y_avg = 0.5 * (y_left + y_right)
+
+            m.Equation(name='PBC %d_1' % i, terms=((1.0, left_set, 1), (-1.0, right_set, 1)))
+            m.Equation(name='PBC %d_2' % i, terms=((1.0, left_set, 2), (-1.0, right_set, 2), (float(-Dep * Dep / 2.0), 'RP', 1)))
+            m.Equation(name='PBC %d_3' % i, terms=((1.0, left_set, 3), (-1.0, right_set, 3), (float(Dep) * y_avg, 'RP', 1)))
+
+        m.StaticStep(adaptiveDampingRatio=0.05,
+            continueDampingFactors=False, initialInc=inIncP, minInc=minIncP, maxInc=maxIncP, maxNumInc=
+            maxNumIncP, matrixSolver=DIRECT_UNSYMMETRIC, name='Pressure', previous='Initial', stabilizationMagnitude=0.0002,
+            stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
+
+
         ra.Surface(name='Surf-3', side1Faces=
             ra.instances['OuterSheath'].faces.getSequenceFromMask(('[#12088 ]', ), ))
 
         m.Pressure(amplitude=UNSET, createStepName='Pressure',
-            distributionType=UNIFORM, field='', magnitude=pressure, name='Load-1',
-            region=ra.surfaces['Surf-3'])
-        pressure_load_status = 'applied'
+            distributionType=UNIFORM, field='', magnitude=P, name='Load-1', region=
+            ra.surfaces['Surf-3'])
 
-    prev_step = 'Pressure'
-    step_count = 0
-    last_smoke_bc = None
-    for factor in curve_factors:
-        u1_val = max_curvature * float(factor) * float(depth) / 1000.0
-        for cycle in range(int(loading_cycles)):
-            pos_name = 'Bending-%d-pos' % (step_count * int(loading_cycles) + cycle + 1)
-            neg_name = 'Bending-%d-neg' % (step_count * int(loading_cycles) + cycle + 1)
+        # --------------------------------------------------
+        # Bending cycle steps
+        # Pressure is applied in the Pressure step and remains active.
+        # RP3 displacement controls bending curvature.
+        # --------------------------------------------------
 
-            m.StaticStep(adaptiveDampingRatio=0.05,
-                continueDampingFactors=False, initialInc=b_initialInc, maxInc=b_maxInc,
-                maxNumInc=b_maxNumInc, minInc=b_minInc, matrixSolver=DIRECT_UNSYMMETRIC,
-                name=pos_name, previous=prev_step,
-                stabilizationMagnitude=stabilization,
-                stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
-            if simple_bending_smoke:
-                if last_smoke_bc is not None:
-                    m.boundaryConditions[last_smoke_bc].deactivate(pos_name)
-                m.DisplacementBC(amplitude=UNSET, createStepName=pos_name,
-                    distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
-                    name='BC-%s' % pos_name, region=ra.sets['m_Set-1'],
-                    u1=UNSET, u2=UNSET, u3=UNSET, ur1=UNSET, ur2=u1_val, ur3=UNSET)
-                last_smoke_bc = 'BC-%s' % pos_name
-            else:
-                m.DisplacementBC(amplitude=UNSET, createStepName=pos_name,
-                    distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
-                    name='BC-%s' % pos_name, region=ra.sets['RP'],
-                    u1=u1_val, u2=UNSET, u3=UNSET, ur1=UNSET, ur2=UNSET, ur3=UNSET)
+        m.StaticStep(
+            adaptiveDampingRatio=0.05,
+            continueDampingFactors=False,
+            initialInc=inIncB,
+            minInc=minIncB,
+            maxInc=maxIncB,
+            maxNumInc=maxNumIncB,
+            matrixSolver=DIRECT_UNSYMMETRIC,
+            name='Bending',
+            previous='Pressure',
+            stabilizationMagnitude=0.0002,
+            stabilizationMethod=DISSIPATED_ENERGY_FRACTION
+        )
 
-            m.StaticStep(adaptiveDampingRatio=0.05,
-                continueDampingFactors=False, initialInc=b_initialInc, maxInc=b_maxInc,
-                maxNumInc=b_maxNumInc, minInc=b_minInc, matrixSolver=DIRECT_UNSYMMETRIC,
-                name=neg_name, previous=pos_name,
-                stabilizationMagnitude=stabilization,
-                stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
-            if simple_bending_smoke:
-                if last_smoke_bc is not None:
-                    m.boundaryConditions[last_smoke_bc].deactivate(neg_name)
-                m.DisplacementBC(amplitude=UNSET, createStepName=neg_name,
-                    distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
-                    name='BC-%s' % neg_name, region=ra.sets['m_Set-1'],
-                    u1=UNSET, u2=UNSET, u3=UNSET, ur1=UNSET, ur2=-u1_val, ur3=UNSET)
-                last_smoke_bc = 'BC-%s' % neg_name
-            else:
-                m.DisplacementBC(amplitude=UNSET, createStepName=neg_name,
-                    distributionType=UNIFORM, fieldName='', fixed=OFF, localCsys=None,
-                    name='BC-%s' % neg_name, region=ra.sets['RP'],
-                    u1=-u1_val, u2=UNSET, u3=UNSET, ur1=UNSET, ur2=UNSET, ur3=UNSET)
+        m.TabularAmplitude(data=((0.0, 0.0), (0.01, 0.078459), (
+            0.02, 0.156434), (0.03, 0.233445), (0.04, 0.309017), (0.05, 0.382683), (
+            0.06, 0.45399), (0.07, 0.522499), (0.08, 0.587785), (0.09, 0.649448), (0.1, 
+            0.707107), (0.11, 0.760406), (0.12, 0.809017), (0.13, 0.85264), (0.14, 
+            0.891007), (0.15, 0.92388), (0.16, 0.951057), (0.17, 0.97237), (0.18, 
+            0.987688), (0.19, 0.996917), (0.2, 1.0), (0.21, 0.996917), (0.22, 
+            0.987688), (0.23, 0.97237), (0.24, 0.951057), (0.25, 0.92388), (0.26, 
+            0.891007), (0.27, 0.85264), (0.28, 0.809017), (0.29, 0.760406), (0.3, 
+            0.707107), (0.31, 0.649448), (0.32, 0.587785), (0.33, 0.522499), (0.34, 
+            0.45399), (0.35, 0.382683), (0.36, 0.309017), (0.37, 0.233445), (0.38, 
+            0.156434), (0.39, 0.078459), (0.4, 0.0), (0.41, -0.078459), (0.42, 
+            -0.156434), (0.43, -0.233445), (0.44, -0.309017), (0.45, -0.382683), (0.46, 
+            -0.45399), (0.47, -0.522499), (0.48, -0.587785), (0.49, -0.649448), (0.5, 
+            -0.707107), (0.51, -0.760406), (0.52, -0.809017), (0.53, -0.85264), (0.54, 
+            -0.891007), (0.55, -0.92388), (0.56, -0.951057), (0.57, -0.97237), (0.58, 
+            -0.987688), (0.59, -0.996917), (0.6, -1.0), (0.61, -0.996917), (0.62, 
+            -0.987688), (0.63, -0.97237), (0.64, -0.951057), (0.65, -0.92388), (0.66, 
+            -0.891007), (0.67, -0.85264), (0.68, -0.809017), (0.69, -0.760406), (0.7, 
+            -0.707107), (0.71, -0.649448), (0.72, -0.587785), (0.73, -0.522499), (0.74, 
+            -0.45399), (0.75, -0.382683), (0.76, -0.309017), (0.77, -0.233445), (0.78, 
+            -0.156434), (0.79, -0.078459), (0.8, 0.0), (0.81, 0.078459), (0.82, 
+            0.156434), (0.83, 0.233445), (0.84, 0.309017), (0.85, 0.382683), (0.86, 
+            0.45399), (0.87, 0.522499), (0.88, 0.587785), (0.89, 0.649448), (0.9, 
+            0.707107), (0.91, 0.760406), (0.92, 0.809017), (0.93, 0.85264), (0.94, 
+            0.891007), (0.95, 0.92388), (0.96, 0.951057), (0.97, 0.97237), (0.98, 
+            0.987688), (0.99, 0.996917), (1.0, 1.0)), name='Amp-1', smooth=
+            SOLVER_DEFAULT, timeSpan=STEP)
 
-            prev_step = neg_name
-        step_count += 1
+        m.DisplacementBC(
+            amplitude='Amp-1',
+            createStepName='Initial',
+            distributionType=UNIFORM,
+            fieldName='',
+            fixed=OFF,
+            localCsys=None,
+            name='displacement',
+            region=ra.sets['RP'],
+            u1=0.0,
+            u2=UNSET,
+            u3=UNSET,
+            ur1=UNSET,
+            ur2=UNSET,
+            ur3=UNSET
+        )
 
-    contact_vars = ['CSTRESS', 'CDISP', 'CPRESS', 'COPEN', 'CSLIP1', 'CSLIP2', 'CSHEAR1', 'CSHEAR2']
-    field_vars = [str(v) for v in field_output if str(v) not in contact_vars]
-    contact_out_vars = [str(v) for v in field_output if str(v) in contact_vars]
-    contact_output_status = 'not_requested'
+        m.boundaryConditions['displacement'].setValuesInStep(
+            stepName='Pressure', u1=0.0)
 
-    m.fieldOutputRequests['F-Output-1'].setValues(
-            variables=tuple(field_vars))
+        m.boundaryConditions['displacement'].setValuesInStep(
+            amplitude='Amp-1', stepName='Bending', u1=BendFac)
 
-    if contact_out_vars:
-        contact_output_status = 'requested'
-        try:
-            m.FieldOutputRequest(name='F-Output-Contact',
-                createStepName='Pressure',
-                variables=tuple(contact_out_vars),
-                contactOutputPosition=ELEMENT_FACE)
-            contact_output_status = 'requested_element_face'
-        except TypeError:
-            try:
-                m.FieldOutputRequest(name='F-Output-Contact',
-                    createStepName='Pressure',
-                    variables=tuple(contact_out_vars))
-                contact_output_status = 'requested_default_position'
-            except Exception as exc:
-                contact_output_status = 'skipped_invalid_variables: {0}'.format(exc)
-        except Exception as exc:
-            contact_output_status = 'skipped_invalid_variables: {0}'.format(exc)
+        m.fieldOutputRequests['F-Output-1'].setValues(variables=(
+            'S', 'E', 'U', 'RF', 'CSTRESS', 'CDISP'))
 
-    history_region = ra.sets['m_Set-1'] if simple_bending_smoke else ra.sets['RP']
-    m.HistoryOutputRequest(createStepName='Pressure', name='H-Output-1',
-        rebar=EXCLUDE, region=history_region, sectionPoints=DEFAULT,
-        variables=tuple(str(v) for v in history_output))
 
-    old_cwd = os.getcwd()
-    os.chdir(str(job_dir))
-    inp_path = os.path.join(path_text(job_dir), job_name + '.inp')
-    cae_path = os.path.join(path_text(job_dir), job_name + '.cae')
-    odb_path = os.path.join(path_text(job_dir), job_name + '.odb')
-    try:
-        mdb.Job(atTime=None, contactPrint=ON, description='', echoPrint=OFF,
-            explicitPrecision=SINGLE, getMemoryFromAnalysis=True, historyPrint=OFF,
-            memory=90, memoryUnits=PERCENTAGE, model='Model-1', modelPrint=OFF,
-            multiprocessingMode=DEFAULT, name=job_name, nodalOutputPrecision=SINGLE,
-            numCpus=cpu_count, numDomains=cpu_count, numGPUs=0, queue=None, resultsFormat=ODB,
-            scratch='', type=ANALYSIS, userSubroutine='', waitHours=0, waitMinutes=0)
+
+        job_name = 'P_%d_Friction_%d_contactStiffness_%d' % (P*100, FrCo*100, conStiff*1000)
+
+        mdb.Job(
+            name=job_name,
+            model='Model-1',
+            type=ANALYSIS,
+            memory=90,
+            memoryUnits=PERCENTAGE,
+            getMemoryFromAnalysis=True,
+
+            multiprocessingMode=DEFAULT,
+            numCpus=CPU,
+            numDomains=CPU,
+
+            explicitPrecision=SINGLE,
+            nodalOutputPrecision=SINGLE,
+            echoPrint=OFF,
+            modelPrint=OFF,
+            contactPrint=ON,
+            historyPrint=OFF,
+            userSubroutine='',
+            scratch='',
+            resultsFormat=ODB
+        )
+
         mdb.jobs[job_name].writeInput(consistencyChecking=OFF)
+        print("[ABAQUS] INP file formed: {0}.inp".format(job_name))
+        sys.stdout.flush()
+        print("[ABAQUS] Analysis started: {0}".format(job_name))
+        sys.stdout.flush()
         mdb.jobs[job_name].submit(consistencyChecking=OFF)
         mdb.jobs[job_name].waitForCompletion()
+        print("[ABAQUS] Analysis completed: {0}".format(job_name))
+        sys.stdout.flush()
         mdb.saveAs(pathName=str(cae_path))
+
+        odb_path = os.path.join(job_dir, job_name + '.odb')
+        inp_path = os.path.join(job_dir, job_name + '.inp')
+        return {
+            'status': 'abaqus_analysis_complete' if os.path.exists(odb_path) else 'abaqus_analysis_finished_no_odb',
+            'job_name': job_name,
+            'inp_path': inp_path,
+            'cae_path': cae_path,
+            'odb_path': odb_path,
+            'odb_exists': os.path.exists(odb_path),
+            'candidate_source': 'automatic.py near-direct port',
+            'pitch_core': float(pitch_core),
+            'pitch_inner': float(pitch_inner),
+            'pitch_outer': float(pitch_outer),
+            'Dep': float(Dep),
+        }
     finally:
         os.chdir(old_cwd)
-
-    files = [os.path.basename(p) for p in [inp_path, cae_path, odb_path] if os.path.exists(p)]
-    return {
-        'status': 'abaqus_analysis_complete' if os.path.exists(odb_path) else 'abaqus_analysis_finished_no_odb',
-        'job_name': job_name,
-        'odb_path': odb_path,
-        'odb_exists': os.path.exists(odb_path),
-        'pressure_load_status': pressure_load_status,
-        'contact_output_status': contact_output_status,
-        'contact_output_variables': contact_out_vars,
-        'armour_contact_pair_status': armour_contact_pair_status,
-        'contact_pair_status': contact_pair_status,
-        'boundary_condition_mode': boundary_condition_mode,
-        'automatic_variable_map': automatic_variable_map(data),
-        'solver_step_settings': {
-            'pressure_step': {
-                'initial_increment': p_initialInc,
-                'minimum_increment': p_minInc,
-                'maximum_increment': p_maxInc,
-                'max_num_increments': p_maxNumInc,
-            },
-            'bending_step': {
-                'initial_increment': b_initialInc,
-                'minimum_increment': b_minInc,
-                'maximum_increment': b_maxInc,
-                'max_num_increments': b_maxNumInc,
-            },
-            'cpu_count': cpu_count,
-        },
-        'files': files,
-        'created_at': timestamp_seconds(),
-    }
-
 
 def main(argv):
     input_path = parse_input_path(argv)
@@ -1474,18 +1849,12 @@ def main(argv):
         if ABAQUS_AVAILABLE:
             result = build_abaqus_model(data, job_dir)
             write_json(os.path.join(job_dir, 'abaqus_mesh_manifest.json'), result)
-            print("Wrote: {0}".format(", ".join(result.get('files', []))))
             write_result_csv(result_csv, [0.0], [0.0])
             write_json(
                 os.path.join(job_dir, 'result_summary.json'),
                 fallback_summary(data, result, [0.0], [0.0]),
             )
-            print("Wrote placeholder result_data.csv")
             extraction_status = run_odb_extraction(job_dir, result.get('odb_path', ''), input_path)
-            if extraction_status == 0:
-                print("Updated result_data.csv from Abaqus ODB")
-            else:
-                print("ODB extraction did not update result_data.csv")
         else:
             curvature, moment = fallback_result_curve(data)
             manifest = fallback_manifest(data)

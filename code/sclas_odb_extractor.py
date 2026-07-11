@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import traceback
+import xml.sax.saxutils as saxutils
 
 
 RIGHT_RP_TOKENS = [
@@ -73,17 +74,38 @@ def write_json(path, data):
 def write_result_csv(path, rows):
     with open(path_text(path), "w") as handle:
         writer = csv.writer(handle, lineterminator="\n")
-        writer.writerow(["curvature_1_per_m", "moment_kn_m"])
+        writer.writerow(["curvature_1_per_m", "moment_n_m"])
         for curvature, moment in rows:
             writer.writerow(["{0:.12g}".format(curvature), "{0:.12g}".format(moment)])
 
 
-def write_force_displacement_csv(path, rows):
+def write_excel_xml(path, odb_name, rows):
     with open(path_text(path), "w") as handle:
-        writer = csv.writer(handle, lineterminator="\n")
-        writer.writerow(["u1_mm", "rf1_n"])
-        for u1_mm, rf1_n in rows:
-            writer.writerow(["{0:.12g}".format(u1_mm), "{0:.12g}".format(rf1_n)])
+        handle.write('<?xml version="1.0"?>\n')
+        handle.write('<?mso-application progid="Excel.Sheet"?>\n')
+        handle.write('<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n')
+        handle.write(' xmlns:o="urn:schemas-microsoft-com:office:office"\n')
+        handle.write(' xmlns:x="urn:schemas-microsoft-com:office:excel"\n')
+        handle.write(' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n')
+        handle.write('<Worksheet ss:Name="RP Data">\n')
+        handle.write("<Table>\n")
+        handle.write("<Row>\n")
+        handle.write(
+            '<Cell ss:MergeAcross="1"><Data ss:Type="String">{0}</Data></Cell>\n'.format(
+                saxutils.escape(odb_name)
+            )
+        )
+        handle.write("</Row>\n")
+        handle.write("<Row>\n")
+        handle.write('<Cell><Data ss:Type="String">Curvature[m^-1]</Data></Cell>\n')
+        handle.write('<Cell><Data ss:Type="String">Moment[N*m]</Data></Cell>\n')
+        handle.write("</Row>\n")
+        for curvature, moment in rows:
+            handle.write("<Row>\n")
+            handle.write('<Cell><Data ss:Type="Number">{0:.10e}</Data></Cell>\n'.format(curvature))
+            handle.write('<Cell><Data ss:Type="Number">{0:.10e}</Data></Cell>\n'.format(moment))
+            handle.write("</Row>\n")
+        handle.write("</Table>\n</Worksheet>\n</Workbook>\n")
 
 
 def summarize_curve_rows(rows):
@@ -166,6 +188,16 @@ def summarize_force_displacement_rows(rows):
     return summary
 
 
+def convert_force_displacement_to_moment_curvature(rows, effective_length_mm):
+    converted = []
+    length_mm = float(effective_length_mm or 0.0)
+    for u1_mm_inverse, rf1_n in rows:
+        curvature_1_per_m = float(u1_mm_inverse) * 1000.0
+        moment_n_m = float(rf1_n) / length_mm / 1000.0 if length_mm else 0.0
+        converted.append((curvature_1_per_m, moment_n_m))
+    return converted
+
+
 def build_result_quality(extraction_summary, existing_summary=None):
     rows = int(extraction_summary.get("rows_written") or 0)
     status = extraction_summary.get("status")
@@ -184,12 +216,12 @@ def build_result_quality(extraction_summary, existing_summary=None):
             "backend_readiness_status": "odb_extraction_failed",
             "next_step": "Fix ODB reference-point output extraction before using Abaqus results in the GUI.",
         }
-    if extraction_summary.get("curve_mode") == "rp_u1_rf1_preview":
+    if extraction_summary.get("curve_mode") == "rp_u1_rf1_moment_curvature":
         return {
-            "curve_class": "rp_force_displacement_preview",
+            "curve_class": "rp_u1_rf1_moment_curvature",
             "is_research_curve": False,
-            "backend_readiness_status": "abaqus_odb_force_displacement_preview",
-            "next_step": "Use this as a first Abaqus ODB visualization; add UR2/RM2 or calibrated moment-curvature output before claiming a research bending curve.",
+            "backend_readiness_status": "abaqus_odb_rp_u1_rf1_converted",
+            "next_step": "Use this as Abaqus RP-based hysteresis visualization; validate the RF1/effective-length moment definition before claiming a final research bending curve.",
         }
     if is_reduced_smoke and rows >= 2:
         return {
@@ -877,10 +909,12 @@ def extract_odb(odb_path, job_dir, input_data_path, skip_local_fields=False):
         if force_auto_field_rows and len(force_auto_field_rows) > len(force_rows):
             force_rows = force_auto_field_rows
             force_method_info = force_auto_field_info
+        raw_force_rows = []
         if len(rows) < 2 and len(force_rows) >= 2:
-            rows = force_rows
+            raw_force_rows = list(force_rows)
+            rows = convert_force_displacement_to_moment_curvature(force_rows, effective_length_mm)
             method_info = force_method_info
-            curve_mode = "rp_u1_rf1_preview"
+            curve_mode = "rp_u1_rf1_moment_curvature"
 
         if len(rows) < 2:
             available_field_outputs = []
@@ -918,15 +952,17 @@ def extract_odb(odb_path, job_dir, input_data_path, skip_local_fields=False):
             "force_auto_field_rows_available": len(force_auto_field_rows),
             "local_field_summary": local_field_summary,
         }
-        if curve_mode == "rp_u1_rf1_preview":
+        if curve_mode == "rp_u1_rf1_moment_curvature":
             summary.update({
                 "axis_mapping": {
-                    "x": "RP U1 displacement (mm)",
-                    "y": "RP RF1 reaction force (N)",
-                    "result_data_csv_note": "result_data.csv keeps legacy GUI column names for display compatibility; use rp_u1_rf1_data.csv for physical axis labels.",
+                    "x": "curvature_1_per_m = RP U1 * 1000",
+                    "y": "moment = RP RF1 / effective_length_mm / 1000",
+                    "result_data_csv_note": "result_data.csv is the single CSV output and stores converted curvature/moment rows.",
                 },
+                "moment_units_assumed": "RP RF1 divided by effective_length_mm and 1000 per backend handoff",
+                "curvature_definition": "RP U1 * 1000",
                 "curve_summary": summarize_curve_rows(rows),
-                "force_displacement_summary": summarize_force_displacement_rows(rows),
+                "raw_force_displacement_summary": summarize_force_displacement_rows(raw_force_rows),
             })
         else:
             summary.update({
@@ -950,6 +986,8 @@ def parse_args(argv):
     parser.add_argument("--input-data", default="input_data.json")
     parser.add_argument("--output-csv", default="result_data.csv")
     parser.add_argument("--summary", default="odb_extraction_summary.json")
+    parser.add_argument("--excel", default="",
+                        help="Optional Excel XML workbook path to write from the same extracted rows.")
     parser.add_argument("--skip-local-fields", action="store_true",
                         help="Skip heavy local field scans and extract only global RP curve outputs.")
     return parser.parse_args(argv)
@@ -968,6 +1006,9 @@ def main(argv):
     summary_path = args.summary
     if not os.path.isabs(summary_path):
         summary_path = os.path.join(job_dir, summary_path)
+    excel_path = args.excel
+    if excel_path and not os.path.isabs(excel_path):
+        excel_path = os.path.join(job_dir, excel_path)
 
     try:
         print("Opening ODB: {0}".format(odb_path))
@@ -975,8 +1016,10 @@ def main(argv):
         summary, rows = extract_odb(odb_path, job_dir, input_data_path, skip_local_fields=args.skip_local_fields)
         if summary.get("status") == "extracted":
             write_result_csv(output_csv, rows)
-            if summary.get("curve_mode") == "rp_u1_rf1_preview":
-                write_force_displacement_csv(os.path.join(job_dir, "rp_u1_rf1_data.csv"), rows)
+            if excel_path:
+                write_excel_xml(excel_path, os.path.basename(odb_path), rows)
+                summary["excel_file"] = os.path.basename(excel_path)
+                summary["excel_note"] = "Excel XML is generated from the same rows as result_data.csv."
         write_json(summary_path, summary)
         update_result_summary(job_dir, summary)
         print("ODB extraction status: {0}".format(summary.get("status")))
