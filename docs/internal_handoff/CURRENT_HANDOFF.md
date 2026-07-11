@@ -1,6 +1,28 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-07-10 KST
+Last updated: 2026-07-11 KST
+
+## automatic.py JSON Input Bridge - 2026-07-11 KST
+
+- Mapped the hardcoded input variables observed in
+  `C:\HELIX\Abaqus+_work\automatic.py` into the existing
+  `code/abaqus_runner.py` `input_data.json` normalization flow.
+- `abaqus_mesh_manifest.json` now includes `automatic_variable_map` so
+  Bogwang/backend can compare the old script variables with the GUI JSON
+  payload: geometry/armour (`Roc`, `RoI`, `RoC`, `TIS`, `TOS`, `TB`,
+  `RoIA`, `RoOA`, `NoIA`, `NoOA`), analysis (`P`, `FrCo`, `BendFac`,
+  `conStiff`), solver (`inIncP`, `minIncP`, `maxIncP`, `maxNumIncP`,
+  `inIncB`, `minIncB`, `maxIncB`, `maxNumIncB`, `CPU`), mesh (`ZAD`,
+  `CCD`, `BSCD`, `ACD`, `BSRD`, `FD1`-`FD4`, `*MeshType`), and helix
+  values (`CHA`, `IAHA`, `OAHA`, `pitch_core`, `pitch_inner`,
+  `pitch_outer`, `Dep`).
+- Abaqus Pressure steps now read `solver.pressure_step`; bending steps read
+  `solver.bending_step`; job CPU reads `solver.cpu_count` / legacy
+  `solver.CPU` instead of staying hardcoded at 12.
+- Per-field mesh count/size basis from the GUI is preserved through
+  `mesh.mesh_input_basis_by_field` and reflected in the legacy
+  `*MeshType` bridge values.
+- Verified with bundled Python `py_compile` and `code\sclas_self_check.py`.
 
 ## C3D8 Element-Type Feedback - 2026-07-10 KST
 

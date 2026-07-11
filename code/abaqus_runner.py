@@ -184,6 +184,101 @@ def as_int(value, default):
         return int(default)
 
 
+def first_present(mapping, keys, default=None):
+    if not isinstance(mapping, dict):
+        return default
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return default
+
+
+def normalize_solver_step(solver, step_name, alias_names, defaults):
+    step = dict(solver.get(step_name, {}))
+    step["initial_increment"] = as_float(
+        first_present(step, ["initial_increment", "initialInc", "inInc"], first_present(solver, [alias_names[0]], defaults["initial_increment"])),
+        defaults["initial_increment"],
+    )
+    step["minimum_increment"] = as_float(
+        first_present(step, ["minimum_increment", "minimumInc", "minInc"], first_present(solver, [alias_names[1]], defaults["minimum_increment"])),
+        defaults["minimum_increment"],
+    )
+    step["maximum_increment"] = as_float(
+        first_present(step, ["maximum_increment", "maximumInc", "maxInc"], first_present(solver, [alias_names[2]], defaults["maximum_increment"])),
+        defaults["maximum_increment"],
+    )
+    step["max_num_increments"] = as_int(
+        first_present(step, ["max_num_increments", "maxNumInc", "maxNumIncrements"], first_present(solver, [alias_names[3]], defaults["max_num_increments"])),
+        defaults["max_num_increments"],
+    )
+    return step
+
+
+def mesh_basis_code(mesh, field_name):
+    basis_by_field = mesh.get("mesh_input_basis_by_field", {})
+    basis = str(basis_by_field.get(field_name, mesh.get("mesh_input_basis", "count"))).strip().lower()
+    return 2 if basis == "size" else 1
+
+
+def automatic_variable_map(data):
+    geo = data.get("geometry_mm", {})
+    dgeo = data.get("derived_geometry_mm", {})
+    arm = data.get("armour", {})
+    ac = data.get("analysis_conditions", {})
+    solver = data.get("solver", {})
+    mesh = data.get("mesh", {})
+    pressure_step = solver.get("pressure_step", {})
+    bending_step = solver.get("bending_step", {})
+    filler_profile = mesh.get("filler_profile_divisions", {})
+    return {
+        "source": "input_data.json -> normalize_payload -> abaqus_runner.py",
+        "Roc": as_float(geo.get("conductor_radius_mm"), 4.0),
+        "RoI": as_float(geo.get("insulation_radius_mm"), 11.3),
+        "RoC": as_float(geo.get("core_outer_radius_mm"), 15.3),
+        "TIS": as_float(geo.get("inner_sheath_thickness_mm"), 4.5),
+        "TOS": as_float(geo.get("outer_sheath_thickness_mm"), 4.5),
+        "TB": as_float(geo.get("bedding_thickness_mm", dgeo.get("bedding_thickness_mm")), 0.6),
+        "RoIA": as_float(arm.get("inner_wire_radius_mm"), 2.0),
+        "RoOA": as_float(arm.get("outer_wire_radius_mm"), 2.0),
+        "NoIA": as_int(arm.get("inner_wire_count_resolved", arm.get("inner_wire_count")), 55),
+        "NoOA": as_int(arm.get("outer_wire_count_resolved", arm.get("outer_wire_count")), 63),
+        "P": as_float(ac.get("external_pressure_mpa", ac.get("hydrostatic_pressure_mpa")), 0.3),
+        "FrCo": as_float(ac.get("friction_coefficient"), 0.3),
+        "BendFac": as_float(ac.get("max_curvature_1_per_m", ac.get("bend_factor")), 5.0e-5),
+        "inIncP": as_float(pressure_step.get("initial_increment"), 1.0e-5),
+        "minIncP": as_float(pressure_step.get("minimum_increment"), 1.0e-10),
+        "maxIncP": as_float(pressure_step.get("maximum_increment"), 0.1),
+        "maxNumIncP": as_int(pressure_step.get("max_num_increments"), 10000),
+        "inIncB": as_float(bending_step.get("initial_increment"), 1.0e-5),
+        "minIncB": as_float(bending_step.get("minimum_increment"), 1.0e-10),
+        "maxIncB": as_float(bending_step.get("maximum_increment"), 0.05),
+        "maxNumIncB": as_int(bending_step.get("max_num_increments"), 10000),
+        "ZAD": as_int(mesh.get("axial_divisions"), 40),
+        "ZADMeshType": mesh_basis_code(mesh, "axial_divisions"),
+        "CCD": as_int(mesh.get("core_circumferential_divisions"), 20),
+        "CCDMeshType": mesh_basis_code(mesh, "core_circumferential_divisions"),
+        "BSCD": as_int(mesh.get("bedding_sheath_circumferential_divisions"), 64),
+        "BSCDMeshType": mesh_basis_code(mesh, "bedding_sheath_circumferential_divisions"),
+        "ACD": as_int(mesh.get("armour_circumferential_divisions"), 3),
+        "ACDMeshType": mesh_basis_code(mesh, "armour_circumferential_divisions"),
+        "BSRD": as_int(mesh.get("bedding_sheath_radial_divisions"), 3),
+        "BSRDMeshType": mesh_basis_code(mesh, "bedding_sheath_radial_divisions"),
+        "FD1": as_int(filler_profile.get("short_line"), 2),
+        "FD2": as_int(filler_profile.get("long_line"), 2),
+        "FD3": as_int(filler_profile.get("short_arc"), 4),
+        "FD4": as_int(filler_profile.get("long_arc"), 6),
+        "CHA": as_float(arm.get("core_lay_angle_deg"), 9.0),
+        "IAHA": as_float(arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")), -20.1),
+        "OAHA": as_float(arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")), 19.6),
+        "pitch_core": as_float(arm.get("core_pitch_mm", arm.get("core_pitch_length_mm")), 702.6),
+        "pitch_inner": as_float(arm.get("inner_armour_pitch_mm", arm.get("inner_armour_pitch_length_mm")), -677.94737),
+        "pitch_outer": as_float(arm.get("outer_armour_pitch_mm", arm.get("outer_armour_pitch_length_mm")), 776.55789),
+        "Dep": as_float(ac.get("effective_length_mm", dgeo.get("effective_length_mm")), 234.2),
+        "conStiff": as_float(ac.get("contact_stiffness_scale_factor", ac.get("conStiff")), 0.005),
+        "CPU": as_int(solver.get("cpu_count", solver.get("CPU")), 12),
+    }
+
+
 def core_center_from_outer_radius(core_outer_radius):
     return round(2.0 * sqrt(3.0) * float(core_outer_radius) / 3.0, 5)
 
@@ -367,6 +462,31 @@ def normalize_payload(data):
     filler_profile.setdefault("short_arc", mesh.get("FD3", 4))
     filler_profile.setdefault("long_arc", mesh.get("FD4", 6))
     mesh["filler_profile_divisions"] = filler_profile
+    basis_by_field = dict(mesh.get("mesh_input_basis_by_field", {}))
+    mesh_controls = data.get("mesh_controls", {})
+    if not basis_by_field and isinstance(mesh_controls, dict):
+        basis_by_field = dict(mesh_controls.get("input_basis_by_field", {}))
+    default_basis = str(mesh.get("mesh_input_basis", "count")).lower()
+    for key in [
+        "axial_divisions",
+        "core_circumferential_divisions",
+        "bedding_sheath_circumferential_divisions",
+        "armour_circumferential_divisions",
+        "inner_sheath_radial_divisions",
+        "bedding_radial_divisions",
+        "outer_sheath_radial_divisions",
+        "bedding_sheath_radial_divisions",
+        "filler_z_divisions",
+    ]:
+        basis_by_field.setdefault(key, default_basis)
+    mesh["mesh_input_basis_by_field"] = basis_by_field
+    mesh["mesh_type_codes"] = {
+        "ZADMeshType": mesh_basis_code(mesh, "axial_divisions"),
+        "CCDMeshType": mesh_basis_code(mesh, "core_circumferential_divisions"),
+        "BSCDMeshType": mesh_basis_code(mesh, "bedding_sheath_circumferential_divisions"),
+        "ACDMeshType": mesh_basis_code(mesh, "armour_circumferential_divisions"),
+        "BSRDMeshType": mesh_basis_code(mesh, "bedding_sheath_radial_divisions"),
+    }
     if mesh.get("filler_z_divisions_source") == "same_as_axial_divisions":
         mesh["filler_z_divisions"] = mesh["axial_divisions"]
         mesh["filler_divisions"] = mesh["axial_divisions"]
@@ -403,14 +523,40 @@ def normalize_payload(data):
     data["analysis_conditions"] = ac
 
     solver = dict(data.get("solver", {}))
-    solver.setdefault("initial_increment", 1.0e-5)
-    solver.setdefault("minimum_increment", 1.0e-11)
-    solver.setdefault("maximum_increment", 0.001)
-    solver.setdefault("max_num_increments", 10000)
+    pressure_step = normalize_solver_step(
+        solver,
+        "pressure_step",
+        ["inIncP", "minIncP", "maxIncP", "maxNumIncP"],
+        {
+            "initial_increment": 1.0e-5,
+            "minimum_increment": 1.0e-10,
+            "maximum_increment": 0.1,
+            "max_num_increments": 10000,
+        },
+    )
+    bending_step = normalize_solver_step(
+        solver,
+        "bending_step",
+        ["inIncB", "minIncB", "maxIncB", "maxNumIncB"],
+        {
+            "initial_increment": 1.0e-5,
+            "minimum_increment": 1.0e-10,
+            "maximum_increment": 0.05,
+            "max_num_increments": 10000,
+        },
+    )
+    solver["pressure_step"] = pressure_step
+    solver["bending_step"] = bending_step
+    solver.setdefault("initial_increment", bending_step["initial_increment"])
+    solver.setdefault("minimum_increment", bending_step["minimum_increment"])
+    solver.setdefault("maximum_increment", bending_step["maximum_increment"])
+    solver.setdefault("max_num_increments", bending_step["max_num_increments"])
     solver.setdefault("step_time", 1.0)
     solver.setdefault("nlgeom", False)
     solver.setdefault("stabilization_enabled", True)
     solver.setdefault("stabilization_factor", 0.0002)
+    solver["cpu_count"] = max(1, as_int(solver.get("cpu_count", solver.get("CPU")), 12))
+    solver["CPU"] = solver["cpu_count"]
     data["solver"] = solver
 
     output = dict(data.get("output_requests", {}))
@@ -532,6 +678,7 @@ def fallback_manifest(data):
         "status": "mesh_request_only",
         "created_at": timestamp_seconds(),
         "geometry_transform": geom,
+        "automatic_variable_map": automatic_variable_map(data),
         "pitch_design": pitch_design,
         "mesh_settings_from_gui": mesh,
         "contact_interface_defaults": defaults,
@@ -639,9 +786,17 @@ def build_abaqus_model(data, job_dir):
     curve_factors  = ac['curve_factors']
     loading_cycles = ac['loading_cycles']
 
-    initialInc = sol['initial_increment'] if sol['initial_increment'] is not None else 1e-05
-    maxInc     = sol['maximum_increment'] if sol['maximum_increment'] is not None else 0.001
-    maxNumInc  = sol['max_num_increments']
+    pressure_step = sol.get('pressure_step', {})
+    bending_step = sol.get('bending_step', {})
+    p_initialInc = as_float(pressure_step.get('initial_increment'), as_float(sol.get('initial_increment'), 1.0e-5))
+    p_minInc     = as_float(pressure_step.get('minimum_increment'), as_float(sol.get('minimum_increment'), 1.0e-10))
+    p_maxInc     = as_float(pressure_step.get('maximum_increment'), 0.1)
+    p_maxNumInc  = as_int(pressure_step.get('max_num_increments'), as_int(sol.get('max_num_increments'), 10000))
+    b_initialInc = as_float(bending_step.get('initial_increment'), as_float(sol.get('initial_increment'), 1.0e-5))
+    b_minInc     = as_float(bending_step.get('minimum_increment'), as_float(sol.get('minimum_increment'), 1.0e-10))
+    b_maxInc     = as_float(bending_step.get('maximum_increment'), as_float(sol.get('maximum_increment'), 0.05))
+    b_maxNumInc  = as_int(bending_step.get('max_num_increments'), as_int(sol.get('max_num_increments'), 10000))
+    cpu_count    = max(1, as_int(sol.get('cpu_count', sol.get('CPU')), 12))
     stabilization = as_float(sol.get('stabilization_factor'), 0.0002)
 
     axial_div       = msh['axial_divisions']
@@ -1116,8 +1271,8 @@ def build_abaqus_model(data, job_dir):
 
 
     m.StaticStep(adaptiveDampingRatio=0.05,
-        continueDampingFactors=False, initialInc=initialInc, maxInc=maxInc,
-        maxNumInc=maxNumInc, name='Pressure', previous='Initial',
+        continueDampingFactors=False, initialInc=p_initialInc, maxInc=p_maxInc,
+        maxNumInc=p_maxNumInc, minInc=p_minInc, name='Pressure', previous='Initial',
         stabilizationMagnitude=stabilization,
         stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
 
@@ -1141,8 +1296,8 @@ def build_abaqus_model(data, job_dir):
             neg_name = 'Bending-%d-neg' % (step_count * int(loading_cycles) + cycle + 1)
 
             m.StaticStep(adaptiveDampingRatio=0.05,
-                continueDampingFactors=False, initialInc=initialInc, maxInc=maxInc,
-                maxNumInc=maxNumInc, name=pos_name, previous=prev_step,
+                continueDampingFactors=False, initialInc=b_initialInc, maxInc=b_maxInc,
+                maxNumInc=b_maxNumInc, minInc=b_minInc, name=pos_name, previous=prev_step,
                 stabilizationMagnitude=stabilization,
                 stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
             if simple_bending_smoke:
@@ -1160,8 +1315,8 @@ def build_abaqus_model(data, job_dir):
                     u1=u1_val, u2=UNSET, u3=UNSET, ur1=UNSET, ur2=UNSET, ur3=UNSET)
 
             m.StaticStep(adaptiveDampingRatio=0.05,
-                continueDampingFactors=False, initialInc=initialInc, maxInc=maxInc,
-                maxNumInc=maxNumInc, name=neg_name, previous=pos_name,
+                continueDampingFactors=False, initialInc=b_initialInc, maxInc=b_maxInc,
+                maxNumInc=b_maxNumInc, minInc=b_minInc, name=neg_name, previous=pos_name,
                 stabilizationMagnitude=stabilization,
                 stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
             if simple_bending_smoke:
@@ -1223,7 +1378,7 @@ def build_abaqus_model(data, job_dir):
             explicitPrecision=SINGLE, getMemoryFromAnalysis=True, historyPrint=OFF,
             memory=90, memoryUnits=PERCENTAGE, model='Model-1', modelPrint=OFF,
             multiprocessingMode=DEFAULT, name=job_name, nodalOutputPrecision=SINGLE,
-            numCpus=12, numDomains=12, numGPUs=0, queue=None, resultsFormat=ODB,
+            numCpus=cpu_count, numDomains=cpu_count, numGPUs=0, queue=None, resultsFormat=ODB,
             scratch='', type=ANALYSIS, userSubroutine='', waitHours=0, waitMinutes=0)
         mdb.jobs[job_name].writeInput(consistencyChecking=OFF)
         mdb.jobs[job_name].submit(consistencyChecking=OFF)
@@ -1244,6 +1399,22 @@ def build_abaqus_model(data, job_dir):
         'armour_contact_pair_status': armour_contact_pair_status,
         'contact_pair_status': contact_pair_status,
         'boundary_condition_mode': boundary_condition_mode,
+        'automatic_variable_map': automatic_variable_map(data),
+        'solver_step_settings': {
+            'pressure_step': {
+                'initial_increment': p_initialInc,
+                'minimum_increment': p_minInc,
+                'maximum_increment': p_maxInc,
+                'max_num_increments': p_maxNumInc,
+            },
+            'bending_step': {
+                'initial_increment': b_initialInc,
+                'minimum_increment': b_minInc,
+                'maximum_increment': b_maxInc,
+                'max_num_increments': b_maxNumInc,
+            },
+            'cpu_count': cpu_count,
+        },
         'files': files,
         'created_at': timestamp_seconds(),
     }

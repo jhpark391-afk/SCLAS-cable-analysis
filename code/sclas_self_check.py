@@ -134,6 +134,13 @@ def rich_backend_payload() -> dict:
             "bedding_radial_divisions": 1,
             "outer_sheath_radial_divisions": 3,
             "contact_regularization_beta": 0.001,
+            "mesh_input_basis_by_field": {
+                "axial_divisions": "size",
+                "core_circumferential_divisions": "count",
+                "bedding_sheath_circumferential_divisions": "count",
+                "armour_circumferential_divisions": "count",
+                "bedding_sheath_radial_divisions": "count",
+            },
         },
         "analysis_conditions": {
             "effective_length_mm": 234.2,
@@ -158,6 +165,19 @@ def rich_backend_payload() -> dict:
             "minimum_increment": 1.0e-11,
             "maximum_increment": 0.001,
             "max_num_increments": 10000,
+            "pressure_step": {
+                "initial_increment": 2.0e-5,
+                "minimum_increment": 2.0e-10,
+                "maximum_increment": 0.2,
+                "max_num_increments": 9000,
+            },
+            "bending_step": {
+                "initial_increment": 3.0e-5,
+                "minimum_increment": 3.0e-10,
+                "maximum_increment": 0.03,
+                "max_num_increments": 8000,
+            },
+            "cpu_count": 6,
             "nlgeom": False,
             "stabilization_enabled": True,
             "stabilization_factor": 0.0002,
@@ -328,6 +348,7 @@ def check_backend_contract() -> None:
             "contact_pair_scaffold_status",
             "boundary_condition_scaffold_status",
             "equivalent_properties_from_gui",
+            "automatic_variable_map",
             "components",
         ],
         "abaqus_mesh_manifest.json",
@@ -346,6 +367,26 @@ def check_backend_contract() -> None:
         fail("mesh armour_model should default to the currently implemented solid_wire backend")
     if mesh_settings.get("inner_sheath_radial_divisions") != 3 or mesh_settings.get("outer_sheath_radial_divisions") != 3:
         fail("sheath radial division controls were not carried into the manifest")
+    auto_map = manifest.get("automatic_variable_map", {})
+    expected_auto = {
+        "P": 40.0,
+        "FrCo": 0.22,
+        "BendFac": 0.08,
+        "inIncP": 2.0e-5,
+        "minIncP": 2.0e-10,
+        "maxIncP": 0.2,
+        "maxNumIncP": 9000,
+        "inIncB": 3.0e-5,
+        "minIncB": 3.0e-10,
+        "maxIncB": 0.03,
+        "maxNumIncB": 8000,
+        "CPU": 6,
+    }
+    for key, expected in expected_auto.items():
+        if auto_map.get(key) != expected:
+            fail(f"automatic_variable_map did not carry {key} from input_data.json")
+    if auto_map.get("ZADMeshType") != 2 or auto_map.get("CCDMeshType") != 1:
+        fail("mesh per-field count/size basis was not carried into automatic_variable_map")
     bindings = manifest["contact_binding_scaffold"]
     if len(bindings) != 5:
         fail(f"Expected 5 contact binding scaffold records, found {len(bindings)}")
