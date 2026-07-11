@@ -992,8 +992,17 @@ def check_backend_json_gui_bridge_contract() -> None:
             fail(f"Backend GUI bridge did not map external/hydrostatic pressure for {name}")
         if mesh.get("z_elem") is None or mesh.get("c_elem_core") is None:
             fail(f"Backend GUI bridge did not map mesh divisions for {name}: {mesh}")
-        if mesh.get("filler_z_elem") is None:
-            fail(f"Backend GUI bridge did not map filler z divisions for {name}: {mesh}")
+        if "filler_z_elem" in mesh:
+            fail(f"Backend GUI bridge should not expose removed filler z divisions for {name}: {mesh}")
+        if payload.get("mesh", {}).get("filler_profile_divisions"):
+            for fd_key in [
+                "filler_short_line_elem",
+                "filler_long_line_elem",
+                "filler_short_arc_elem",
+                "filler_long_arc_elem",
+            ]:
+                if mesh.get(fd_key) is None:
+                    fail(f"Backend GUI bridge did not map filler profile division {fd_key} for {name}: {mesh}")
         if name == "RoC25":
             if geometry.get("no_ia") != 0 or geometry.get("no_oa") != 0:
                 fail("RoC25 fixture should preserve zero armour counts as Auto in GUI mapping")

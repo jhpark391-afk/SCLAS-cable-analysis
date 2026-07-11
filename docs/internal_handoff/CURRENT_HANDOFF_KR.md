@@ -71,7 +71,7 @@
 * Mesh/FEA Setting 탭의 `Abaqus element type`은 `C3D8` 고정 표시로 바꾸고 `C3D4`, `B31` 선택지를 화면에서 제거했습니다.
 * Analysis Results 탭은 실행/JSON/결과 확인 중심으로 단순화했습니다.
   * 화면 표시 입력: `Effective length`, `Loading cycles`, `Result points`
-  * 숨김 backend default: `twist`, `axial_strain`, `radial_compression`, residual contact pressure, solver increment values
+  * 참고: 당시 숨김 backend default였던 `twist`, `axial_strain`, `radial_compression`, residual contact pressure는 2026-07-11 정리에서 GUI/export payload에서 제거했습니다. Solver increment 값은 SCLAS 710 solver alias로 유지합니다.
 * `Research Scope / Local Behavior` 체크박스 묶음은 일반 화면에서 숨겼고, payload에는 현재 구현 범위인 bending/pressure 중심 scope만 남깁니다.
 * Backend mode는 `FAST GUI preview`, `Export job package only`, `Run local/shared-folder command`만 표시합니다. SSH/scp 원격 설정은 코드 호환용으로 남기되 화면에서는 숨겼습니다.
 * Run Controls에 `Import Backend JSON` 버튼을 추가해 기존 `input_data.json`을 GUI 값으로 다시 불러오는 정보 교환 루프를 명확히 했습니다.
@@ -199,4 +199,22 @@ graph TD
 * 주의: 엑셀의 `Roc=11`, `RoI=4` 기본값은 현재 GUI/backend 수식에서 conductor radius가 insulation radius보다 커지는 충돌을 만들 수 있어, 화면 기본값은 기존 물리적으로 유효한 `r_cond=4.00`, `r_ins=11.30`, `R_core=15.30`을 유지하고 계약 note에 기록합니다.
 
 ---
+# 2026-07-11 SCLAS 710 변수표 기준 정크 변수 제거
 
+* `C:\HELIX\Abaqus+_work\SCLAS_변수_정리710.xlsx` 기준으로 GUI/export 변수 목록을 다시 줄였습니다.
+* 더 이상 `input_data.json`에 내보내지 않는 항목:
+  * `study_scope`, `numerical_model`, `equivalent_properties`
+  * `analysis_conditions.residual_contact_pressure_mpa`
+  * `analysis_conditions.max_twist_rad_per_m`
+  * `analysis_conditions.max_axial_strain`
+  * `analysis_conditions.radial_compression_ratio`
+  * `analysis_conditions.contact_regularization_beta`
+  * `mesh.model_strategy`, `mesh.armour_model`
+  * `mesh.filler_z_divisions`, `mesh.filler_divisions`
+  * `mesh.circumferential_division_policy`, `mesh.mesh_algorithm_policy`
+  * `mesh.contact_regularization_beta`
+* 위 값들은 GUI에서 숨김 처리만 하는 것이 아니라 위젯/설정 저장/export payload에서 제거했습니다.
+* Abaqus backend runner는 과거 JSON 호환을 위해 필요한 fallback/default를 유지합니다.
+* FAST GUI preview에 필요했던 EI 추정값은 `equivalent_properties`로 export하지 않고 worker 내부 계산으로만 사용합니다.
+
+---

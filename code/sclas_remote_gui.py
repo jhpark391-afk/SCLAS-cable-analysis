@@ -421,12 +421,29 @@ class AnalysisWorker(QThread):
     def run_fast_solver(self) -> None:
         self.log_sig.emit("[FAST] Running local Bouc-Wen style analytical fallback.")
         analysis = self.payload["analysis_conditions"]
-        equivalent = self.payload["equivalent_properties"]
 
         k_max = float(analysis["max_curvature_1_per_m"])
         friction = float(analysis["friction_coefficient"])
         pressure = float(analysis["hydrostatic_pressure_mpa"])
-        ei_init = float(equivalent["core_equivalent_EI_N_m2"])
+        dg = self.payload.get("derived_geometry_mm", {})
+        materials = self.payload.get("materials", [])
+        conductor = next(
+            (
+                material
+                for material in materials
+                if "conductor" in str(material.get("material", "")).lower()
+                or "copper" in str(material.get("material", "")).lower()
+                or "conductor" in str(material.get("name", "")).lower()
+            ),
+            materials[0] if materials else {"elastic_modulus_GPa": 108.0},
+        )
+        e_pa = float(conductor.get("elastic_modulus_GPa", 108.0)) * 1.0e9
+        r_cond_m = float(dg.get("conductor_radius_mm", self.payload["geometry_mm"].get("conductor_radius_mm", 4.0))) / 1000.0
+        core_center_m = float(dg.get("core_center_radius_mm", self.payload["geometry_mm"].get("core_center_radius_mm", 17.67))) / 1000.0
+        core_count = int(self.payload.get("geometry_mm", {}).get("core_count", 3))
+        area_cond = math.pi * r_cond_m ** 2
+        local_i = math.pi * r_cond_m ** 4 / 4.0
+        ei_init = e_pa * core_count * (local_i + area_cond * core_center_m ** 2)
 
         steps = int(analysis.get("solver_steps", 500))
         t = np.linspace(0.0, 4.0 * np.pi, steps)
@@ -611,13 +628,8 @@ Important sections:
 - `derived_geometry_mm`: GUI-derived radii, armor center radii, pitch lengths,
   and the auto effective model length in mm.
 - `materials`: layer elastic properties from GUI table.
-- `mesh`: requested element type, model strategy, armour representation, preview discretization.
-- `analysis_conditions`: length, pressure, friction, curvature, twist, axial strain, radial compression, cycle count.
-- `study_scope`: enabled local behavior assessments requested by the GUI.
-- `numerical_model`: literature-informed backend modelling recommendations.
-  `numerical_model.contact_interfaces` lists the first contact pairs to define
-  in Abaqus.
-- `equivalent_properties`: GUI-side equivalent EI estimates.
+- `mesh`: requested element type and SCLAS 710 mesh division values.
+- `analysis_conditions`: effective length, pressure, friction, curvature/factor, cycle count.
 
 Key GUI/backend conventions:
 - Users input helix pitch angles in `armour.*_lay_angle_deg`.
@@ -632,8 +644,8 @@ Key GUI/backend conventions:
   signed `armour.*_pitch_mm` values when generating the Abaqus helix.
 - `geometry_mm.core_count` defaults to `3` and is passed for backend job setup.
 - `mesh.axial_divisions` is the single z-direction division count for all cable
-  components. `mesh.filler_z_divisions` is kept only for backward compatibility
-  and must mirror `mesh.axial_divisions`.
+  components. Filler profile divisions are provided separately as `FD1` to `FD4`
+  under `mesh.filler_profile_divisions`.
 
 ## Required output
 Write `result_data.csv` in the same job folder.
@@ -673,28 +685,15 @@ Write `result_summary.json` with any backend metrics, for example:
 }
 ```
 
-## Research evaluation scope
-The primary GUI plot remains the bending moment-curvature hysteresis loop.
-The backend should use `study_scope.enabled_assessments` to decide which extra
-local behavior evaluations to run:
-- `bending_stick_slip`: bending stiffness drop and hysteresis loop.
-- `torsion`: torsion stiffness and torsion-bending coupling candidates.
-- `tension_bending_coupling`: axial load influence on bending response.
-- `compression_bird_caging`: radial/diameter instability risk.
-- `pressure_effect`: hydrostatic pressure influence on stiffness and slip.
-
 ## Literature-informed modelling notes
 - Use a periodic/homogenized cell when possible to reduce the 3D FE domain to a
   helical period while preserving contact interactions.
 - Treat armour layers efficiently with beam elements plus contact surface
   elements when the backend needs many wires.
 - Use penalty/augmented-Lagrange normal contact and regularized Coulomb
-  tangential contact. `contact_regularization_beta` is included for this.
-- Calibrate friction and residual contact pressure against slip-zone bending
-  stiffness and dissipated energy, then use those values for local stress
-  extraction.
-- For coupled axisymmetric studies, report axial/torsional stiffness and
-  pressure/compression-induced softening in `result_summary.json`.
+  tangential contact. Backend defaults own detailed contact stabilization.
+- Calibrate friction/pressure settings against the Abaqus bending loop and local
+  contact output, then use those values for local stress extraction.
 
 ## Abaqus command pattern
 A typical backend command may look like:
@@ -1053,7 +1052,6 @@ class SCLASRemoteGUI(QMainWindow):
             "Residual contact pressure (MPa)": "잔류 접촉압 (MPa)",
             "Friction coefficient": "마찰 계수",
             "Max curvature (1/m)": "최대 곡률 (1/m)",
-            "Max twist (rad/m)": "최대 비틀림 (rad/m)",
             "Max axial strain": "최대 축 변형률",
             "Radial compression ratio": "반경 방향 압축률",
             "Loading cycles": "하중 사이클",
@@ -1194,23 +1192,6 @@ class SCLASRemoteGUI(QMainWindow):
         if hasattr(self, "plot_canvas"):
             self.plot_canvas.setLabel("left", self.ui_text("Bending Moment M"), units="kN.m")
             self.plot_canvas.setLabel("bottom", self.ui_text("Curvature \u03ba"), units="1/m")
-        if hasattr(self, "mesh_inputs"):
-            self.translate_combo_items(
-                self.mesh_inputs["model_strategy"],
-                [
-                    ("Periodic cell", "Periodic homogenized cell"),
-                    ("Full 3D segment", "Full 3D segment"),
-                    ("Axisymmetric", "Axisymmetric tension/torsion"),
-                ],
-            )
-            self.translate_combo_items(
-                self.mesh_inputs["armour_model"],
-                [
-                    ("Solid wire", "Solid wire"),
-                    ("Beam + contact", "Beam + contact surface"),
-                    ("Analytical equiv.", "Analytical equivalent"),
-                ],
-            )
         if hasattr(self, "summary_text"):
             if self.last_summary_data:
                 self.summary_text.setPlainText(self.format_summary(self.last_summary_data))
@@ -1831,18 +1812,6 @@ class SCLASRemoteGUI(QMainWindow):
             "basis": basis,
             "counts": counts,
             "target_sizes_mm": sizes,
-            "circumferential_policy": {
-                "multiples_of_4_recommended_for_demo": True,
-                "multiples_of_4_enforced": False,
-                "core_sheath_theta_is_multiple_of_4": counts["core_theta"] % 4 == 0,
-                "bedding_sheath_theta_is_multiple_of_4": counts["bedding_sheath_theta"] % 4 == 0,
-                "armour_theta_is_multiple_of_4": counts["armour_theta"] % 4 == 0,
-            },
-            "mesh_algorithm_policy": {
-                "general_solid_algorithm": "medial_axis",
-                "armour_algorithm": "front_or_medial_axis_pending_backend_confirmation",
-                "note": "Screenshot feedback favours medial axis except possible armour/front handling; GUI records policy but does not force backend implementation.",
-            },
         }
 
     def build_mesh_tab(self) -> None:
@@ -1873,9 +1842,6 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_inputs = {
             "mesh_basis": QComboBox(),
             "elem_type": QComboBox(),
-            "model_strategy": QComboBox(),
-            "armour_model": QComboBox(),
-            "contact_beta": QLineEdit("0.001"),
             "z_elem": QSpinBox(),
             "c_elem_core": QSpinBox(),
             "c_elem_bedding_sheath": QSpinBox(),
@@ -1894,14 +1860,11 @@ class SCLASRemoteGUI(QMainWindow):
             "r_size_inner_sheath": QLineEdit("1.50"),
             "r_size_bedding": QLineEdit("0.60"),
             "r_size_outer_sheath": QLineEdit("1.50"),
-            "filler_z_elem": QSpinBox(),
         }
         self.mesh_inputs["mesh_basis"].addItem("Division count", "count")
         self.mesh_inputs["mesh_basis"].addItem("Target size", "size")
         self.mesh_inputs["elem_type"].addItem("C3D8", "C3D8")
         self.mesh_inputs["elem_type"].setEnabled(False)
-        self.mesh_inputs["model_strategy"].addItem("Full 3D segment", "Full 3D segment")
-        self.mesh_inputs["armour_model"].addItem("Solid wire", "Solid wire")
         self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(60)
         self.mesh_inputs["c_elem_core"].setRange(3, 240); self.mesh_inputs["c_elem_core"].setValue(20)
         self.mesh_inputs["c_elem_bedding_sheath"].setRange(3, 320); self.mesh_inputs["c_elem_bedding_sheath"].setValue(80)
@@ -1913,14 +1876,9 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_inputs["filler_long_line_elem"].setRange(1, 100); self.mesh_inputs["filler_long_line_elem"].setValue(2)
         self.mesh_inputs["filler_short_arc_elem"].setRange(1, 100); self.mesh_inputs["filler_short_arc_elem"].setValue(4)
         self.mesh_inputs["filler_long_arc_elem"].setRange(1, 100); self.mesh_inputs["filler_long_arc_elem"].setValue(6)
-        self.mesh_inputs["filler_z_elem"].setRange(2, 500); self.mesh_inputs["filler_z_elem"].setValue(40)
-        self.mesh_inputs["filler_z_elem"].setVisible(False)
         mesh_tips = {
             "mesh_basis": "Choose whether the rows below are entered as division counts or target mesh sizes. Counts are still exported for backend compatibility.",
             "elem_type": "Fixed GUI request for the full 3D solid-wire workflow.",
-            "model_strategy": "Fixed backend strategy: full 3D segment.",
-            "armour_model": "Fixed armour representation: solid wire.",
-            "contact_beta": "Tangential contact regularization value for stick-slip stability.",
             "z_elem": "Global axial n_z divisions along the cable length for every component, including filler.",
             "c_elem_core": "Core circumferential divisions from SCLAS 710 variable CCD.",
             "c_elem_bedding_sheath": "Bedding and sheath circumferential divisions from SCLAS 710 variable BSCD.",
@@ -1939,10 +1897,8 @@ class SCLASRemoteGUI(QMainWindow):
             "r_size_inner_sheath": "Target radial element thickness in mm for inner sheath; frontend converts this to n_r.",
             "r_size_bedding": "Target radial element thickness in mm for bedding; frontend converts this to n_r.",
             "r_size_outer_sheath": "Target radial element thickness in mm for outer sheath; frontend converts this to n_r.",
-            "filler_z_elem": "Backward-compatible internal mirror of axial n_z divisions.",
         }
-        self.mesh_inputs["contact_beta"].setVisible(False)
-        for key in ["elem_type", "model_strategy", "armour_model"]:
+        for key in ["elem_type"]:
             self.mesh_inputs[key].setMinimumWidth(140)
             self.mesh_inputs[key].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for key in [
@@ -2063,12 +2019,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.cond = {
             "eff_length": QLineEdit("234.20"),
             "pressure": QLineEdit("0.30"),
-            "residual_contact_pressure": QLineEdit("0.30"),
             "friction": QLineEdit("0.30"),
             "curvature": QLineEdit("5.0e-5"),
-            "twist": QLineEdit("0.05"),
-            "axial_strain": QLineEdit("0.002"),
-            "radial_compression": QLineEdit("0.015"),
             "cycles": QSpinBox(),
             "steps": QSpinBox(),
         }
@@ -2077,16 +2029,11 @@ class SCLASRemoteGUI(QMainWindow):
         analysis_tips = {
             "eff_length": "Auto-computed as core pitch length divided by core count. Backend uses this as the model length.",
             "pressure": "SCLAS 710 variable P. Residual/production pressure passed to the Abaqus analysis request.",
-            "residual_contact_pressure": "Residual normal contact pressure for stick-slip/friction calibration.",
             "friction": "Coulomb friction coefficient for armour-to-sheath and armour-to-bedding contact.",
             "curvature": "SCLAS 710 variable BendFac. Target bending curvature/factor for the bending request.",
-            "twist": "Maximum twist requested for future coupled torsion studies.",
-            "axial_strain": "Axial strain requested for tension-bending coupling studies.",
-            "radial_compression": "Compression ratio used for bird-caging risk proxy.",
             "cycles": "Number of loading cycles in the preview/result request.",
             "steps": "Number of output samples in the result curve.",
         }
-        self.cond["residual_contact_pressure"].setVisible(False)
         self.cond["eff_length"].setReadOnly(True)
         self.cond["eff_length"].setStyleSheet("background: #f8fafc; color: #0b5cad; font-weight: 750;")
         for key, tip in analysis_tips.items():
@@ -2112,23 +2059,6 @@ class SCLASRemoteGUI(QMainWindow):
         form.addRow(self.form_label("Loading cycles"), self.cond["cycles"])
         form.addRow(self.form_label("Result points"), self.cond["steps"])
         left.addWidget(self.collapsible_section("Run Inputs", conditions_box, expanded=True))
-
-        scope_box = QFrame()
-        scope_layout = QVBoxLayout(scope_box)
-        self.study_checks = {
-            "bending_stick_slip": QCheckBox("Bending: stick-slip / hysteresis"),
-            "torsion": QCheckBox("Torsion stiffness"),
-            "tension_bending_coupling": QCheckBox("Tension-bending coupling"),
-            "compression_bird_caging": QCheckBox("Compression: bird-caging risk"),
-            "pressure_effect": QCheckBox("Hydrostatic pressure effect"),
-        }
-        self.visible_study_scope_keys = {"bending_stick_slip", "pressure_effect"}
-        self.study_checks["bending_stick_slip"].setChecked(True)
-        self.study_checks["pressure_effect"].setChecked(True)
-        for check in self.study_checks.values():
-            check.setToolTip("Enable this assessment in the exported backend contract.")
-            scope_layout.addWidget(check)
-        self.study_scope_box = scope_box
 
         backend_box = QFrame()
         backend_layout = QVBoxLayout(backend_box)
@@ -2653,27 +2583,6 @@ class SCLASRemoteGUI(QMainWindow):
             widget.setText(format_mm(dg["effective_length_mm"]))
             widget.blockSignals(False)
 
-    def mesh_value(self, key: str) -> str:
-        if key == "model_strategy":
-            return "full_3d_segment"
-        if key == "armour_model":
-            return "solid_wire"
-        maps = {
-            "model_strategy": {
-                "Periodic homogenized cell": "periodic_homogenized_cell",
-                "Full 3D segment": "full_3d_segment",
-                "Axisymmetric tension/torsion": "axisymmetric_tension_torsion",
-            },
-            "armour_model": {
-                "Beam + contact surface": "beam_with_contact_surface",
-                "Solid wire": "solid_wire",
-                "Analytical equivalent": "analytical_equivalent",
-            },
-        }
-        combo = self.mesh_inputs[key]
-        text = combo.currentData() or combo.currentText()
-        return maps.get(key, {}).get(text, text)
-
     def build_sclas710_variable_contract(self, dg: dict, mesh_req: dict) -> dict:
         counts = mesh_req["counts"]
         basis = mesh_req["basis"]
@@ -2751,7 +2660,6 @@ class SCLASRemoteGUI(QMainWindow):
     def build_payload(self) -> dict:
         dg = self.parse_geometry()
         materials = self.collect_materials()
-        eq = self.compute_equivalent_properties(materials, dg)
         mesh_req = self.mesh_request_values(dg)
         mesh_counts = mesh_req["counts"]
         mesh_sizes = mesh_req["target_sizes_mm"]
@@ -2771,10 +2679,7 @@ class SCLASRemoteGUI(QMainWindow):
                 "pressure": "MPa",
                 "angle": "deg",
                 "curvature": "1/m",
-                "twist": "rad/m",
-                "strain": "dimensionless",
-                "contact_regularization_beta": "dimensionless",
-                "elastic_modulus": "GPa in materials, Pa in equivalent_properties",
+                "elastic_modulus": "GPa in materials",
                 "density": "kg/m^3 in materials",
                 "poisson_ratio": "nu, dimensionless",
                 "moment_output_required": "kN.m",
@@ -2833,12 +2738,8 @@ class SCLASRemoteGUI(QMainWindow):
             "mesh": {
                 "requested_element_type": self.mesh_inputs["elem_type"].currentText(),
                 "solid_element_type": self.mesh_inputs["elem_type"].currentText(),
-                "model_strategy": self.mesh_value("model_strategy"),
-                "armour_model": self.mesh_value("armour_model"),
                 "mesh_input_basis": mesh_req["basis"],
                 "target_sizes_mm": mesh_sizes,
-                "circumferential_division_policy": mesh_req["circumferential_policy"],
-                "mesh_algorithm_policy": mesh_req["mesh_algorithm_policy"],
                 "axial_divisions": mesh_counts["axial"],
                 "core_circumferential_divisions": mesh_counts["core_theta"],
                 "bedding_sheath_circumferential_divisions": mesh_counts["bedding_sheath_theta"],
@@ -2847,9 +2748,6 @@ class SCLASRemoteGUI(QMainWindow):
                 "bedding_radial_divisions": mesh_counts["bedding_r"],
                 "outer_sheath_radial_divisions": mesh_counts["outer_sheath_r"],
                 "bedding_sheath_radial_divisions": mesh_counts["bedding_r"],
-                "filler_divisions": mesh_counts["axial"],
-                "filler_z_divisions": mesh_counts["axial"],
-                "filler_z_divisions_source": "same_as_axial_divisions",
                 "filler_profile_divisions": {
                     "short_line": mesh_counts["filler_short_line"],
                     "long_line": mesh_counts["filler_long_line"],
@@ -2864,20 +2762,12 @@ class SCLASRemoteGUI(QMainWindow):
                     "ACD": "armour_circumferential_divisions",
                     "BSRD": "bedding_sheath_radial_divisions",
                 },
-                "axial_divisions_scope": "global_all_components",
-                "radial_divisions_per_layer": mesh_counts["bedding_r"],
-                "global_seed_size_mm": mesh_sizes["axial_mm"],
-                "local_refinement_factor": 1.0,
-                "contact_regularization_beta": safe_float(self.mesh_inputs["contact_beta"], 0.001, "Contact regularization beta"),
                 "coordinate_basis": "cylindrical_r_theta_z",
-                "note": "GUI writes resolved counts for backend compatibility. Target sizes are retained when Mesh input basis = Target size.",
             },
             "mesh_controls": {
                 "coordinate_basis": "cylindrical_r_theta_z",
                 "input_basis": mesh_req["basis"],
                 "target_sizes_mm": mesh_sizes,
-                "circumferential_division_policy": mesh_req["circumferential_policy"],
-                "mesh_algorithm_policy": mesh_req["mesh_algorithm_policy"],
                 "components": {
                     "Core": {
                         "r": {"mode": "disabled"},
@@ -2936,17 +2826,12 @@ class SCLASRemoteGUI(QMainWindow):
                 "external_pressure_mpa": safe_float(self.cond["pressure"], 0.3, "External pressure"),
                 "hydrostatic_pressure_mpa": safe_float(self.cond["pressure"], 0.3, "External pressure"),
                 "pressure_mpa": safe_float(self.cond["pressure"], 0.3, "Pressure"),
-                "residual_contact_pressure_mpa": safe_float(self.cond["residual_contact_pressure"], 0.3, "Residual contact pressure"),
                 "friction_coefficient": safe_float(self.cond["friction"], 0.3, "Friction coefficient"),
                 "contact_stiffness_scale_factor": None,
                 "max_curvature_1_per_m": safe_float(self.cond["curvature"], 5.0e-5, "Max curvature"),
                 "bend_factor": safe_float(self.cond["curvature"], 5.0e-5, "Bend factor"),
                 "curvature_unit": "1_per_m",
                 "curve_factors": [-0.1, -0.05, 0.0, 0.05, 0.1],
-                "max_twist_rad_per_m": safe_float(self.cond["twist"], 0.05, "Max twist"),
-                "max_axial_strain": safe_float(self.cond["axial_strain"], 0.002, "Max axial strain"),
-                "radial_compression_ratio": safe_float(self.cond["radial_compression"], 0.015, "Radial compression ratio"),
-                "contact_regularization_beta": safe_float(self.mesh_inputs["contact_beta"], 0.001, "Contact regularization beta"),
                 "loading_cycles": int(self.cond["cycles"].value()),
                 "solver_steps": int(self.cond["steps"].value()),
                 "run_mode": "export_job_only",
@@ -3005,12 +2890,7 @@ class SCLASRemoteGUI(QMainWindow):
             "modeling": {
                 "model_type": "full_3d",
                 "model_label": "Full 3D",
-                "equivalent_model_level": 1,
-                "use_equivalent_properties": False,
             },
-            "study_scope": self.collect_study_scope(),
-            "numerical_model": self.build_numerical_model_notes(),
-            "equivalent_properties": eq,
             "backend_output_contract": {
                 "required_csv": "result_data.csv",
                 "required_columns": ["curvature_1_per_m", "moment_kn_m"],
@@ -3018,12 +2898,6 @@ class SCLASRemoteGUI(QMainWindow):
                 "primary_result": "bending moment-curvature loop",
                 "optional_odb": "*.odb",
                 "mesh_manifest": "abaqus_mesh_manifest.json",
-                "additional_requested_assessments": [
-                    "torsion stiffness",
-                    "tension-bending coupling",
-                    "compression bird-caging risk",
-                    "hydrostatic pressure effect",
-                ],
             },
             "backend_exchange_contract": {
                 "input_source_of_truth": "input_data.json",
@@ -3056,105 +2930,11 @@ class SCLASRemoteGUI(QMainWindow):
                     "pitch_lengths": "computed by GUI from Menard-Cartraud 2023 Eq. (2) using helix pitch angles and layer mean radii",
                     "period_length": "computed by GUI from Menard-Cartraud 2023 Eq. (3); armour integer multipliers are auto-selected against the core period",
                     "effective_length_mm": "computed by GUI as the selected common period length L_eff",
-                    "filler_z_divisions": "mirrors mesh.axial_divisions; no separate GUI input",
                 },
             },
             "sclas_710_variable_contract": self.build_sclas710_variable_contract(dg, mesh_req),
         }
         return payload
-
-    def build_numerical_model_notes(self) -> dict:
-        friction = safe_float(self.cond["friction"], 0.3, "Friction coefficient")
-        residual_pressure = safe_float(self.cond["residual_contact_pressure"], 0.3, "Residual contact pressure")
-        contact_beta = safe_float(self.mesh_inputs["contact_beta"], 0.001, "Contact regularization beta")
-        dg = getattr(self, "derived_geom", {})
-        effective_length = float(dg.get("effective_length_mm", safe_float(self.cond["eff_length"], 234.2, "Effective length")))
-        return {
-            "literature_basis": [
-                {
-                    "id": "Chang2019_OceanEngineering",
-                    "focus": "coupled tensile, torsional, and compressive loads; water-pressure-induced stiffness reduction",
-                    "implementation_hint": "report axial-torsional coupling and compression/pressure softening metrics in result_summary.json",
-                },
-                {
-                    "id": "Menard2023_MarineStructures",
-                    "focus": "periodic homogenized 3D FE cell for cyclic bending with contact, friction, and residual pressure",
-                    "implementation_hint": "use helical-period job domain, periodic boundary conditions, beam/surface armour modelling, and slip-state calibration",
-                },
-            ],
-            "recommended_backend_sequence": [
-                "validate bending moment-curvature loop",
-                "calibrate friction and residual contact pressure using slip-zone stiffness and dissipated energy",
-                "add axial-torsional stiffness matrix under coupled tension/torsion",
-                "add compressive pressure sweep and bird-caging risk metric",
-                "extract local stresses/displacements for fatigue-relevant components",
-            ],
-            "contact_model": {
-                "normal": "penalty_or_augmented_lagrange",
-                "tangential": "coulomb_regularized",
-                "friction_coefficient": friction,
-                "residual_contact_pressure_mpa": residual_pressure,
-                "regularization_beta": contact_beta,
-            },
-            "contact_interfaces": [
-                {
-                    "name": "inner_armour_to_inner_sheath",
-                    "master": "inner_armour_helical_beams_or_surfaces",
-                    "slave": "inner_sheath_outer_surface",
-                    "priority": "high",
-                },
-                {
-                    "name": "inner_armour_to_bedding",
-                    "master": "inner_armour_helical_beams_or_surfaces",
-                    "slave": "bedding_inner_surface",
-                    "priority": "high",
-                },
-                {
-                    "name": "outer_armour_to_bedding",
-                    "master": "outer_armour_helical_beams_or_surfaces",
-                    "slave": "bedding_outer_surface",
-                    "priority": "high",
-                },
-                {
-                    "name": "outer_armour_to_outer_sheath",
-                    "master": "outer_armour_helical_beams_or_surfaces",
-                    "slave": "outer_sheath_inner_surface",
-                    "priority": "high",
-                },
-                {
-                    "name": "armour_cross_layer_interaction",
-                    "master": "outer_armour_layer",
-                    "slave": "inner_armour_layer",
-                    "priority": "medium",
-                },
-            ],
-            "contact_interface_defaults": {
-                "normal": "penalty_or_augmented_lagrange",
-                "tangential": "regularized_coulomb",
-                "friction_coefficient": friction,
-                "residual_contact_pressure_mpa": residual_pressure,
-                "regularization_beta": contact_beta,
-            },
-            "periodic_cell": {
-                "effective_length_mm": effective_length,
-                "effective_length_source": dg.get("effective_length_source", "core_pitch_length_mm_divided_by_core_count"),
-                "strategy": self.mesh_value("model_strategy"),
-                "armour_representation": self.mesh_value("armour_model"),
-                "note": "Effective length is derived from the core pitch length divided by the configured core count.",
-            },
-        }
-
-    def collect_study_scope(self) -> dict:
-        visible_keys = getattr(self, "visible_study_scope_keys", set(self.study_checks))
-        return {
-            "project_goal": "local behavior evaluation framework for submarine power cable",
-            "enabled_assessments": {
-                key: bool(widget.isChecked()) if key in visible_keys else False
-                for key, widget in self.study_checks.items()
-            },
-            "primary_gui_output": "moment-curvature hysteresis loop",
-            "backend_note": "GUI currently exposes bending plus pressure-effect scope only; torsion, tension, and compression remain backend/future defaults.",
-        }
 
     def collect_materials(self) -> List[dict]:
         rows = []
@@ -3173,35 +2953,6 @@ class SCLASRemoteGUI(QMainWindow):
             })
         return rows
 
-    def compute_equivalent_properties(self, materials: List[dict], dg: Dict[str, float]) -> dict:
-        # GUI-side estimate only. Abaqus should compute final stiffness from the full model.
-        conductor = next(
-            (
-                material
-                for material in materials
-                if "conductor" in str(material.get("material", "")).lower()
-                or "copper" in str(material.get("material", "")).lower()
-                or "conductor" in str(material.get("name", "")).lower()
-            ),
-            materials[0],
-        )
-        e_copper_pa = conductor["elastic_modulus_GPa"] * 1e9
-        r_cond_m = dg["conductor_radius_mm"] / 1000.0
-        core_center_m = dg["core_center_radius_mm"] / 1000.0
-        core_count = int(dg.get("core_count", 3))
-        area_cond = math.pi * r_cond_m ** 2
-        local_i = math.pi * r_cond_m ** 4 / 4.0
-        # GUI estimate only: includes parallel-axis contribution for off-center cores.
-        i_core_about_center = core_count * (local_i + area_cond * core_center_m ** 2)
-        ei_core = e_copper_pa * i_core_about_center
-        return {
-            "method": f"{core_count}_copper_cores_with_parallel_axis_estimate_GUI_only",
-            "core_count": core_count,
-            "core_equivalent_I_m4": i_core_about_center,
-            "core_equivalent_EI_N_m2": ei_core,
-            "warning": "Approximation only. Backend Abaqus result is authoritative.",
-        }
-
     # ---------------- Actions ----------------
     def validate_inputs_dialog(self) -> None:
         try:
@@ -3215,9 +2966,7 @@ class SCLASRemoteGUI(QMainWindow):
                 f"Core pitch length: {payload['derived_geometry_mm']['core_pitch_length_mm']:.3f} mm\n"
                 f"Selected period length: {payload['analysis_conditions']['effective_length_mm']:.3f} mm\n"
                 f"Inner armour backend pitch: {payload['armour']['inner_armour_backend_pitch_length_mm']:.3f} mm\n"
-                f"Outer armour backend pitch: {payload['armour']['outer_armour_backend_pitch_length_mm']:.3f} mm\n"
-                f"Estimated EI: {payload['equivalent_properties']['core_equivalent_EI_N_m2']:.6g} N.m^2\n"
-                f"Enabled assessments: {', '.join(k for k, v in payload['study_scope']['enabled_assessments'].items() if v)}"
+                f"Outer armour backend pitch: {payload['armour']['outer_armour_backend_pitch_length_mm']:.3f} mm"
             )
             self.set_badge(self.lbl_model_status, "Model: valid", "good")
             QMessageBox.information(self, "Validation complete", msg)
@@ -3253,8 +3002,6 @@ class SCLASRemoteGUI(QMainWindow):
 
         for widget in list(self.inputs.values()) + list(self.mesh_inputs.values()) + list(self.cond.values()):
             connect_widget(widget)
-        for widget in self.study_checks.values():
-            connect_widget(widget)
         if hasattr(self, "table"):
             self.table.itemChanged.connect(self.schedule_input_preview_refresh)
 
@@ -3272,10 +3019,6 @@ class SCLASRemoteGUI(QMainWindow):
         outer_pitch = pitch_design.get("outer_armour", {})
         job_root = Path(self.job_root_input.text().strip()).expanduser()
         job_folder = job_root / str(payload["metadata"]["job_id"])
-        enabled = [
-            key for key, value in payload["study_scope"]["enabled_assessments"].items()
-            if value
-        ]
         return "\n".join([
             "Abaqus input_data.json preview",
             "",
@@ -3317,8 +3060,6 @@ class SCLASRemoteGUI(QMainWindow):
             f"element_type: {mesh['requested_element_type']}",
             f"input_basis: {mesh['mesh_input_basis']}",
             f"target_sizes_mm: {mesh['target_sizes_mm']}",
-            f"strategy: {mesh['model_strategy']}",
-            f"armour_model: {mesh['armour_model']}",
             f"axial_divisions: {mesh['axial_divisions']}",
             f"core_circumferential_divisions CCD: {mesh['core_circumferential_divisions']}",
             f"bedding_sheath_circumferential_divisions BSCD: {mesh['bedding_sheath_circumferential_divisions']}",
@@ -3326,10 +3067,7 @@ class SCLASRemoteGUI(QMainWindow):
             f"inner_sheath_radial_divisions: {mesh['inner_sheath_radial_divisions']}",
             f"bedding_radial_divisions: {mesh['bedding_radial_divisions']}",
             f"outer_sheath_radial_divisions: {mesh['outer_sheath_radial_divisions']}",
-            f"filler_z_divisions: {mesh['filler_z_divisions']} ({mesh['filler_z_divisions_source']})",
             f"filler_profile_divisions FD1/FD2/FD3/FD4: {mesh['filler_profile_divisions']['short_line']}/{mesh['filler_profile_divisions']['long_line']}/{mesh['filler_profile_divisions']['short_arc']}/{mesh['filler_profile_divisions']['long_arc']}",
-            f"multiples_of_4_recommended: {mesh['circumferential_division_policy']['multiples_of_4_recommended_for_demo']}",
-            f"multiples_of_4_enforced: {mesh['circumferential_division_policy']['multiples_of_4_enforced']}",
             "",
             "[Analysis Conditions]",
             f"effective_length_mm: {analysis['effective_length_mm']:.5g}",
@@ -3338,18 +3076,7 @@ class SCLASRemoteGUI(QMainWindow):
             f"friction_coefficient: {analysis['friction_coefficient']:.5g}",
             f"loading_cycles: {analysis['loading_cycles']}",
             f"solver_steps: {analysis['solver_steps']}",
-            "",
-            "[Hidden Backend Defaults]",
             f"curve_factors: {analysis['curve_factors']}",
-            f"residual_contact_pressure_mpa: {analysis['residual_contact_pressure_mpa']:.5g}",
-            f"contact_regularization_beta: {analysis['contact_regularization_beta']:.5g}",
-            f"max_twist_rad_per_m: {analysis['max_twist_rad_per_m']:.5g}",
-            f"max_axial_strain: {analysis['max_axial_strain']:.5g}",
-            f"radial_compression_ratio: {analysis['radial_compression_ratio']:.5g}",
-            "solver_increment_policy: backend defaults",
-            "",
-            "[Enabled Assessments]",
-            ", ".join(enabled) if enabled else "none",
         ])
 
     def refresh_input_preview(self, payload: Optional[dict] = None) -> None:
@@ -3435,7 +3162,6 @@ class SCLASRemoteGUI(QMainWindow):
             "ui": {"language": self.ui_language},
             "geometry": {key: widget_value(widget) for key, widget in self.inputs.items()},
             "analysis_conditions": {key: widget_value(widget) for key, widget in self.cond.items()},
-            "study_scope": {key: widget.isChecked() for key, widget in self.study_checks.items()},
             "mesh": {key: widget_value(widget) for key, widget in self.mesh_inputs.items()},
             "backend": {
                 "mode": self.selected_mode(),
@@ -3489,9 +3215,6 @@ class SCLASRemoteGUI(QMainWindow):
             for key, value in settings.get("analysis_conditions", {}).items():
                 if key in self.cond:
                     set_widget(self.cond[key], value)
-        for key, value in settings.get("study_scope", {}).items():
-            if key in self.study_checks:
-                self.study_checks[key].setChecked(bool(value))
         if current_schema:
             for key, value in settings.get("mesh", {}).items():
                 if key in self.mesh_inputs:
@@ -4198,11 +3921,6 @@ class SCLASRemoteGUI(QMainWindow):
                 self.table.setItem(row, 4, QTableWidgetItem(str(material["density_kg_m3"])))
             updated += 1
 
-        for key, value in gui_values["study_scope"].items():
-            if key in self.study_checks:
-                self.study_checks[key].setChecked(bool(value))
-                updated += 1
-
         self.parse_geometry()
         self.trigger_rebuild()
         lines = [
@@ -4213,7 +3931,6 @@ class SCLASRemoteGUI(QMainWindow):
             f"inner_armour_wire_count: {self.derived_geom.get('inner_armour_wire_count', '-')} ({self.derived_geom.get('inner_armour_wire_count_source', '-')})",
             f"outer_armour_wire_count: {self.derived_geom.get('outer_armour_wire_count', '-')} ({self.derived_geom.get('outer_armour_wire_count_source', '-')})",
             f"pressure_mpa P: {self.cond['pressure'].text()}",
-            f"armour_model: {self.mesh_value('armour_model')}",
         ]
         self.last_summary_data = {}
         self.summary_text.setPlainText("\n".join(lines))
@@ -4488,12 +4205,6 @@ class SCLASRemoteGUI(QMainWindow):
                 node = node[key]
             return node
 
-        enabled = value(["study_scope", "enabled_assessments"], {})
-        if isinstance(enabled, dict):
-            enabled_text = ", ".join(key for key, flag in enabled.items() if flag) or "none"
-        else:
-            enabled_text = "-"
-
         mesh_status = value(["mesh_status", "status"], value(["mesh_status"], "-"))
         quality = data.get("abaqus_result_quality", {})
         odb = data.get("odb_extraction", {})
@@ -4522,7 +4233,6 @@ class SCLASRemoteGUI(QMainWindow):
                     f"루프 손실: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
                     f"데이터 수: {data.get('num_points', '-')}",
                     f"메시 상태: {mesh_status}",
-                    f"활성 연구 범위: {enabled_text}",
                 ]
         else:
             if force_preview:
@@ -4545,7 +4255,6 @@ class SCLASRemoteGUI(QMainWindow):
                     f"Loop loss: {float(data.get('hysteresis_loss_kj_per_m_proxy', 0.0)):.6g}",
                     f"Points: {data.get('num_points', '-')}",
                     f"Mesh status: {mesh_status}",
-                    f"Enabled scope: {enabled_text}",
                 ]
 
         if isinstance(quality, dict) and quality:

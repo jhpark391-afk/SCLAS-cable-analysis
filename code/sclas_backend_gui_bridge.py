@@ -57,7 +57,6 @@ def backend_payload_gui_values(payload):
     armour = payload.get("armour", {})
     mesh = payload.get("mesh", {})
     analysis = payload.get("analysis_conditions", {})
-    enabled = payload.get("study_scope", {}).get("enabled_assessments", {})
 
     return {
         "geometry": {
@@ -89,20 +88,13 @@ def backend_payload_gui_values(payload):
         "analysis_conditions": {
             "eff_length": first_present(analysis, "effective_length_mm"),
             "pressure": first_present(analysis, "external_pressure_mpa", "hydrostatic_pressure_mpa", "pressure_mpa", "P"),
-            "residual_contact_pressure": first_present(analysis, "residual_contact_pressure_mpa"),
             "friction": first_present(analysis, "friction_coefficient", "FrCo"),
             "curvature": first_present(analysis, "max_curvature_1_per_m", "bend_factor", "BendFac"),
-            "twist": first_present(analysis, "max_twist_rad_per_m"),
-            "axial_strain": first_present(analysis, "max_axial_strain"),
-            "radial_compression": first_present(analysis, "radial_compression_ratio"),
             "cycles": first_present(analysis, "loading_cycles"),
             "steps": first_present(analysis, "solver_steps"),
         },
         "mesh": {
             "elem_type": first_present(mesh, "solid_element_type", "requested_element_type"),
-            "model_strategy": first_present(mesh, "model_strategy"),
-            "armour_model": first_present(mesh, "armour_model"),
-            "contact_beta": first_present(mesh, "contact_regularization_beta"),
             "z_elem": first_present(mesh, "axial_divisions", "ZAD"),
             "c_elem_core": first_present(mesh, "core_circumferential_divisions", "CCD"),
             "c_elem_bedding_sheath": first_present(mesh, "bedding_sheath_circumferential_divisions", "BSCD"),
@@ -110,14 +102,12 @@ def backend_payload_gui_values(payload):
             "r_elem_inner_sheath": first_present(mesh, "inner_sheath_radial_divisions"),
             "r_elem_bedding": first_present(mesh, "bedding_radial_divisions", "bedding_sheath_radial_divisions", "radial_divisions_per_layer", "BSRD"),
             "r_elem_outer_sheath": first_present(mesh, "outer_sheath_radial_divisions"),
-            "filler_z_elem": first_present(mesh, "filler_z_divisions", "filler_divisions", "axial_divisions"),
             "filler_short_line_elem": first_present(mesh.get("filler_profile_divisions", {}), "short_line", "FD1"),
             "filler_long_line_elem": first_present(mesh.get("filler_profile_divisions", {}), "long_line", "FD2"),
             "filler_short_arc_elem": first_present(mesh.get("filler_profile_divisions", {}), "short_arc", "FD3"),
             "filler_long_arc_elem": first_present(mesh.get("filler_profile_divisions", {}), "long_arc", "FD4"),
         },
         "materials": payload.get("materials", []),
-        "study_scope": enabled if isinstance(enabled, dict) else {},
     }
 
 

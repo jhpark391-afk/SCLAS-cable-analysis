@@ -10,7 +10,7 @@
 |---|---|---|
 | User Input | 사용자가 직접 입력해야 하는 값 | 화면에 명확히 표시 |
 | Derived | GUI가 계산하는 값 | 읽기 전용 확인값 또는 JSON preview에 표시 |
-| Fixed / Backend Default | 현재 backend에서 고정하거나 숨겨 쓰는 값 | 일반 사용 화면에서는 숨김 |
+| Removed / Backend Fallback | 엑셀 변수표에 없거나 후속 연구용인 값 | GUI/export payload에서 제거, 필요한 경우 backend 내부 default로만 처리 |
 | Output | backend가 계산 후 돌려주는 결과 | Results 탭과 summary에서 표시 |
 
 보광이 피드백의 핵심은 "많이 보여주는 GUI"가 아니라 "필요한 입력만 남기고, 각 입력이 backend 어디에 쓰이는지 설명 가능한 GUI"로 정리하는 것이다.
@@ -76,27 +76,31 @@
 | Common period / Effective length | Eq. (3): `l = k_j*p_j/n_j`, core period 기준 | `analysis_conditions.effective_length_mm` | Analysis 탭에서 읽기 전용 |
 | Armour period multipliers | `round(L_eff*n_armour/p_raw)` | `derived_geometry_mm.*_period_multiplier` | GUI가 자동 선택 |
 | Armour backend pitch length | `L_eff*n_armour/k_armour` | `armour.*_backend_pitch_length_mm` | backend가 우선 사용 |
-| Filler z divisions | `mesh.axial_divisions`와 동일 | `mesh.filler_z_divisions` | 별도 입력 없음 |
 | Size-mode resolved mesh counts | `ceil(length_or_arc_or_thickness / target_size)` 후 spinbox 범위로 clamp | `mesh.*_divisions` | 사용자는 size 입력, backend는 기존 count key 사용 |
-| Equivalent EI estimate | material + conductor/core geometry 기반 GUI estimate | `equivalent_properties.core_equivalent_EI_N_m2` | 참고값, 연구 결과 아님 |
 
-## 4. 숨기거나 고정해야 할 값
+## 4. GUI/export에서 제거한 값
 
-아래 값들은 일반 사용자가 선택하게 하면 오히려 혼란이 커질 가능성이 높다.
+아래 값들은 `SCLAS_변수_정리710.xlsx`의 사용자 입력 변수표에 없거나 후속 연구용/호환용 metadata라서 GUI 위젯과 `input_data.json` export에서 제거했다. 기존 과거 JSON을 읽는 경우에는 backend runner가 자체 default/fallback으로 처리한다.
 
-| 항목 | 현재 상태 | 정리 방향 |
+| 항목 | 이전 상태 | 현재 처리 |
 |---|---|---|
-| `mesh.model_strategy` | backend 기본 `full_3d_segment` | 계속 숨김 |
-| `mesh.armour_model` | backend 기본 `solid_wire` | 계속 숨김 |
-| `mesh.requested_element_type` | GUI 표시값 `C3D8` | 선택형 combo가 아니라 고정 표시 |
-| `mesh.filler_z_divisions` | 호환 key로 JSON에 남음 | 화면에서는 숨김 |
-| `analysis_conditions.residual_contact_pressure_mpa` | hidden widget | 보광/현수 calibration 단계 전까지 숨김 |
-| `analysis_conditions.max_twist_rad_per_m` | future/coupled-load 기본값 | Analysis 탭 화면에서 숨김 |
-| `analysis_conditions.max_axial_strain` | future/coupled-load 기본값 | Analysis 탭 화면에서 숨김 |
-| `analysis_conditions.radial_compression_ratio` | future/coupled-load 기본값 | Analysis 탭 화면에서 숨김 |
-| solver increments | JSON fixed values | 전문가 모드 전까지 숨김 |
-| output request field list | JSON fixed list | backend 구현 기준으로 유지 |
-| run mode flags | backend 실행 모드 내부값 | 일반 변수표에서 분리 |
+| `mesh.model_strategy` | hidden fixed value | export 제거, backend는 full 3D workflow를 자체 결정 |
+| `mesh.armour_model` | hidden fixed value | export 제거, backend는 solid-wire 생성 로직에서 처리 |
+| `mesh.filler_z_divisions`, `mesh.filler_divisions` | axial division mirror 호환 key | export 제거, backend fallback은 `mesh.axial_divisions` 사용 |
+| `mesh.circumferential_division_policy` | 설명용 metadata | export 제거 |
+| `mesh.mesh_algorithm_policy` | 설명용 metadata | export 제거 |
+| `mesh.contact_regularization_beta` | hidden regularization value | export 제거, backend default로 처리 |
+| `analysis_conditions.residual_contact_pressure_mpa` | hidden widget | export 제거, backend/calibration 단계에서 별도 결정 |
+| `analysis_conditions.max_twist_rad_per_m` | future/coupled-load default | export 제거 |
+| `analysis_conditions.max_axial_strain` | future/coupled-load default | export 제거 |
+| `analysis_conditions.radial_compression_ratio` | future/coupled-load default | export 제거 |
+| `study_scope.enabled_assessments` | hidden/checkbox research scope | GUI/export 제거 |
+| `numerical_model` | 문헌 note metadata | export 제거, 별도 문서에서 관리 |
+| `equivalent_properties` | GUI preview용 EI 추정값 | export 제거, FAST preview 내부 계산으로만 사용 |
+| `mesh.requested_element_type` | GUI 표시값 `C3D8` | 유지하되 선택형 combo가 아니라 고정 표시 |
+| solver increments | SCLAS 710 solver 변수 | `solver.*`와 `solver.sclas_710_aliases`로 유지 |
+| output request field list | backend 결과 요청 | backend 구현 기준으로 유지 |
+| run mode flags | 실행 제어값 | GUI job 생성에 필요하므로 유지 |
 
 현재 GUI는 `Abaqus element type`을 `C3D8` 고정 표시로 단순화했다. `C3D8R`의 `R`은 reduced integration을 의미하므로 현재 발표/기본 계약값으로 쓰지 않는다. `C3D4`, `B31` 선택지는 사용자가 잘못 고를 수 있으므로 화면에서 제거했다. 내부 backend는 필요하면 solid/beam element를 자체적으로 결정해야 한다.
 
@@ -135,8 +139,7 @@
 2. `BendFac=5.0e-5`가 `max_curvature_1_per_m`와 같은 의미인지, 또는 별도 curve factor인지 확인한다.
 3. friction coefficient `FrCo=0.30`을 모든 contact pair에 공통 적용하는 것이 맞는가?
 4. `conStiff`는 아직 null로 두고 backend 내부/default로 처리해도 되는가?
-5. residual contact pressure `0.30 MPa`는 계속 숨겨두는가?
-5. twist, axial strain, radial compression은 지금 GUI에서 보여줄 필요가 있는가, 아니면 후속 연구 탭으로 숨길 것인가?
+5. residual contact pressure, twist, axial strain, radial compression은 GUI/export에서 제거했으므로, 필요 시 별도 전문가/후속 연구 계약으로 다시 추가할지 결정한다.
 
 ## 6. GUI 코드 구조 지도
 
@@ -153,9 +156,7 @@
 | `build_analysis_tab()` around line 1729 | backend mode, job root, run/create controls, results 조건 UI 생성 |
 | `parse_geometry()` around line 2133 | GUI 입력값을 radii, pitch length, effective length 등으로 계산 |
 | `build_payload()` around line 2266 | 모든 입력/계산값을 `input_data.json` 구조로 조립 |
-| `build_numerical_model_notes()` around line 2504 | contact/interface/periodic cell 관련 backend note 생성 |
 | `collect_materials()` around line 2596 | material table 8행을 `materials[]`로 변환 |
-| `compute_equivalent_properties()` around line 2613 | GUI 참고용 equivalent EI 계산 |
 | `install_input_preview_autorefresh()` around line 2674 | 입력값 변경 시 preview 자동 갱신 연결 |
 | `refresh_input_preview()` around line 2770 | 현재 `input_data.json` preview 표시 |
 | `apply_backend_payload_to_gui()` around line 3568 | 기존 backend JSON을 GUI widget 값으로 역매핑 |
@@ -212,7 +213,6 @@ Mesh 탭 Global axial n_z divisions
   -> self.mesh_inputs["z_elem"]
   -> build_payload()에서 mesh.axial_divisions 저장
   -> mesh_controls 모든 component z.count에 같은 값 저장
-  -> filler_z_divisions도 같은 값으로 mirror
   -> abaqus_runner.py에서 seedEdgeByNumber axial division에 사용
 ```
 
@@ -230,8 +230,8 @@ Mesh 탭 Target size mode
 2026-07-09 기준으로 GUI 3번 탭도 단순화했다.
 
 1. Analysis 탭은 `Effective length`, `Loading cycles`, `Result points`만 직접 표시한다.
-2. `twist`, `axial_strain`, `radial_compression`은 payload default로 남기되 화면에서는 숨긴다.
-3. `Research Scope / Local Behavior` 체크박스 묶음은 화면에서 제거하고, payload에는 bending/pressure 중심 scope만 남긴다.
+2. `twist`, `axial_strain`, `radial_compression`, residual contact pressure는 GUI/export에서 제거하고 backend fallback/default로만 둔다.
+3. `Research Scope / Local Behavior` 체크박스 묶음과 `study_scope` payload는 제거한다.
 4. Backend mode는 `FAST GUI preview`, `Export job package only`, `Run local/shared-folder command`만 화면에 표시한다.
 5. SSH/scp 원격 설정은 코드 호환용으로 남기되 일반 GUI 화면에서는 숨긴다.
 6. Run Controls에 `Import Backend JSON` 버튼을 추가해 `input_data.json`을 GUI 값으로 다시 불러오는 정보 교환 루프를 명확히 했다.
@@ -240,6 +240,6 @@ Mesh 탭 Target size mode
 
 1. Derived Pitch / Length 박스는 Design 탭에 남기되 "calculated, not user input" 문구를 추가하거나 JSON preview 쪽으로 옮긴다.
 2. 보광이 엑셀의 최종 기본값을 받아 Design/FEA Setting 탭 기본값과 변수 register를 다시 맞춘다.
-3. `docs/SCLAS_GUI_VARIABLE_REGISTER_20260708.xlsx`에 `User Input / Derived / Hidden Backend Default / Output` 판정 열을 추가한다.
+3. `docs/SCLAS_GUI_VARIABLE_REGISTER_20260708.xlsx`에 `User Input / Derived / Removed Backend Fallback / Output` 판정 열을 추가한다.
 
-이후 코드 삭제는 backend가 실제로 더 이상 읽지 않는 것이 확인된 뒤에 진행하는 것이 안전하다.
+이후 추가 삭제는 backend가 실제로 더 이상 읽지 않는 것이 확인된 뒤에 진행하는 것이 안전하다.
