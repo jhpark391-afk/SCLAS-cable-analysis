@@ -2,6 +2,22 @@
 
 Last updated: 2026-07-11 KST
 
+## SCLAS 711 GUI Defaults Cleanup - 2026-07-11 KST
+
+- Applied the new `SCLAS_변수_정리711.xlsx` defaults as the GUI startup
+  source of truth.
+- Removed the visible `Import key,value CSV` design-tab workflow and deleted
+  the unused loader method.
+- Removed visible `Core count`, `Loading cycles`, and `Result points` inputs.
+  The backend payload still carries fixed compatibility values:
+  `geometry_mm.core_count = 3`, `analysis_conditions.loading_cycles = 1`, and
+  `analysis_conditions.solver_steps = 500`.
+- Prevented local `settings.json` from overwriting SCLAS 711 workbook-controlled
+  geometry, analysis, and mesh defaults. This fixes the startup issue where an
+  old local setting could force conductor radius to `5` instead of the workbook
+  default `Roc = 4`.
+- Added a self-check guard for these GUI defaults and removed-input regressions.
+
 ## automatic.py JSON Input Bridge - 2026-07-11 KST
 
 - Mapped the hardcoded input variables observed in

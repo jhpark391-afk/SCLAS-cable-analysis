@@ -80,7 +80,7 @@ from sclas_backend_gui_bridge import (
 from sclas_inp_mesh_preview import PART_COLORS, build_inp_mesh_preview, format_inp_mesh_summary
 from sclas_job_filters import candidate_job_dirs
 
-SCLAS_710_VARIABLE_DEFAULTS = {
+SCLAS_711_VARIABLE_DEFAULTS = {
     "geometry_input": {
         "Roc": 4.0,
         "RoI": 11.3,
@@ -132,7 +132,7 @@ SCLAS_710_VARIABLE_DEFAULTS = {
     },
 }
 
-APP_VERSION = "12.0-abaqus-quality-summary"
+APP_VERSION = "12.1-sclas711-defaults"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
@@ -1481,12 +1481,6 @@ class SCLASRemoteGUI(QMainWindow):
         left.setContentsMargins(18, 16, 18, 16)
         left.setSpacing(10)
         left.addWidget(self.header("Cable Geometry Inputs"))
-        self.btn_load_csv = QPushButton("Import key,value CSV")
-        self.btn_load_csv.setFixedHeight(42)
-        self.btn_load_csv.setToolTip("Load the original SCLAS CSV-style key/value input table.")
-        self.btn_load_csv.clicked.connect(self.load_csv)
-        left.addWidget(self.btn_load_csv)
-
         self.inputs = {
             "r_cond": QLineEdit("4.00"),
             "r_insu": QLineEdit("11.30"),
@@ -1504,6 +1498,7 @@ class SCLASRemoteGUI(QMainWindow):
             "core_count": QSpinBox(),
         }
         self.inputs["core_count"].setRange(1, 12); self.inputs["core_count"].setValue(3)
+        self.inputs["core_count"].setVisible(False)
         self.inputs["core_count"].setToolTip("Default 3. Passed to the backend job setup; effective length is core pitch length divided by this count.")
         self.inputs["no_ia"].setRange(0, 300); self.inputs["no_ia"].setValue(55); self.inputs["no_ia"].setSpecialValueText("Auto")
         self.inputs["no_oa"].setRange(0, 300); self.inputs["no_oa"].setValue(63); self.inputs["no_oa"].setSpecialValueText("Auto")
@@ -1515,7 +1510,6 @@ class SCLASRemoteGUI(QMainWindow):
                     ("Conductor radius r_cond (mm)", "r_cond"),
                     ("Insulation radius r_ins (mm)", "r_insu"),
                     ("Core outer radius R_core (mm)", "roc"),
-                    ("Core count n_core", "core_count"),
                 ],
             ),
             (
@@ -2143,7 +2137,7 @@ class SCLASRemoteGUI(QMainWindow):
         if hasattr(self, "cond"):
             return
         self.cond = {
-            "eff_length": QLineEdit("234.20"),
+            "eff_length": QLineEdit("234.07161"),
             "pressure": QLineEdit("0.30"),
             "friction": QLineEdit("0.30"),
             "contact_stiffness": QLineEdit("0.005"),
@@ -2151,16 +2145,18 @@ class SCLASRemoteGUI(QMainWindow):
             "cycles": QSpinBox(),
             "steps": QSpinBox(),
         }
-        self.cond["cycles"].setRange(1, 20); self.cond["cycles"].setValue(2)
+        self.cond["cycles"].setRange(1, 20); self.cond["cycles"].setValue(1)
+        self.cond["cycles"].setVisible(False)
         self.cond["steps"].setRange(50, 10000); self.cond["steps"].setValue(500)
+        self.cond["steps"].setVisible(False)
         analysis_tips = {
             "eff_length": "Auto-computed as core pitch length divided by core count. Backend uses this as the model length.",
             "pressure": "SCLAS 711 variable P. Residual/production pressure passed to the Abaqus analysis request.",
             "friction": "Coulomb friction coefficient for armour-to-sheath and armour-to-bedding contact.",
             "contact_stiffness": "SCLAS 711 variable conStiff. Abaqus normal contactStiffnessScaleFactor.",
             "curvature": "SCLAS 711 variable BendFac. Target bending curvature/factor for the bending request.",
-            "cycles": "Number of loading cycles in the preview/result request.",
-            "steps": "Number of output samples in the result curve.",
+            "cycles": "Hidden backend default. GUI does not expose this as a SCLAS 711 input.",
+            "steps": "Hidden preview sampling default. GUI does not expose this as a SCLAS 711 input.",
         }
         self.cond["eff_length"].setReadOnly(True)
         self.cond["eff_length"].setStyleSheet("background: #f8fafc; color: #0b5cad; font-weight: 750;")
@@ -2184,8 +2180,6 @@ class SCLASRemoteGUI(QMainWindow):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(9)
         form.addRow(self.form_label("Effective length L_eff (mm)"), self.cond["eff_length"])
-        form.addRow(self.form_label("Loading cycles"), self.cond["cycles"])
-        form.addRow(self.form_label("Result points"), self.cond["steps"])
         left.addWidget(self.collapsible_section("Run Inputs", conditions_box, expanded=True))
 
         backend_box = QFrame()
@@ -2589,7 +2583,8 @@ class SCLASRemoteGUI(QMainWindow):
         tos = safe_float(self.inputs["tos"], 4.5, "Outer sheath thickness")
         nia_input = int(self.inputs["no_ia"].value())
         noa_input = int(self.inputs["no_oa"].value())
-        core_count = int(self.inputs["core_count"].value())
+        core_count = 3
+        self.inputs["core_count"].setValue(core_count)
         core_lay_angle = safe_float(self.inputs["core_lay_angle"], 9.0, "Core helix pitch angle")
         inner_lay_angle = safe_float(self.inputs["inner_lay_angle"], -20.1, "Inner armour helix pitch angle")
         outer_lay_angle = safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour helix pitch angle")
@@ -2650,7 +2645,7 @@ class SCLASRemoteGUI(QMainWindow):
             "insulation_radius_mm": ri,
             "core_outer_radius_mm": roc,
             "core_count": core_count,
-            "core_count_source": "GUI_default_or_user",
+            "core_count_source": "fixed_sclas711_default",
             "core_center_radius_mm": coc,
             "core_center_radius_input_mm": coc,
             "core_center_radius_source": "auto_2sqrt3_over_3_times_core_outer_radius",
@@ -2747,7 +2742,7 @@ class SCLASRemoteGUI(QMainWindow):
                 "Roc maps to conductor radius and RoI maps to insulation radius. "
                 "SCLAS 711 confirmed defaults are Roc=4.0 mm and RoI=11.3 mm."
             ),
-            "defaults": SCLAS_710_VARIABLE_DEFAULTS,
+            "defaults": SCLAS_711_VARIABLE_DEFAULTS,
             "geometry_input": {
                 "Roc": {"value": safe_float(self.inputs["r_cond"], 4.0, "Conductor radius"), "json_path": "geometry_mm.conductor_radius_mm"},
                 "RoI": {"value": safe_float(self.inputs["r_insu"], 11.3, "Insulation radius"), "json_path": "geometry_mm.insulation_radius_mm"},
@@ -2847,7 +2842,7 @@ class SCLASRemoteGUI(QMainWindow):
                 "conductor_radius_mm": safe_float(self.inputs["r_cond"], 4.0, "Conductor radius"),
                 "insulation_radius_mm": safe_float(self.inputs["r_insu"], 11.3, "Insulation radius"),
                 "core_outer_radius_mm": dg["core_outer_radius_mm"],
-                "core_count": int(self.inputs["core_count"].value()),
+                "core_count": 3,
                 "core_center_radius_mm": dg["core_center_radius_mm"],
                 "inner_sheath_thickness_mm": safe_float(self.inputs["tis"], 4.5, "Inner sheath thickness"),
                 "bedding_thickness_mm": safe_float(self.inputs["bedding_thickness"], 0.6, "Bedding thickness"),
@@ -2994,8 +2989,8 @@ class SCLASRemoteGUI(QMainWindow):
                 "bend_factor": safe_float(self.cond["curvature"], 5.0e-5, "Bend factor"),
                 "curvature_unit": "1_per_m",
                 "curve_factors": [-0.1, -0.05, 0.0, 0.05, 0.1],
-                "loading_cycles": int(self.cond["cycles"].value()),
-                "solver_steps": int(self.cond["steps"].value()),
+                "loading_cycles": 1,
+                "solver_steps": 500,
                 "run_mode": "export_job_only",
                 "save_abaqus_files": True,
                 "run_solver": False,
@@ -3237,8 +3232,6 @@ class SCLASRemoteGUI(QMainWindow):
             f"external_pressure_mpa: {analysis['external_pressure_mpa']:.5g}",
             f"bend_factor/max_curvature_1_per_m: {analysis['max_curvature_1_per_m']:.5g}",
             f"friction_coefficient: {analysis['friction_coefficient']:.5g}",
-            f"loading_cycles: {analysis['loading_cycles']}",
-            f"solver_steps: {analysis['solver_steps']}",
             f"curve_factors: {analysis['curve_factors']}",
         ])
 
@@ -3323,10 +3316,6 @@ class SCLASRemoteGUI(QMainWindow):
             "version": APP_VERSION,
             "settings_schema": SETTINGS_SCHEMA_VERSION,
             "ui": {"language": self.ui_language},
-            "geometry": {key: widget_value(widget) for key, widget in self.inputs.items()},
-            "analysis_conditions": {key: widget_value(widget) for key, widget in self.cond.items()},
-            "mesh": {key: widget_value(widget) for key, widget in self.mesh_inputs.items()},
-            "mesh_basis_by_field": self.mesh_basis_by_field() if hasattr(self, "mesh_basis_controls") else {},
             "backend": {
                 "mode": self.selected_mode(),
                 "job_root": self.job_root_input.text().strip(),
@@ -3368,38 +3357,8 @@ class SCLASRemoteGUI(QMainWindow):
                 "and resetting SCLAS 711-controlled geometry, analysis, and mesh defaults."
             )
 
-        sclas710_geometry_keys = {"core_lay_angle", "inner_lay_angle", "outer_lay_angle"}
-
-        for key, value in settings.get("geometry", {}).items():
-            if key in self.inputs:
-                if not current_schema and key in sclas710_geometry_keys:
-                    continue
-                set_widget(self.inputs[key], value)
-        if current_schema:
-            for key, value in settings.get("analysis_conditions", {}).items():
-                if key in self.cond:
-                    set_widget(self.cond[key], value)
-        if current_schema:
-            for key, value in settings.get("mesh", {}).items():
-                if key in self.mesh_inputs:
-                    set_widget(self.mesh_inputs[key], value)
-            field_to_count_key = {
-                "axial": "z_elem",
-                "core_theta": "c_elem_core",
-                "bedding_sheath_theta": "c_elem_bedding_sheath",
-                "armour_theta": "c_elem_armour",
-                "inner_sheath_r": "r_elem_inner_sheath",
-                "bedding_r": "r_elem_bedding",
-                "outer_sheath_r": "r_elem_outer_sheath",
-            }
-            for field, basis in settings.get("mesh_basis_by_field", {}).items():
-                count_key = field_to_count_key.get(field)
-                combo = getattr(self, "mesh_basis_controls", {}).get(count_key)
-                if combo is None:
-                    continue
-                idx = combo.findData(str(basis))
-                if idx >= 0:
-                    combo.setCurrentIndex(idx)
+        if settings.get("geometry") or settings.get("analysis_conditions") or settings.get("mesh"):
+            self.log("[SETTINGS] SCLAS 711 Excel-controlled inputs reset to workbook defaults.")
 
         backend = settings.get("backend", {})
         if backend.get("job_root"):
@@ -4073,10 +4032,14 @@ class SCLASRemoteGUI(QMainWindow):
         gui_values = backend_payload_gui_values(payload)
 
         for key, value in gui_values["geometry"].items():
+            if key == "core_count":
+                continue
             if key in self.inputs:
                 updated += int(self.set_input_widget_value(self.inputs[key], value))
 
         for key, value in gui_values["analysis_conditions"].items():
+            if key in {"cycles", "steps"}:
+                continue
             if key in self.cond:
                 updated += int(self.set_input_widget_value(self.cond[key], value))
 
@@ -4138,7 +4101,7 @@ class SCLASRemoteGUI(QMainWindow):
             QMessageBox.information(
                 self,
                 "Backend preset",
-                "Backend preset loading was removed from the Design tab. Use Import key,value CSV or the Analysis backend controls.",
+                "Backend preset loading was removed from the Design tab. Use Import Backend JSON or the Analysis backend controls.",
             )
             return
         label = self.backend_preset_combo.currentText()
@@ -4158,54 +4121,6 @@ class SCLASRemoteGUI(QMainWindow):
         except Exception as exc:
             self.set_badge(self.lbl_model_status, "Model: error", "error")
             QMessageBox.critical(self, "Backend preset load error", str(exc))
-
-    def load_csv(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Open key,value CSV", "", "CSV Files (*.csv)")
-        if not path:
-            return
-        try:
-            aliases = {
-                "Radius of Conductor": "r_cond",
-                "Radius of Insulation": "r_insu",
-                "Radius of Core": "roc",
-                "Centre of Core": "coc",
-                "Center of Core": "coc",
-                "Thickness of Inner Sheath": "tis",
-                "Bedding thickness": "bedding_thickness",
-                "Bedding Thickness": "bedding_thickness",
-                "Thickness of Bedding": "bedding_thickness",
-                "Number of Inner Armour": "no_ia",
-                "Radius of Inner Armour": "r_ia",
-                "Number of Outer Armour": "no_oa",
-                "Radius of Outer Armour": "r_oa",
-                "Thickness of Outer Sheath": "tos",
-                "Length": "eff_length",
-                "Helix Angle of Core": "core_lay_angle",
-                "Core Lay Angle": "core_lay_angle",
-                "Helix Angle of Inner Armour": "inner_lay_angle",
-                "Helix Angle of Outer Armour": "outer_lay_angle",
-            }
-            updated = 0
-            with open(path, "r", encoding="utf-8-sig", newline="") as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    if len(row) < 2:
-                        continue
-                    raw_key, value = row[0].strip(), row[1].strip()
-                    if not raw_key or not value:
-                        continue
-                    key = raw_key if raw_key in self.inputs else aliases.get(raw_key)
-                    target = self.inputs if key in self.inputs else self.cond if key in self.cond else None
-                    if target:
-                        widget = target[key]
-                        if isinstance(widget, QLineEdit):
-                            widget.setText(str(parse_csv_number(value)))
-                        elif isinstance(widget, QSpinBox):
-                            widget.setValue(int(round(parse_csv_number(value))))
-                        updated += 1
-            QMessageBox.information(self, "CSV loaded", f"Updated {updated} fields.")
-        except Exception as exc:
-            QMessageBox.critical(self, "CSV load error", str(exc))
 
     # ---------------- Plot / geometry ----------------
     def update_plot(self, k: np.ndarray, m: np.ndarray, summary: dict = None) -> None:

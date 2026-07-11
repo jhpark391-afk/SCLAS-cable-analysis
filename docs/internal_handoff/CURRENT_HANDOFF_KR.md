@@ -1,4 +1,14 @@
-﻿# 2026-07-10 C3D8 element type 피드백 반영
+# 2026-07-11 SCLAS 711 GUI default cleanup
+
+* SCLAS_변수_정리711.xlsx 기준으로 GUI 시작 기본값을 고정했습니다.
+* Design 탭의 Import key,value CSV 기능과 loader 함수를 제거했습니다.
+* Core count, Loading cycles, Result points는 화면 입력에서 제거했습니다.
+* backend 호환 payload에는 core_count=3, loading_cycles=1, solver_steps=500을 고정값으로 유지합니다.
+* 로컬 settings.json이 conductor radius=5 같은 이전 값을 다시 덮어쓰지 않도록 geometry/analysis/mesh 저장값 로드를 차단했습니다.
+* self-check에 SCLAS 711 default 회귀 방지 검사를 추가했습니다.
+
+---
+# 2026-07-10 C3D8 element type 피드백 반영
 
 * 팀 피드백 캡처 기준으로 GUI/JSON 기본 element type을 `C3D8R`에서 `C3D8`로 수정했습니다.
 * `C3D8R`의 `R`은 reduced integration을 의미하므로, 계산 단순화 모델로 오해될 수 있어 현재 발표/기본 계약값에서 제외했습니다.

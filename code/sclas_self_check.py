@@ -78,6 +78,35 @@ def check_compile() -> None:
     print("[OK] Python files compile")
 
 
+def check_gui_sclas711_defaults() -> None:
+    source = (CODE_DIR / "sclas_remote_gui.py").read_text(encoding="utf-8-sig")
+    forbidden = [
+        "self.btn_load_csv",
+        "def load_csv(",
+        "Loading cycles\"), self.cond[\"cycles\"]",
+        "Result points\"), self.cond[\"steps\"]",
+        "\"geometry\": {key: widget_value(widget) for key, widget in self.inputs.items()}",
+        "\"analysis_conditions\": {key: widget_value(widget) for key, widget in self.cond.items()}",
+        "\"mesh\": {key: widget_value(widget) for key, widget in self.mesh_inputs.items()}",
+    ]
+    for snippet in forbidden:
+        if snippet in source:
+            fail(f"GUI SCLAS 711 defaults regressed; found forbidden snippet: {snippet}")
+    required = [
+        "SCLAS_711_VARIABLE_DEFAULTS",
+        "APP_VERSION = \"12.1-sclas711-defaults\"",
+        "core_count = 3",
+        "\"core_count_source\": \"fixed_sclas711_default\"",
+        "\"loading_cycles\": 1",
+        "\"solver_steps\": 500",
+        "SCLAS 711 Excel-controlled inputs reset to workbook defaults.",
+    ]
+    for snippet in required:
+        if snippet not in source:
+            fail(f"GUI SCLAS 711 defaults missing required snippet: {snippet}")
+    print("[OK] GUI SCLAS 711 defaults")
+
+
 def rich_backend_payload() -> dict:
     """Build a GUI-like payload so normal Python checks the Abaqus contract shape."""
     return {
@@ -1896,6 +1925,7 @@ def main() -> int:
     checks = [
         check_pyproj_references,
         check_compile,
+        check_gui_sclas711_defaults,
         check_inp_mesh_preview_parser,
         check_backend_contract,
         check_geometry_scaling_contract,
