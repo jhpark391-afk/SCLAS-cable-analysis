@@ -199,6 +199,15 @@ graph TD
 * 주의: 엑셀의 `Roc=11`, `RoI=4` 기본값은 현재 GUI/backend 수식에서 conductor radius가 insulation radius보다 커지는 충돌을 만들 수 있어, 화면 기본값은 기존 물리적으로 유효한 `r_cond=4.00`, `r_ins=11.30`, `R_core=15.30`을 유지하고 계약 note에 기록합니다.
 
 ---
+# 2026-07-11 Mesh row별 Count/Size 선택 및 INP import UI 제거
+
+* Mesh Setting Guide의 전역 `Mesh input basis` 콤보를 제거했습니다.
+* `Axial`, `Core`, `Bedding/Sheath`, `Armour`, `Inner sheath`, `Bedding`, `Outer sheath` 각 row마다 독립 `Count/Size` 콤보를 추가했습니다.
+* `input_data.json`에는 전체 상태를 `mesh.mesh_input_basis`로, row별 상태를 `mesh.mesh_input_basis_by_field`와 `mesh_controls.input_basis_by_field`로 저장합니다.
+* 선택이 `Size`인 row만 target size를 count로 환산하고, 나머지는 사용자가 입력한 count를 그대로 사용합니다.
+* 좌측 패널의 `Import Abaqus INP` 버튼과 INP summary 박스는 제거했습니다. 실제 Abaqus 결과/mesh 검토는 backend 산출물과 Results/diagnostics 흐름에서 확인합니다.
+
+---
 # 2026-07-11 SCLAS 710 변수표 기준 정크 변수 제거
 
 * `C:\HELIX\Abaqus+_work\SCLAS_변수_정리710.xlsx` 기준으로 GUI/export 변수 목록을 다시 줄였습니다.

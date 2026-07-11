@@ -1699,27 +1699,84 @@ class SCLASRemoteGUI(QMainWindow):
             else:
                 w.valueChanged.connect(self.trigger_rebuild)
 
-    def mesh_count_size_stack(self, count_key: str, size_key: str) -> QStackedWidget:
+    def mesh_count_size_stack(self, count_key: str, size_key: str) -> QWidget:
+        control = QWidget()
+        layout = QHBoxLayout(control)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        combo = QComboBox()
+        combo.addItem("Count", "count")
+        combo.addItem("Size", "size")
+        combo.setFixedWidth(74)
+        combo.setToolTip("Choose count or target size for this mesh variable only.")
         stack = QStackedWidget()
         stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         stack.setMinimumWidth(112)
         stack.addWidget(self.mesh_inputs[count_key])
         stack.addWidget(self.mesh_inputs[size_key])
-        self.mesh_basis_stacks.append(stack)
-        return stack
+        layout.addWidget(combo)
+        layout.addWidget(stack, 1)
+        self.mesh_basis_controls[count_key] = combo
+        self.mesh_basis_stacks[count_key] = stack
+        combo.currentIndexChanged.connect(lambda _index, k=count_key: self.set_mesh_input_basis(k))
+        return control
 
-    def set_mesh_input_basis(self, *args) -> None:
-        basis = self.mesh_input_basis()
-        stack_index = 1 if basis == "size" else 0
-        for stack in getattr(self, "mesh_basis_stacks", []):
-            stack.setCurrentIndex(stack_index)
+    def set_mesh_input_basis(self, key: Optional[str] = None, *args) -> None:
+        keys = [key] if key else list(getattr(self, "mesh_basis_stacks", {}))
+        for count_key in keys:
+            stack = self.mesh_basis_stacks.get(count_key)
+            if stack is None:
+                continue
+            basis = self.mesh_field_basis(count_key)
+            stack.setCurrentIndex(1 if basis == "size" else 0)
         self.update_mesh_guide()
         self.schedule_input_preview_refresh()
 
-    def mesh_input_basis(self) -> str:
-        if not hasattr(self, "mesh_inputs") or "mesh_basis" not in self.mesh_inputs:
+    def mesh_field_basis(self, count_key: str) -> str:
+        combo = getattr(self, "mesh_basis_controls", {}).get(count_key)
+        if combo is None:
             return "count"
-        return str(self.mesh_inputs["mesh_basis"].currentData() or "count")
+        return str(combo.currentData() or "count")
+
+    def mesh_input_basis(self) -> str:
+        if not hasattr(self, "mesh_basis_controls") or not self.mesh_basis_controls:
+            return "count"
+        values = {self.mesh_field_basis(key) for key in self.mesh_basis_controls}
+        if len(values) == 1:
+            return values.pop()
+        return "mixed"
+
+    def mesh_basis_by_field(self) -> dict:
+        return {
+            "axial": self.mesh_field_basis("z_elem"),
+            "core_theta": self.mesh_field_basis("c_elem_core"),
+            "bedding_sheath_theta": self.mesh_field_basis("c_elem_bedding_sheath"),
+            "armour_theta": self.mesh_field_basis("c_elem_armour"),
+            "inner_sheath_r": self.mesh_field_basis("r_elem_inner_sheath"),
+            "bedding_r": self.mesh_field_basis("r_elem_bedding"),
+            "outer_sheath_r": self.mesh_field_basis("r_elem_outer_sheath"),
+            "filler_short_line": "count",
+            "filler_long_line": "count",
+            "filler_short_arc": "count",
+            "filler_long_arc": "count",
+        }
+
+    def set_all_mesh_input_basis(self, basis: str) -> None:
+        for key, combo in getattr(self, "mesh_basis_controls", {}).items():
+            idx = combo.findData(basis)
+            if idx >= 0:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(idx)
+                combo.blockSignals(False)
+            self.set_mesh_input_basis(key)
+
+    def mesh_input_basis_label(self) -> str:
+        basis = self.mesh_input_basis()
+        if basis == "size":
+            return "target size"
+        if basis == "mixed":
+            return "mixed count/size"
+        return "division count"
 
     def mesh_size_float(self, key: str, default: float) -> float:
         widget = self.mesh_inputs.get(key)
@@ -1740,6 +1797,7 @@ class SCLASRemoteGUI(QMainWindow):
             dg = getattr(self, "derived_geom", {}) or self.parse_geometry()
 
         basis = self.mesh_input_basis()
+        basis_by_field = self.mesh_basis_by_field()
         counts = {
             "axial": int(self.mesh_inputs["z_elem"].value()),
             "core_theta": int(self.mesh_inputs["c_elem_core"].value()),
@@ -1762,54 +1820,53 @@ class SCLASRemoteGUI(QMainWindow):
             "bedding_radial_mm": None,
             "outer_sheath_radial_mm": None,
         }
-        if basis == "size":
-            axial_size = self.mesh_size_float("z_size", 5.85)
-            core_theta_size = self.mesh_size_float("c_size_core", 13.5)
-            bedding_sheath_theta_size = self.mesh_size_float("c_size_bedding_sheath", 3.3)
-            armour_theta_size = self.mesh_size_float("c_size_armour", 1.6)
-            inner_r_size = self.mesh_size_float("r_size_inner_sheath", 1.5)
-            bedding_r_size = self.mesh_size_float("r_size_bedding", 0.6)
-            outer_r_size = self.mesh_size_float("r_size_outer_sheath", 1.5)
-            sizes = {
-                "axial_mm": axial_size,
-                "core_sheath_circumferential_mm": core_theta_size,
-                "bedding_sheath_circumferential_mm": bedding_sheath_theta_size,
-                "armour_circumferential_mm": armour_theta_size,
-                "inner_sheath_radial_mm": inner_r_size,
-                "bedding_radial_mm": bedding_r_size,
-                "outer_sheath_radial_mm": outer_r_size,
-            }
-            effective_length = max(float(dg.get("effective_length_mm", 234.2)), axial_size)
-            outer_radius = max(float(dg.get("outer_sheath_outer_radius_mm", 51.0)), core_theta_size / (2.0 * math.pi))
-            armour_radius = max(
-                float(dg.get("inner_armour_wire_radius_mm", 2.0)),
-                float(dg.get("outer_armour_wire_radius_mm", 2.0)),
-                armour_theta_size / (2.0 * math.pi),
-            )
-            inner_thickness = max(
-                float(dg.get("inner_sheath_outer_radius_mm", 0.0)) - float(dg.get("inner_sheath_inner_radius_mm", 0.0)),
-                inner_r_size,
-            )
-            bedding_thickness = max(float(dg.get("bedding_thickness_mm", 0.6)), bedding_r_size)
-            outer_thickness = max(
-                float(dg.get("outer_sheath_outer_radius_mm", 0.0)) - float(dg.get("outer_sheath_inner_radius_mm", 0.0)),
-                outer_r_size,
-            )
-            counts = {
-                "axial": self.clamp_mesh_count(math.ceil(effective_length / axial_size), self.mesh_inputs["z_elem"]),
-                "core_theta": self.clamp_mesh_count(math.ceil(2.0 * math.pi * outer_radius / core_theta_size), self.mesh_inputs["c_elem_core"]),
-                "bedding_sheath_theta": self.clamp_mesh_count(math.ceil(2.0 * math.pi * outer_radius / bedding_sheath_theta_size), self.mesh_inputs["c_elem_bedding_sheath"]),
-                "armour_theta": self.clamp_mesh_count(math.ceil(2.0 * math.pi * armour_radius / armour_theta_size), self.mesh_inputs["c_elem_armour"]),
-                "inner_sheath_r": self.clamp_mesh_count(math.ceil(inner_thickness / inner_r_size), self.mesh_inputs["r_elem_inner_sheath"]),
-                "bedding_r": self.clamp_mesh_count(math.ceil(bedding_thickness / bedding_r_size), self.mesh_inputs["r_elem_bedding"]),
-                "outer_sheath_r": self.clamp_mesh_count(math.ceil(outer_thickness / outer_r_size), self.mesh_inputs["r_elem_outer_sheath"]),
-                "filler_short_line": int(self.mesh_inputs["filler_short_line_elem"].value()),
-                "filler_long_line": int(self.mesh_inputs["filler_long_line_elem"].value()),
-                "filler_short_arc": int(self.mesh_inputs["filler_short_arc_elem"].value()),
-                "filler_long_arc": int(self.mesh_inputs["filler_long_arc_elem"].value()),
-            }
+        axial_size = self.mesh_size_float("z_size", 5.85)
+        core_theta_size = self.mesh_size_float("c_size_core", 13.5)
+        bedding_sheath_theta_size = self.mesh_size_float("c_size_bedding_sheath", 3.3)
+        armour_theta_size = self.mesh_size_float("c_size_armour", 1.6)
+        inner_r_size = self.mesh_size_float("r_size_inner_sheath", 1.5)
+        bedding_r_size = self.mesh_size_float("r_size_bedding", 0.6)
+        outer_r_size = self.mesh_size_float("r_size_outer_sheath", 1.5)
+        effective_length = max(float(dg.get("effective_length_mm", 234.2)), axial_size)
+        outer_radius = max(float(dg.get("outer_sheath_outer_radius_mm", 51.0)), core_theta_size / (2.0 * math.pi), bedding_sheath_theta_size / (2.0 * math.pi))
+        armour_radius = max(
+            float(dg.get("inner_armour_wire_radius_mm", 2.0)),
+            float(dg.get("outer_armour_wire_radius_mm", 2.0)),
+            armour_theta_size / (2.0 * math.pi),
+        )
+        inner_thickness = max(
+            float(dg.get("inner_sheath_outer_radius_mm", 0.0)) - float(dg.get("inner_sheath_inner_radius_mm", 0.0)),
+            inner_r_size,
+        )
+        bedding_thickness = max(float(dg.get("bedding_thickness_mm", 0.6)), bedding_r_size)
+        outer_thickness = max(
+            float(dg.get("outer_sheath_outer_radius_mm", 0.0)) - float(dg.get("outer_sheath_inner_radius_mm", 0.0)),
+            outer_r_size,
+        )
+        if basis_by_field["axial"] == "size":
+            sizes["axial_mm"] = axial_size
+            counts["axial"] = self.clamp_mesh_count(math.ceil(effective_length / axial_size), self.mesh_inputs["z_elem"])
+        if basis_by_field["core_theta"] == "size":
+            sizes["core_sheath_circumferential_mm"] = core_theta_size
+            counts["core_theta"] = self.clamp_mesh_count(math.ceil(2.0 * math.pi * outer_radius / core_theta_size), self.mesh_inputs["c_elem_core"])
+        if basis_by_field["bedding_sheath_theta"] == "size":
+            sizes["bedding_sheath_circumferential_mm"] = bedding_sheath_theta_size
+            counts["bedding_sheath_theta"] = self.clamp_mesh_count(math.ceil(2.0 * math.pi * outer_radius / bedding_sheath_theta_size), self.mesh_inputs["c_elem_bedding_sheath"])
+        if basis_by_field["armour_theta"] == "size":
+            sizes["armour_circumferential_mm"] = armour_theta_size
+            counts["armour_theta"] = self.clamp_mesh_count(math.ceil(2.0 * math.pi * armour_radius / armour_theta_size), self.mesh_inputs["c_elem_armour"])
+        if basis_by_field["inner_sheath_r"] == "size":
+            sizes["inner_sheath_radial_mm"] = inner_r_size
+            counts["inner_sheath_r"] = self.clamp_mesh_count(math.ceil(inner_thickness / inner_r_size), self.mesh_inputs["r_elem_inner_sheath"])
+        if basis_by_field["bedding_r"] == "size":
+            sizes["bedding_radial_mm"] = bedding_r_size
+            counts["bedding_r"] = self.clamp_mesh_count(math.ceil(bedding_thickness / bedding_r_size), self.mesh_inputs["r_elem_bedding"])
+        if basis_by_field["outer_sheath_r"] == "size":
+            sizes["outer_sheath_radial_mm"] = outer_r_size
+            counts["outer_sheath_r"] = self.clamp_mesh_count(math.ceil(outer_thickness / outer_r_size), self.mesh_inputs["r_elem_outer_sheath"])
         return {
             "basis": basis,
+            "basis_by_field": basis_by_field,
             "counts": counts,
             "target_sizes_mm": sizes,
         }
@@ -1840,7 +1897,6 @@ class SCLASRemoteGUI(QMainWindow):
 
         left.addWidget(self.header("Mesh Setting Guide"))
         self.mesh_inputs = {
-            "mesh_basis": QComboBox(),
             "elem_type": QComboBox(),
             "z_elem": QSpinBox(),
             "c_elem_core": QSpinBox(),
@@ -1861,8 +1917,6 @@ class SCLASRemoteGUI(QMainWindow):
             "r_size_bedding": QLineEdit("0.60"),
             "r_size_outer_sheath": QLineEdit("1.50"),
         }
-        self.mesh_inputs["mesh_basis"].addItem("Division count", "count")
-        self.mesh_inputs["mesh_basis"].addItem("Target size", "size")
         self.mesh_inputs["elem_type"].addItem("C3D8", "C3D8")
         self.mesh_inputs["elem_type"].setEnabled(False)
         self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(60)
@@ -1877,7 +1931,6 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_inputs["filler_short_arc_elem"].setRange(1, 100); self.mesh_inputs["filler_short_arc_elem"].setValue(4)
         self.mesh_inputs["filler_long_arc_elem"].setRange(1, 100); self.mesh_inputs["filler_long_arc_elem"].setValue(6)
         mesh_tips = {
-            "mesh_basis": "Choose whether the rows below are entered as division counts or target mesh sizes. Counts are still exported for backend compatibility.",
             "elem_type": "Fixed GUI request for the full 3D solid-wire workflow.",
             "z_elem": "Global axial n_z divisions along the cable length for every component, including filler.",
             "c_elem_core": "Core circumferential divisions from SCLAS 710 variable CCD.",
@@ -1929,7 +1982,8 @@ class SCLASRemoteGUI(QMainWindow):
             self.mesh_inputs[key].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for key, tip in mesh_tips.items():
             self.mesh_inputs[key].setToolTip(tip)
-        self.mesh_basis_stacks = []
+        self.mesh_basis_controls = {}
+        self.mesh_basis_stacks = {}
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight)
         form.setHorizontalSpacing(12)
@@ -1937,7 +1991,6 @@ class SCLASRemoteGUI(QMainWindow):
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         form.setRowWrapPolicy(QFormLayout.WrapLongRows)
         form.addRow(self.form_label("Abaqus element type fixed"), self.mesh_inputs["elem_type"])
-        form.addRow(self.form_label("Mesh input basis"), self.mesh_inputs["mesh_basis"])
         form.addRow(self.form_label("Axial n_z / size"), self.mesh_count_size_stack("z_elem", "z_size"))
         form.addRow(self.form_label("Core n_theta / size"), self.mesh_count_size_stack("c_elem_core", "c_size_core"))
         form.addRow(self.form_label("Bedding/Sheath n_theta / size"), self.mesh_count_size_stack("c_elem_bedding_sheath", "c_size_bedding_sheath"))
@@ -1950,20 +2003,9 @@ class SCLASRemoteGUI(QMainWindow):
         form.addRow(self.form_label("Filler FD3 short arc"), self.mesh_inputs["filler_short_arc_elem"])
         form.addRow(self.form_label("Filler FD4 long arc"), self.mesh_inputs["filler_long_arc_elem"])
         left.addLayout(form)
-        self.btn_import_inp_mesh = QPushButton("Import Abaqus INP")
-        self.btn_import_inp_mesh.setFixedHeight(42)
-        self.btn_import_inp_mesh.setToolTip("Read an Abaqus .inp file and render a part-colored end-section mesh preview.")
-        self.btn_import_inp_mesh.clicked.connect(self.import_inp_mesh_dialog)
-        left.addWidget(self.btn_import_inp_mesh)
-        note = QLabel("Use this tab to set division counts or target sizes. Circumferential multiples of 4 are recommended for demos, but not enforced. The actual Abaqus mesh is checked by importing the generated INP.")
+        note = QLabel("Set count or target size independently for each mesh variable. Counts are resolved before export for the Abaqus backend.")
         note.setWordWrap(True)
         left.addWidget(note)
-        self.inp_mesh_summary = QTextEdit()
-        self.inp_mesh_summary.setObjectName("SummaryText")
-        self.inp_mesh_summary.setReadOnly(True)
-        self.inp_mesh_summary.setMaximumHeight(112)
-        self.inp_mesh_summary.setPlainText("Import an Abaqus .inp file to inspect the actual generated mesh.")
-        left.addWidget(self.inp_mesh_summary)
         left.addStretch()
 
         viewer = QFrame(); viewer.setObjectName("Card")
@@ -2009,7 +2051,6 @@ class SCLASRemoteGUI(QMainWindow):
                 widget.textChanged.connect(lambda _text, k=key: self.activate_mesh_key(k))
         for key in ["pressure", "curvature", "friction"]:
             self.cond[key].textChanged.connect(lambda _text: self.update_mesh_guide())
-        self.mesh_inputs["mesh_basis"].currentIndexChanged.connect(self.set_mesh_input_basis)
         self.set_mesh_input_basis()
         self.update_mesh_guide()
 
@@ -2586,6 +2627,7 @@ class SCLASRemoteGUI(QMainWindow):
     def build_sclas710_variable_contract(self, dg: dict, mesh_req: dict) -> dict:
         counts = mesh_req["counts"]
         basis = mesh_req["basis"]
+        basis_by_field = mesh_req.get("basis_by_field", {})
         pressure = safe_float(self.cond["pressure"], 0.3, "Pressure")
         friction = safe_float(self.cond["friction"], 0.3, "Friction coefficient")
         bend_fac = safe_float(self.cond["curvature"], 5.0e-5, "Bend factor")
@@ -2621,10 +2663,18 @@ class SCLASRemoteGUI(QMainWindow):
                 "BendFac": {"value": bend_fac, "json_path": "analysis_conditions.max_curvature_1_per_m"},
             },
             "mesh_input": {
-                "CoreMeshType": {"value": basis, "json_path": "mesh_controls.components.Core"},
-                "BSMeshType": {"value": basis, "json_path": "mesh_controls.components.InnerSheath/Bedding/OuterSheath"},
-                "ArmourMeshType": {"value": basis, "json_path": "mesh_controls.components.InnerArmour/OuterArmour"},
-                "FillerMeshType": {"value": basis, "json_path": "mesh_controls.components.Filler"},
+                "CoreMeshType": {"value": basis_by_field.get("core_theta", basis), "json_path": "mesh_controls.components.Core"},
+                "BSMeshType": {
+                    "value": {
+                        "theta": basis_by_field.get("bedding_sheath_theta", basis),
+                        "inner_sheath_r": basis_by_field.get("inner_sheath_r", basis),
+                        "bedding_r": basis_by_field.get("bedding_r", basis),
+                        "outer_sheath_r": basis_by_field.get("outer_sheath_r", basis),
+                    },
+                    "json_path": "mesh_controls.components.InnerSheath/Bedding/OuterSheath",
+                },
+                "ArmourMeshType": {"value": basis_by_field.get("armour_theta", basis), "json_path": "mesh_controls.components.InnerArmour/OuterArmour"},
+                "FillerMeshType": {"value": "count", "json_path": "mesh_controls.components.Filler"},
                 "ZAD": {"value": counts["axial"], "json_path": "mesh.axial_divisions"},
                 "CCD": {"value": counts["core_theta"], "json_path": "mesh.core_circumferential_divisions"},
                 "BSCD": {"value": counts["bedding_sheath_theta"], "json_path": "mesh.bedding_sheath_circumferential_divisions"},
@@ -2739,6 +2789,7 @@ class SCLASRemoteGUI(QMainWindow):
                 "requested_element_type": self.mesh_inputs["elem_type"].currentText(),
                 "solid_element_type": self.mesh_inputs["elem_type"].currentText(),
                 "mesh_input_basis": mesh_req["basis"],
+                "mesh_input_basis_by_field": mesh_req["basis_by_field"],
                 "target_sizes_mm": mesh_sizes,
                 "axial_divisions": mesh_counts["axial"],
                 "core_circumferential_divisions": mesh_counts["core_theta"],
@@ -2767,37 +2818,38 @@ class SCLASRemoteGUI(QMainWindow):
             "mesh_controls": {
                 "coordinate_basis": "cylindrical_r_theta_z",
                 "input_basis": mesh_req["basis"],
+                "input_basis_by_field": mesh_req["basis_by_field"],
                 "target_sizes_mm": mesh_sizes,
                 "components": {
                     "Core": {
                         "r": {"mode": "disabled"},
-                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["core_theta"], "size_mm": mesh_sizes["core_sheath_circumferential_mm"]},
-                        "z": {"mode": mesh_req["basis"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
+                        "theta": {"mode": mesh_req["basis_by_field"]["core_theta"], "count": mesh_counts["core_theta"], "size_mm": mesh_sizes["core_sheath_circumferential_mm"]},
+                        "z": {"mode": mesh_req["basis_by_field"]["axial"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "InnerSheath": {
-                        "r": {"mode": mesh_req["basis"], "count": mesh_counts["inner_sheath_r"], "size_mm": mesh_sizes["inner_sheath_radial_mm"]},
-                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
-                        "z": {"mode": mesh_req["basis"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
+                        "r": {"mode": mesh_req["basis_by_field"]["inner_sheath_r"], "count": mesh_counts["inner_sheath_r"], "size_mm": mesh_sizes["inner_sheath_radial_mm"]},
+                        "theta": {"mode": mesh_req["basis_by_field"]["bedding_sheath_theta"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
+                        "z": {"mode": mesh_req["basis_by_field"]["axial"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "Bedding": {
-                        "r": {"mode": mesh_req["basis"], "count": mesh_counts["bedding_r"], "size_mm": mesh_sizes["bedding_radial_mm"]},
-                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
-                        "z": {"mode": mesh_req["basis"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
+                        "r": {"mode": mesh_req["basis_by_field"]["bedding_r"], "count": mesh_counts["bedding_r"], "size_mm": mesh_sizes["bedding_radial_mm"]},
+                        "theta": {"mode": mesh_req["basis_by_field"]["bedding_sheath_theta"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
+                        "z": {"mode": mesh_req["basis_by_field"]["axial"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "OuterSheath": {
-                        "r": {"mode": mesh_req["basis"], "count": mesh_counts["outer_sheath_r"], "size_mm": mesh_sizes["outer_sheath_radial_mm"]},
-                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
-                        "z": {"mode": mesh_req["basis"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
+                        "r": {"mode": mesh_req["basis_by_field"]["outer_sheath_r"], "count": mesh_counts["outer_sheath_r"], "size_mm": mesh_sizes["outer_sheath_radial_mm"]},
+                        "theta": {"mode": mesh_req["basis_by_field"]["bedding_sheath_theta"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
+                        "z": {"mode": mesh_req["basis_by_field"]["axial"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "InnerArmour": {
                         "r": {"mode": "disabled"},
-                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["armour_theta"], "size_mm": mesh_sizes["armour_circumferential_mm"]},
-                        "z": {"mode": mesh_req["basis"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
+                        "theta": {"mode": mesh_req["basis_by_field"]["armour_theta"], "count": mesh_counts["armour_theta"], "size_mm": mesh_sizes["armour_circumferential_mm"]},
+                        "z": {"mode": mesh_req["basis_by_field"]["axial"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "OuterArmour": {
                         "r": {"mode": "disabled"},
-                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["armour_theta"], "size_mm": mesh_sizes["armour_circumferential_mm"]},
-                        "z": {"mode": mesh_req["basis"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
+                        "theta": {"mode": mesh_req["basis_by_field"]["armour_theta"], "count": mesh_counts["armour_theta"], "size_mm": mesh_sizes["armour_circumferential_mm"]},
+                        "z": {"mode": mesh_req["basis_by_field"]["axial"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "Filler": {
                         "r": {"mode": "special_profile"},
@@ -2811,7 +2863,7 @@ class SCLASRemoteGUI(QMainWindow):
                             },
                         },
                         "z": {
-                            "mode": mesh_req["basis"],
+                            "mode": mesh_req["basis_by_field"]["axial"],
                             "count": mesh_counts["axial"],
                             "size_mm": mesh_sizes["axial_mm"],
                             "source": "same_as_global_axial_divisions",
@@ -3059,6 +3111,7 @@ class SCLASRemoteGUI(QMainWindow):
             "[Mesh Request]",
             f"element_type: {mesh['requested_element_type']}",
             f"input_basis: {mesh['mesh_input_basis']}",
+            f"input_basis_by_field: {mesh['mesh_input_basis_by_field']}",
             f"target_sizes_mm: {mesh['target_sizes_mm']}",
             f"axial_divisions: {mesh['axial_divisions']}",
             f"core_circumferential_divisions CCD: {mesh['core_circumferential_divisions']}",
@@ -3163,6 +3216,7 @@ class SCLASRemoteGUI(QMainWindow):
             "geometry": {key: widget_value(widget) for key, widget in self.inputs.items()},
             "analysis_conditions": {key: widget_value(widget) for key, widget in self.cond.items()},
             "mesh": {key: widget_value(widget) for key, widget in self.mesh_inputs.items()},
+            "mesh_basis_by_field": self.mesh_basis_by_field() if hasattr(self, "mesh_basis_controls") else {},
             "backend": {
                 "mode": self.selected_mode(),
                 "job_root": self.job_root_input.text().strip(),
@@ -3219,6 +3273,23 @@ class SCLASRemoteGUI(QMainWindow):
             for key, value in settings.get("mesh", {}).items():
                 if key in self.mesh_inputs:
                     set_widget(self.mesh_inputs[key], value)
+            field_to_count_key = {
+                "axial": "z_elem",
+                "core_theta": "c_elem_core",
+                "bedding_sheath_theta": "c_elem_bedding_sheath",
+                "armour_theta": "c_elem_armour",
+                "inner_sheath_r": "r_elem_inner_sheath",
+                "bedding_r": "r_elem_bedding",
+                "outer_sheath_r": "r_elem_outer_sheath",
+            }
+            for field, basis in settings.get("mesh_basis_by_field", {}).items():
+                count_key = field_to_count_key.get(field)
+                combo = getattr(self, "mesh_basis_controls", {}).get(count_key)
+                if combo is None:
+                    continue
+                idx = combo.findData(str(basis))
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
 
         backend = settings.get("backend", {})
         if backend.get("job_root"):
@@ -4509,7 +4580,7 @@ class SCLASRemoteGUI(QMainWindow):
         painter.drawText(22, 30, "Analysis Structure / Mesh / Contact Guide")
         painter.setFont(body_font)
         painter.setPen(QColor("#64748b"))
-        basis_text = "target size" if self.mesh_input_basis() == "size" else "division count"
+        basis_text = self.mesh_input_basis_label()
         painter.drawText(22, 52, f"Set load, curvature, friction, and mesh {basis_text}; counts are resolved before export.")
 
         margin = 22

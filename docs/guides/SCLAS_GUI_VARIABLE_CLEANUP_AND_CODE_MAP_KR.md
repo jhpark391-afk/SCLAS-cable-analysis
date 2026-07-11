@@ -43,7 +43,7 @@
 | Finite Element Analysis Setting | Analysis Structure Setup | Pressure `P` | `pressure` | 0.30 | MPa | `analysis_conditions.external_pressure_mpa`, `analysis_conditions.pressure_mpa` | SCLAS 710 `P` |
 | Finite Element Analysis Setting | Analysis Structure Setup | Bend factor / curvature `BendFac` | `curvature` | 5.0e-5 | 1/m | `analysis_conditions.max_curvature_1_per_m`, `analysis_conditions.bend_factor` | 현재는 같은 GUI 입력으로 전달 |
 | Finite Element Analysis Setting | Analysis Structure Setup | Friction coefficient `FrCo` / `mu` | `friction` | 0.30 | - | `analysis_conditions.friction_coefficient` | SCLAS 710 `FrCo` |
-| Finite Element Analysis Setting | Mesh Setting Guide | Mesh input basis | `mesh_basis` | Division count | count/size | `mesh.mesh_input_basis` | 개수/목표 크기 입력 방식 선택 |
+| Finite Element Analysis Setting | Mesh Setting Guide | Per-row mesh basis | `mesh_basis_by_field` | count per row | count/size | `mesh.mesh_input_basis_by_field` | 각 mesh 변수별 개수/목표 크기 입력 방식 선택 |
 | Finite Element Analysis Setting | Mesh Setting Guide | z-axis divisions `ZAD` | `z_elem` | 60 | count | `mesh.axial_divisions` | 모든 component 공통 z 방향 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Core circumferential divisions `CCD` | `c_elem_core` | 20 | count | `mesh.core_circumferential_divisions` | core 전용 |
 | Finite Element Analysis Setting | Mesh Setting Guide | Bedding/Sheath circumferential divisions `BSCD` | `c_elem_bedding_sheath` | 80 | count | `mesh.bedding_sheath_circumferential_divisions` | inner sheath, bedding, outer sheath |
@@ -162,7 +162,6 @@
 | `apply_backend_payload_to_gui()` around line 3568 | 기존 backend JSON을 GUI widget 값으로 역매핑 |
 | `load_csv()` around line 3665 | key,value CSV를 GUI 입력칸으로 불러옴 |
 | `generate_mesh_preview()` around line 4447 | GUI 값 기반 mesh guide preview 생성 |
-| `import_inp_mesh_dialog()` around line 4601 | 실제 Abaqus `.inp`를 읽어 mesh를 검토 |
 
 보조 파일:
 
@@ -217,11 +216,11 @@ Mesh 탭 Global axial n_z divisions
 ```
 
 ```text
-Mesh 탭 Target size mode
-  -> self.mesh_inputs["mesh_basis"] = size
-  -> z_size / c_size_core / c_size_armour / r_size_* 입력
-  -> mesh_request_values()에서 target size를 resolved count로 환산
-  -> build_payload()에서 mesh.target_sizes_mm과 mesh.*_divisions를 둘 다 저장
+Mesh 탭 per-row Count/Size mode
+  -> 각 mesh row의 Count/Size combo 선택
+  -> 선택된 row만 z_size / c_size_* / r_size_* 입력 사용
+  -> mesh_request_values()에서 선택된 row만 target size를 resolved count로 환산
+  -> build_payload()에서 mesh.mesh_input_basis_by_field, mesh.target_sizes_mm, mesh.*_divisions 저장
   -> backend는 기존 count key를 그대로 사용하고, target size는 추적/검토용으로 보존
 ```
 
