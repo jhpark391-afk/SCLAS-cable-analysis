@@ -289,9 +289,9 @@ def normalize_payload(data):
     arm.setdefault("outer_wire_radius_mm", geometry["outer_armour_wire_radius_mm"])
     arm.setdefault("inner_wire_count", geometry["inner_armour_wire_count_input"])
     arm.setdefault("outer_wire_count", geometry["outer_armour_wire_count_input"])
-    arm.setdefault("core_lay_angle_deg", 8.98)
-    arm.setdefault("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg", arm.get("lay_angle_deg", 20.32)))
-    arm.setdefault("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg", arm.get("lay_angle_deg", 19.62)))
+    arm.setdefault("core_lay_angle_deg", 9.0)
+    arm.setdefault("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg", arm.get("lay_angle_deg", -20.1)))
+    arm.setdefault("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg", arm.get("lay_angle_deg", 19.6)))
     core_pitch_source = arm.get(
         "core_backend_pitch_length_mm",
         arm.get("core_period_matched_pitch_length_mm", arm.get("core_pitch_length_mm", arm.get("core_pitch_mm"))),
@@ -353,12 +353,20 @@ def normalize_payload(data):
     data["derived_geometry_mm"] = merged_dgeo
 
     mesh = dict(data.get("mesh", {}))
-    mesh.setdefault("axial_divisions", 40)
-    mesh.setdefault("core_circumferential_divisions", 24)
-    mesh.setdefault("armour_circumferential_divisions", 8)
+    mesh.setdefault("axial_divisions", mesh.get("ZAD", 60))
+    mesh.setdefault("core_circumferential_divisions", mesh.get("CCD", 20))
+    mesh.setdefault("bedding_sheath_circumferential_divisions", mesh.get("BSCD", 80))
+    mesh.setdefault("armour_circumferential_divisions", mesh.get("ACD", 3))
     mesh.setdefault("inner_sheath_radial_divisions", mesh.get("radial_divisions_per_layer", 3))
-    mesh.setdefault("bedding_radial_divisions", mesh.get("radial_divisions_per_layer", 1))
+    mesh.setdefault("bedding_radial_divisions", mesh.get("radial_divisions_per_layer", mesh.get("BSRD", 3)))
     mesh.setdefault("outer_sheath_radial_divisions", mesh.get("radial_divisions_per_layer", 3))
+    mesh.setdefault("bedding_sheath_radial_divisions", mesh.get("BSRD", mesh.get("bedding_radial_divisions", 3)))
+    filler_profile = dict(mesh.get("filler_profile_divisions", {}))
+    filler_profile.setdefault("short_line", mesh.get("FD1", 2))
+    filler_profile.setdefault("long_line", mesh.get("FD2", 2))
+    filler_profile.setdefault("short_arc", mesh.get("FD3", 4))
+    filler_profile.setdefault("long_arc", mesh.get("FD4", 6))
+    mesh["filler_profile_divisions"] = filler_profile
     if mesh.get("filler_z_divisions_source") == "same_as_axial_divisions":
         mesh["filler_z_divisions"] = mesh["axial_divisions"]
         mesh["filler_divisions"] = mesh["axial_divisions"]
@@ -372,14 +380,17 @@ def normalize_payload(data):
     data["mesh"] = mesh
 
     ac = dict(data.get("analysis_conditions", {}))
-    pressure = ac.get("external_pressure_mpa", ac.get("hydrostatic_pressure_mpa", 0.0))
+    pressure = ac.get("external_pressure_mpa", ac.get("hydrostatic_pressure_mpa", ac.get("pressure_mpa", 0.3)))
     ac["external_pressure_mpa"] = as_float(pressure, 0.0)
     ac["hydrostatic_pressure_mpa"] = ac["external_pressure_mpa"]
+    ac["pressure_mpa"] = ac["external_pressure_mpa"]
     ac.setdefault("effective_length_mm", merged_dgeo.get("effective_length_mm", 234.2))
     ac.setdefault("effective_length_source", merged_dgeo.get("effective_length_source", "core_pitch_length_mm_divided_by_core_count"))
     ac.setdefault("residual_contact_pressure_mpa", 0.3)
-    ac.setdefault("friction_coefficient", 0.22)
-    ac.setdefault("max_curvature_1_per_m", 0.08)
+    ac.setdefault("friction_coefficient", ac.get("FrCo", 0.3))
+    ac.setdefault("contact_stiffness_scale_factor", ac.get("conStiff"))
+    ac.setdefault("max_curvature_1_per_m", ac.get("bend_factor", ac.get("BendFac", 5.0e-5)))
+    ac.setdefault("bend_factor", ac["max_curvature_1_per_m"])
     ac.setdefault("curve_factors", [-0.1, -0.05, 0.0, 0.05, 0.1])
     curve_factors = ac.get("curve_factors", [-0.1, -0.05, 0.0, 0.05, 0.1])
     if not isinstance(curve_factors, (list, tuple)):
@@ -447,8 +458,8 @@ def build_backend_readiness(payload, source, mesh_status):
 def fallback_result_curve(data):
     ac = data["analysis_conditions"]
     steps = max(2, as_int(ac.get("solver_steps"), 500))
-    kmax = as_float(ac.get("max_curvature_1_per_m"), 0.08)
-    friction = as_float(ac.get("friction_coefficient"), 0.22)
+    kmax = as_float(ac.get("max_curvature_1_per_m"), 5.0e-5)
+    friction = as_float(ac.get("friction_coefficient"), 0.3)
     pressure = as_float(ac.get("external_pressure_mpa"), 0.0)
     stiffness = 1.0 + 0.35 * friction + 0.002 * pressure
     curvature = []
@@ -474,9 +485,9 @@ def fallback_manifest(data):
     pitch_design = {
         "source": period_design_payload.get("source", "Menard_Cartraud_2023_Eq2_Eq3_Eq4"),
         "strategy": period_design_payload.get("strategy", "frontend_period_matched_pitch_preferred"),
-        "core_lay_angle_deg": as_float(arm.get("core_lay_angle_deg"), 8.98),
-        "inner_armour_lay_angle_deg": as_float(arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")), 20.32),
-        "outer_armour_lay_angle_deg": as_float(arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")), 19.62),
+        "core_lay_angle_deg": as_float(arm.get("core_lay_angle_deg"), 9.0),
+        "inner_armour_lay_angle_deg": as_float(arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")), -20.1),
+        "outer_armour_lay_angle_deg": as_float(arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")), 19.6),
         "core_pitch_mm": as_float(
             arm.get("core_pitch_mm", arm.get("core_pitch_length_mm")),
             pitch_from_lay_angle(geom["core_center_radius_mm"], arm.get("core_lay_angle_deg"), 702.6, sign=1.0),
@@ -503,7 +514,7 @@ def fallback_manifest(data):
     defaults = {
         "normal": "penalty_or_augmented_lagrange",
         "tangential": "regularized_coulomb",
-        "friction_coefficient": as_float(ac.get("friction_coefficient"), 0.22),
+        "friction_coefficient": as_float(ac.get("friction_coefficient"), 0.3),
         "residual_contact_pressure_mpa": as_float(ac.get("residual_contact_pressure_mpa"), 0.3),
         "regularization_beta": as_float(ac.get("contact_regularization_beta", mesh.get("contact_regularization_beta")), 0.001),
     }
@@ -608,9 +619,9 @@ def build_abaqus_model(data, job_dir):
 
     RAoIA = round(Decimal(360) / NoIA, 5)
     RAoOA = round(Decimal(360) / NoOA, 5)
-    core_lay_angle = as_float(arm.get('core_lay_angle_deg'), 8.98)
-    inner_lay_angle = as_float(arm.get('inner_armour_lay_angle_deg', arm.get('inner_lay_angle_deg')), 20.32)
-    outer_lay_angle = as_float(arm.get('outer_armour_lay_angle_deg', arm.get('outer_lay_angle_deg')), 19.62)
+    core_lay_angle = as_float(arm.get('core_lay_angle_deg'), 9.0)
+    inner_lay_angle = as_float(arm.get('inner_armour_lay_angle_deg', arm.get('inner_lay_angle_deg')), -20.1)
+    outer_lay_angle = as_float(arm.get('outer_armour_lay_angle_deg', arm.get('outer_lay_angle_deg')), 19.6)
     pitch_core_default = pitch_from_lay_angle(CoC, core_lay_angle, 702.6, sign=1.0)
     pitch_inner_default = pitch_from_lay_angle(CoIA, inner_lay_angle, -677.94737, sign=-1.0)
     pitch_outer_default = pitch_from_lay_angle(CoOA, outer_lay_angle, 776.55789, sign=1.0)
@@ -620,9 +631,9 @@ def build_abaqus_model(data, job_dir):
 
     depth          = as_float(ac.get('effective_length_mm'), 234.2)
     pressure       = as_float(ac.get('external_pressure_mpa', ac.get('hydrostatic_pressure_mpa')), 0.0)
-    friction       = as_float(ac.get('friction_coefficient'), 0.22)
+    friction       = as_float(ac.get('friction_coefficient'), 0.3)
     contact_beta   = as_float(ac.get('contact_regularization_beta', msh.get('contact_regularization_beta')), 0.001)
-    max_curvature  = as_float(ac.get('max_curvature_1_per_m'), 0.08)
+    max_curvature  = as_float(ac.get('max_curvature_1_per_m'), 5.0e-5)
     curve_factors  = ac['curve_factors']
     loading_cycles = ac['loading_cycles']
 

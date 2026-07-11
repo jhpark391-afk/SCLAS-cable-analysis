@@ -189,4 +189,14 @@ graph TD
 1. **복합 하중 구속 조건 자동화**: Torsion(비틀림) 및 인장력을 Cyclic Bending(반복 굽힘)과 다중 스텝으로 조합 적용하는 아바쿠스 제어 자동화.
 2. **국부 지표 ODB 세부 파싱**: CPRESS(접촉압력), COPEN(접촉이격), CSLIP(마찰슬립량) 등의 미세 국부 필드값을 ODB에서 자동으로 분리 후처리하여 시각화.
 
+# 2026-07-11 SCLAS 710 변수표 반영
+
+* 기준 파일: `C:\HELIX\Abaqus+_work\SCLAS_변수_정리710.xlsx`
+* GUI payload에 `sclas_710_variable_contract`를 추가해 엑셀 약어와 현재 JSON path를 함께 기록합니다.
+* Analysis 기본값을 710 기준으로 조정했습니다: `P=0.30 MPa`, `FrCo=0.30`, `BendFac=5.0e-5`.
+* Mesh 입력을 710 약어 구조로 확장했습니다: `ZAD=60`, `CCD=20`, `BSCD=80`, `ACD=3`, `BSRD=3`, `FD1~FD4=2/2/4/6`.
+* `code/abaqus_runner.py`는 새 alias를 받아도 기존 backend key로 normalize하도록 보강했습니다.
+* 주의: 엑셀의 `Roc=11`, `RoI=4` 기본값은 현재 GUI/backend 수식에서 conductor radius가 insulation radius보다 커지는 충돌을 만들 수 있어, 화면 기본값은 기존 물리적으로 유효한 `r_cond=4.00`, `r_ins=11.30`, `R_core=15.30`을 유지하고 계약 note에 기록합니다.
+
+---
 

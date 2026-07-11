@@ -80,12 +80,65 @@ from sclas_backend_gui_bridge import (
 from sclas_inp_mesh_preview import PART_COLORS, build_inp_mesh_preview, format_inp_mesh_summary
 from sclas_job_filters import candidate_job_dirs
 
+SCLAS_710_VARIABLE_DEFAULTS = {
+    "geometry_input": {
+        "Roc": 11.0,
+        "RoI": 4.0,
+        "RoC": 15.3,
+        "TIS": 4.5,
+        "TOS": 4.5,
+        "TB": 0.6,
+        "CHA": 9.0,
+        "IAHA": -20.1,
+        "OAHA": 19.6,
+    },
+    "armour_input": {
+        "RoIA": 2.0,
+        "RoOA": 2.0,
+        "NoIA": 55,
+        "NoOA": 63,
+    },
+    "analysis_input": {
+        "P": 0.3,
+        "FrCo": 0.3,
+        "conStiff": None,
+        "BendFac": 5.0e-5,
+    },
+    "solver_input": {
+        "inIncP": 1.0e-5,
+        "minIncP": 1.0e-10,
+        "maxIncP": 0.1,
+        "maxNumIncP": 10000,
+        "inIncB": 1.0e-5,
+        "minIncB": 1.0e-10,
+        "maxIncB": 0.05,
+        "maxNumIncB": 10000,
+        "CPU": 12,
+    },
+    "mesh_input": {
+        "CoreMeshType": "count",
+        "BSMeshType": "count",
+        "ArmourMeshType": "count",
+        "FillerMeshType": "count",
+        "ZAD": 60,
+        "CCD": 20,
+        "BSCD": 80,
+        "ACD": 3,
+        "BSRD": 3,
+        "FD1": 2,
+        "FD2": 2,
+        "FD3": 4,
+        "FD4": 6,
+    },
+}
+
 APP_VERSION = "12.0-abaqus-quality-summary"
 CONTRACT_VERSION = "sclas-abaqus-contract-v1"
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
 DEFAULT_JOB_ROOT = PROJECT_DIR / "jobs" / "SCLAS_jobs"
 SETTINGS_PATH = PROJECT_DIR / "settings.json"
+SETTINGS_SCHEMA_VERSION = "sclas-710-variable-contract-v1"
 BACKEND_RUNNER_TEMPLATE = APP_DIR / "abaqus_runner.py"
 ODB_EXTRACTOR_TEMPLATE = APP_DIR / "sclas_odb_extractor.py"
 TEAM_LOGO_PATH = PROJECT_DIR / "assets" / "helix_logo.png"
@@ -1464,8 +1517,8 @@ class SCLASRemoteGUI(QMainWindow):
             "r_oa": QLineEdit("2.00"),
             "no_oa": QSpinBox(),
             "tos": QLineEdit("4.50"),
-            "core_lay_angle": QLineEdit("8.98"),
-            "inner_lay_angle": QLineEdit("20.1"),
+            "core_lay_angle": QLineEdit("9.00"),
+            "inner_lay_angle": QLineEdit("-20.1"),
             "outer_lay_angle": QLineEdit("19.6"),
             "core_count": QSpinBox(),
         }
@@ -1709,14 +1762,20 @@ class SCLASRemoteGUI(QMainWindow):
         counts = {
             "axial": int(self.mesh_inputs["z_elem"].value()),
             "core_theta": int(self.mesh_inputs["c_elem_core"].value()),
+            "bedding_sheath_theta": int(self.mesh_inputs["c_elem_bedding_sheath"].value()),
             "armour_theta": int(self.mesh_inputs["c_elem_armour"].value()),
             "inner_sheath_r": int(self.mesh_inputs["r_elem_inner_sheath"].value()),
             "bedding_r": int(self.mesh_inputs["r_elem_bedding"].value()),
             "outer_sheath_r": int(self.mesh_inputs["r_elem_outer_sheath"].value()),
+            "filler_short_line": int(self.mesh_inputs["filler_short_line_elem"].value()),
+            "filler_long_line": int(self.mesh_inputs["filler_long_line_elem"].value()),
+            "filler_short_arc": int(self.mesh_inputs["filler_short_arc_elem"].value()),
+            "filler_long_arc": int(self.mesh_inputs["filler_long_arc_elem"].value()),
         }
         sizes = {
             "axial_mm": None,
             "core_sheath_circumferential_mm": None,
+            "bedding_sheath_circumferential_mm": None,
             "armour_circumferential_mm": None,
             "inner_sheath_radial_mm": None,
             "bedding_radial_mm": None,
@@ -1725,6 +1784,7 @@ class SCLASRemoteGUI(QMainWindow):
         if basis == "size":
             axial_size = self.mesh_size_float("z_size", 5.85)
             core_theta_size = self.mesh_size_float("c_size_core", 13.5)
+            bedding_sheath_theta_size = self.mesh_size_float("c_size_bedding_sheath", 3.3)
             armour_theta_size = self.mesh_size_float("c_size_armour", 1.6)
             inner_r_size = self.mesh_size_float("r_size_inner_sheath", 1.5)
             bedding_r_size = self.mesh_size_float("r_size_bedding", 0.6)
@@ -1732,6 +1792,7 @@ class SCLASRemoteGUI(QMainWindow):
             sizes = {
                 "axial_mm": axial_size,
                 "core_sheath_circumferential_mm": core_theta_size,
+                "bedding_sheath_circumferential_mm": bedding_sheath_theta_size,
                 "armour_circumferential_mm": armour_theta_size,
                 "inner_sheath_radial_mm": inner_r_size,
                 "bedding_radial_mm": bedding_r_size,
@@ -1756,10 +1817,15 @@ class SCLASRemoteGUI(QMainWindow):
             counts = {
                 "axial": self.clamp_mesh_count(math.ceil(effective_length / axial_size), self.mesh_inputs["z_elem"]),
                 "core_theta": self.clamp_mesh_count(math.ceil(2.0 * math.pi * outer_radius / core_theta_size), self.mesh_inputs["c_elem_core"]),
+                "bedding_sheath_theta": self.clamp_mesh_count(math.ceil(2.0 * math.pi * outer_radius / bedding_sheath_theta_size), self.mesh_inputs["c_elem_bedding_sheath"]),
                 "armour_theta": self.clamp_mesh_count(math.ceil(2.0 * math.pi * armour_radius / armour_theta_size), self.mesh_inputs["c_elem_armour"]),
                 "inner_sheath_r": self.clamp_mesh_count(math.ceil(inner_thickness / inner_r_size), self.mesh_inputs["r_elem_inner_sheath"]),
                 "bedding_r": self.clamp_mesh_count(math.ceil(bedding_thickness / bedding_r_size), self.mesh_inputs["r_elem_bedding"]),
                 "outer_sheath_r": self.clamp_mesh_count(math.ceil(outer_thickness / outer_r_size), self.mesh_inputs["r_elem_outer_sheath"]),
+                "filler_short_line": int(self.mesh_inputs["filler_short_line_elem"].value()),
+                "filler_long_line": int(self.mesh_inputs["filler_long_line_elem"].value()),
+                "filler_short_arc": int(self.mesh_inputs["filler_short_arc_elem"].value()),
+                "filler_long_arc": int(self.mesh_inputs["filler_long_arc_elem"].value()),
             }
         return {
             "basis": basis,
@@ -1769,6 +1835,7 @@ class SCLASRemoteGUI(QMainWindow):
                 "multiples_of_4_recommended_for_demo": True,
                 "multiples_of_4_enforced": False,
                 "core_sheath_theta_is_multiple_of_4": counts["core_theta"] % 4 == 0,
+                "bedding_sheath_theta_is_multiple_of_4": counts["bedding_sheath_theta"] % 4 == 0,
                 "armour_theta_is_multiple_of_4": counts["armour_theta"] % 4 == 0,
             },
             "mesh_algorithm_policy": {
@@ -1811,12 +1878,18 @@ class SCLASRemoteGUI(QMainWindow):
             "contact_beta": QLineEdit("0.001"),
             "z_elem": QSpinBox(),
             "c_elem_core": QSpinBox(),
+            "c_elem_bedding_sheath": QSpinBox(),
             "c_elem_armour": QSpinBox(),
             "r_elem_inner_sheath": QSpinBox(),
             "r_elem_bedding": QSpinBox(),
             "r_elem_outer_sheath": QSpinBox(),
+            "filler_short_line_elem": QSpinBox(),
+            "filler_long_line_elem": QSpinBox(),
+            "filler_short_arc_elem": QSpinBox(),
+            "filler_long_arc_elem": QSpinBox(),
             "z_size": QLineEdit("5.85"),
             "c_size_core": QLineEdit("13.50"),
+            "c_size_bedding_sheath": QLineEdit("3.30"),
             "c_size_armour": QLineEdit("1.60"),
             "r_size_inner_sheath": QLineEdit("1.50"),
             "r_size_bedding": QLineEdit("0.60"),
@@ -1829,12 +1902,17 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_inputs["elem_type"].setEnabled(False)
         self.mesh_inputs["model_strategy"].addItem("Full 3D segment", "Full 3D segment")
         self.mesh_inputs["armour_model"].addItem("Solid wire", "Solid wire")
-        self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(40)
-        self.mesh_inputs["c_elem_core"].setRange(4, 160); self.mesh_inputs["c_elem_core"].setValue(24)
-        self.mesh_inputs["c_elem_armour"].setRange(4, 64); self.mesh_inputs["c_elem_armour"].setValue(8)
+        self.mesh_inputs["z_elem"].setRange(2, 500); self.mesh_inputs["z_elem"].setValue(60)
+        self.mesh_inputs["c_elem_core"].setRange(3, 240); self.mesh_inputs["c_elem_core"].setValue(20)
+        self.mesh_inputs["c_elem_bedding_sheath"].setRange(3, 320); self.mesh_inputs["c_elem_bedding_sheath"].setValue(80)
+        self.mesh_inputs["c_elem_armour"].setRange(1, 64); self.mesh_inputs["c_elem_armour"].setValue(3)
         self.mesh_inputs["r_elem_inner_sheath"].setRange(1, 50); self.mesh_inputs["r_elem_inner_sheath"].setValue(3)
-        self.mesh_inputs["r_elem_bedding"].setRange(1, 50); self.mesh_inputs["r_elem_bedding"].setValue(1)
+        self.mesh_inputs["r_elem_bedding"].setRange(1, 50); self.mesh_inputs["r_elem_bedding"].setValue(3)
         self.mesh_inputs["r_elem_outer_sheath"].setRange(1, 50); self.mesh_inputs["r_elem_outer_sheath"].setValue(3)
+        self.mesh_inputs["filler_short_line_elem"].setRange(1, 100); self.mesh_inputs["filler_short_line_elem"].setValue(2)
+        self.mesh_inputs["filler_long_line_elem"].setRange(1, 100); self.mesh_inputs["filler_long_line_elem"].setValue(2)
+        self.mesh_inputs["filler_short_arc_elem"].setRange(1, 100); self.mesh_inputs["filler_short_arc_elem"].setValue(4)
+        self.mesh_inputs["filler_long_arc_elem"].setRange(1, 100); self.mesh_inputs["filler_long_arc_elem"].setValue(6)
         self.mesh_inputs["filler_z_elem"].setRange(2, 500); self.mesh_inputs["filler_z_elem"].setValue(40)
         self.mesh_inputs["filler_z_elem"].setVisible(False)
         mesh_tips = {
@@ -1844,13 +1922,19 @@ class SCLASRemoteGUI(QMainWindow):
             "armour_model": "Fixed armour representation: solid wire.",
             "contact_beta": "Tangential contact regularization value for stick-slip stability.",
             "z_elem": "Global axial n_z divisions along the cable length for every component, including filler.",
-            "c_elem_core": "Circumferential n_theta divisions for core, sheath, and bedding preview surfaces.",
+            "c_elem_core": "Core circumferential divisions from SCLAS 710 variable CCD.",
+            "c_elem_bedding_sheath": "Bedding and sheath circumferential divisions from SCLAS 710 variable BSCD.",
             "c_elem_armour": "Circumferential n_theta divisions around each armour cross-section.",
             "r_elem_inner_sheath": "n_r divisions through the inner sheath thickness.",
             "r_elem_bedding": "n_r divisions through the bedding layer.",
             "r_elem_outer_sheath": "n_r divisions through the outer sheath thickness.",
+            "filler_short_line_elem": "Filler short line divisions from SCLAS 710 variable FD1.",
+            "filler_long_line_elem": "Filler long line divisions from SCLAS 710 variable FD2.",
+            "filler_short_arc_elem": "Filler short arc divisions from SCLAS 710 variable FD3.",
+            "filler_long_arc_elem": "Filler long arc divisions from SCLAS 710 variable FD4.",
             "z_size": "Target axial element length in mm; frontend converts this to n_z.",
             "c_size_core": "Target circumferential arc length in mm for core/sheath/bedding; frontend converts this to n_theta.",
+            "c_size_bedding_sheath": "Target circumferential arc length in mm for bedding and sheath; frontend converts this to BSCD.",
             "c_size_armour": "Target armour-wire circumferential arc length in mm; frontend converts this to armour n_theta.",
             "r_size_inner_sheath": "Target radial element thickness in mm for inner sheath; frontend converts this to n_r.",
             "r_size_bedding": "Target radial element thickness in mm for bedding; frontend converts this to n_r.",
@@ -1864,16 +1948,22 @@ class SCLASRemoteGUI(QMainWindow):
         for key in [
             "z_elem",
             "c_elem_core",
+            "c_elem_bedding_sheath",
             "c_elem_armour",
             "r_elem_inner_sheath",
             "r_elem_bedding",
             "r_elem_outer_sheath",
+            "filler_short_line_elem",
+            "filler_long_line_elem",
+            "filler_short_arc_elem",
+            "filler_long_arc_elem",
         ]:
             self.mesh_inputs[key].setMinimumWidth(112)
             self.mesh_inputs[key].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for key in [
             "z_size",
             "c_size_core",
+            "c_size_bedding_sheath",
             "c_size_armour",
             "r_size_inner_sheath",
             "r_size_bedding",
@@ -1893,11 +1983,16 @@ class SCLASRemoteGUI(QMainWindow):
         form.addRow(self.form_label("Abaqus element type fixed"), self.mesh_inputs["elem_type"])
         form.addRow(self.form_label("Mesh input basis"), self.mesh_inputs["mesh_basis"])
         form.addRow(self.form_label("Axial n_z / size"), self.mesh_count_size_stack("z_elem", "z_size"))
-        form.addRow(self.form_label("Core/Sheath n_theta / size"), self.mesh_count_size_stack("c_elem_core", "c_size_core"))
+        form.addRow(self.form_label("Core n_theta / size"), self.mesh_count_size_stack("c_elem_core", "c_size_core"))
+        form.addRow(self.form_label("Bedding/Sheath n_theta / size"), self.mesh_count_size_stack("c_elem_bedding_sheath", "c_size_bedding_sheath"))
         form.addRow(self.form_label("Armour n_theta / size"), self.mesh_count_size_stack("c_elem_armour", "c_size_armour"))
         form.addRow(self.form_label("Inner sheath n_r / size"), self.mesh_count_size_stack("r_elem_inner_sheath", "r_size_inner_sheath"))
         form.addRow(self.form_label("Bedding n_r / size"), self.mesh_count_size_stack("r_elem_bedding", "r_size_bedding"))
         form.addRow(self.form_label("Outer sheath n_r / size"), self.mesh_count_size_stack("r_elem_outer_sheath", "r_size_outer_sheath"))
+        form.addRow(self.form_label("Filler FD1 short line"), self.mesh_inputs["filler_short_line_elem"])
+        form.addRow(self.form_label("Filler FD2 long line"), self.mesh_inputs["filler_long_line_elem"])
+        form.addRow(self.form_label("Filler FD3 short arc"), self.mesh_inputs["filler_short_arc_elem"])
+        form.addRow(self.form_label("Filler FD4 long arc"), self.mesh_inputs["filler_long_arc_elem"])
         left.addLayout(form)
         self.btn_import_inp_mesh = QPushButton("Import Abaqus INP")
         self.btn_import_inp_mesh.setFixedHeight(42)
@@ -1967,10 +2062,10 @@ class SCLASRemoteGUI(QMainWindow):
             return
         self.cond = {
             "eff_length": QLineEdit("234.20"),
-            "pressure": QLineEdit("40.00"),
+            "pressure": QLineEdit("0.30"),
             "residual_contact_pressure": QLineEdit("0.30"),
-            "friction": QLineEdit("0.22"),
-            "curvature": QLineEdit("0.08"),
+            "friction": QLineEdit("0.30"),
+            "curvature": QLineEdit("5.0e-5"),
             "twist": QLineEdit("0.05"),
             "axial_strain": QLineEdit("0.002"),
             "radial_compression": QLineEdit("0.015"),
@@ -1981,10 +2076,10 @@ class SCLASRemoteGUI(QMainWindow):
         self.cond["steps"].setRange(50, 10000); self.cond["steps"].setValue(500)
         analysis_tips = {
             "eff_length": "Auto-computed as core pitch length divided by core count. Backend uses this as the model length.",
-            "pressure": "External pressure load passed to the Abaqus analysis request.",
+            "pressure": "SCLAS 710 variable P. Residual/production pressure passed to the Abaqus analysis request.",
             "residual_contact_pressure": "Residual normal contact pressure for stick-slip/friction calibration.",
             "friction": "Coulomb friction coefficient for armour-to-sheath and armour-to-bedding contact.",
-            "curvature": "Target maximum curvature for the bending request and moment-curvature loop.",
+            "curvature": "SCLAS 710 variable BendFac. Target bending curvature/factor for the bending request.",
             "twist": "Maximum twist requested for future coupled torsion studies.",
             "axial_strain": "Axial strain requested for tension-bending coupling studies.",
             "radial_compression": "Compression ratio used for bird-caging risk proxy.",
@@ -2416,8 +2511,8 @@ class SCLASRemoteGUI(QMainWindow):
         nia_input = int(self.inputs["no_ia"].value())
         noa_input = int(self.inputs["no_oa"].value())
         core_count = int(self.inputs["core_count"].value())
-        core_lay_angle = safe_float(self.inputs["core_lay_angle"], 8.98, "Core helix pitch angle")
-        inner_lay_angle = safe_float(self.inputs["inner_lay_angle"], 20.1, "Inner armour helix pitch angle")
+        core_lay_angle = safe_float(self.inputs["core_lay_angle"], 9.0, "Core helix pitch angle")
+        inner_lay_angle = safe_float(self.inputs["inner_lay_angle"], -20.1, "Inner armour helix pitch angle")
         outer_lay_angle = safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour helix pitch angle")
 
         if not (0 < rc < ri <= roc):
@@ -2579,6 +2674,80 @@ class SCLASRemoteGUI(QMainWindow):
         text = combo.currentData() or combo.currentText()
         return maps.get(key, {}).get(text, text)
 
+    def build_sclas710_variable_contract(self, dg: dict, mesh_req: dict) -> dict:
+        counts = mesh_req["counts"]
+        basis = mesh_req["basis"]
+        pressure = safe_float(self.cond["pressure"], 0.3, "Pressure")
+        friction = safe_float(self.cond["friction"], 0.3, "Friction coefficient")
+        bend_fac = safe_float(self.cond["curvature"], 5.0e-5, "Bend factor")
+        return {
+            "source_file": r"C:\HELIX\Abaqus+_work\SCLAS_변수_정리710.xlsx",
+            "schema_date": "2026-07-10",
+            "note": (
+                "Roc/RoI spreadsheet defaults are preserved as reference defaults. "
+                "GUI keeps physically valid conductor/insulation radii from the current model unless the user edits them."
+            ),
+            "defaults": SCLAS_710_VARIABLE_DEFAULTS,
+            "geometry_input": {
+                "Roc": {"value": safe_float(self.inputs["r_cond"], 4.0, "Conductor radius"), "json_path": "geometry_mm.conductor_radius_mm"},
+                "RoI": {"value": safe_float(self.inputs["r_insu"], 11.3, "Insulation radius"), "json_path": "geometry_mm.insulation_radius_mm"},
+                "RoC": {"value": dg["core_outer_radius_mm"], "json_path": "geometry_mm.core_outer_radius_mm"},
+                "TIS": {"value": safe_float(self.inputs["tis"], 4.5, "Inner sheath thickness"), "json_path": "geometry_mm.inner_sheath_thickness_mm"},
+                "TOS": {"value": safe_float(self.inputs["tos"], 4.5, "Outer sheath thickness"), "json_path": "geometry_mm.outer_sheath_thickness_mm"},
+                "TB": {"value": dg["bedding_thickness_mm"], "json_path": "geometry_mm.bedding_thickness_mm"},
+                "CHA": {"value": safe_float(self.inputs["core_lay_angle"], 9.0, "Core helix angle"), "json_path": "armour.core_lay_angle_deg"},
+                "IAHA": {"value": safe_float(self.inputs["inner_lay_angle"], -20.1, "Inner armour helix angle"), "json_path": "armour.inner_lay_angle_deg"},
+                "OAHA": {"value": safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour helix angle"), "json_path": "armour.outer_lay_angle_deg"},
+            },
+            "armour_input": {
+                "RoIA": {"value": safe_float(self.inputs["r_ia"], 2.0, "Inner armour radius"), "json_path": "armour.inner_wire_radius_mm"},
+                "RoOA": {"value": safe_float(self.inputs["r_oa"], 2.0, "Outer armour radius"), "json_path": "armour.outer_wire_radius_mm"},
+                "NoIA": {"value": int(self.inputs["no_ia"].value()), "resolved_value": int(dg["inner_armour_wire_count"]), "json_path": "armour.inner_wire_count"},
+                "NoOA": {"value": int(self.inputs["no_oa"].value()), "resolved_value": int(dg["outer_armour_wire_count"]), "json_path": "armour.outer_wire_count"},
+            },
+            "analysis_input": {
+                "P": {"value": pressure, "json_path": "analysis_conditions.external_pressure_mpa"},
+                "FrCo": {"value": friction, "json_path": "analysis_conditions.friction_coefficient"},
+                "conStiff": {"value": None, "json_path": "analysis_conditions.contact_stiffness_scale_factor"},
+                "BendFac": {"value": bend_fac, "json_path": "analysis_conditions.max_curvature_1_per_m"},
+            },
+            "mesh_input": {
+                "CoreMeshType": {"value": basis, "json_path": "mesh_controls.components.Core"},
+                "BSMeshType": {"value": basis, "json_path": "mesh_controls.components.InnerSheath/Bedding/OuterSheath"},
+                "ArmourMeshType": {"value": basis, "json_path": "mesh_controls.components.InnerArmour/OuterArmour"},
+                "FillerMeshType": {"value": basis, "json_path": "mesh_controls.components.Filler"},
+                "ZAD": {"value": counts["axial"], "json_path": "mesh.axial_divisions"},
+                "CCD": {"value": counts["core_theta"], "json_path": "mesh.core_circumferential_divisions"},
+                "BSCD": {"value": counts["bedding_sheath_theta"], "json_path": "mesh.bedding_sheath_circumferential_divisions"},
+                "ACD": {"value": counts["armour_theta"], "json_path": "mesh.armour_circumferential_divisions"},
+                "BSRD": {"value": counts["bedding_r"], "json_path": "mesh.bedding_sheath_radial_divisions"},
+                "FD1": {"value": counts["filler_short_line"], "json_path": "mesh.filler_profile_divisions.short_line"},
+                "FD2": {"value": counts["filler_long_line"], "json_path": "mesh.filler_profile_divisions.long_line"},
+                "FD3": {"value": counts["filler_short_arc"], "json_path": "mesh.filler_profile_divisions.short_arc"},
+                "FD4": {"value": counts["filler_long_arc"], "json_path": "mesh.filler_profile_divisions.long_arc"},
+            },
+            "derived_values": {
+                "CoC": dg["core_center_radius_mm"],
+                "IRIS": dg["inner_sheath_inner_radius_mm"],
+                "ORIS": dg["inner_sheath_outer_radius_mm"],
+                "CoIA": dg["inner_armour_center_radius_mm"],
+                "IRB": dg["inner_armour_outer_radius_mm"],
+                "ORB": dg["bedding_outer_radius_mm"],
+                "CoOA": dg["outer_armour_center_radius_mm"],
+                "IROS": dg["outer_sheath_inner_radius_mm"],
+                "OROS": dg["outer_sheath_outer_radius_mm"],
+                "scale": dg["filler_profile_scale"],
+                "Dep": dg["effective_length_mm"],
+                "RAoIA": 360.0 / max(float(dg["inner_armour_wire_count"]), 1.0),
+                "RAoOA": 360.0 / max(float(dg["outer_armour_wire_count"]), 1.0),
+                "coef_dof2": (float(dg["effective_length_mm"]) ** 2) / 2.0,
+                "coef_dof4": -float(dg["effective_length_mm"]),
+                "pitch_core": dg["core_pitch_length_mm"],
+                "pitch_inner": -abs(float(dg["inner_armour_input_pitch_length_mm"])),
+                "pitch_outer": dg["outer_armour_input_pitch_length_mm"],
+            },
+        }
+
     def build_payload(self) -> dict:
         dg = self.parse_geometry()
         materials = self.collect_materials()
@@ -2631,15 +2800,15 @@ class SCLASRemoteGUI(QMainWindow):
                 "outer_wire_count_resolved": int(dg["outer_armour_wire_count"]),
                 "inner_wire_count_source": dg["inner_armour_wire_count_source"],
                 "outer_wire_count_source": dg["outer_armour_wire_count_source"],
-                "core_lay_angle_deg": safe_float(self.inputs["core_lay_angle"], 8.98, "Core lay angle"),
-                "inner_lay_angle_deg": safe_float(self.inputs["inner_lay_angle"], 20.1, "Inner armour lay angle"),
+                "core_lay_angle_deg": safe_float(self.inputs["core_lay_angle"], 9.0, "Core lay angle"),
+                "inner_lay_angle_deg": safe_float(self.inputs["inner_lay_angle"], -20.1, "Inner armour lay angle"),
                 "outer_lay_angle_deg": safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour lay angle"),
-                "inner_armour_lay_angle_deg": safe_float(self.inputs["inner_lay_angle"], 20.1, "Inner armour lay angle"),
+                "inner_armour_lay_angle_deg": safe_float(self.inputs["inner_lay_angle"], -20.1, "Inner armour lay angle"),
                 "outer_armour_lay_angle_deg": safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour lay angle"),
                 "inner_armour_period_matched_lay_angle_deg": dg["inner_armour_period_matched_lay_angle_deg"],
                 "outer_armour_period_matched_lay_angle_deg": dg["outer_armour_period_matched_lay_angle_deg"],
                 "lay_angle_deg": 0.5 * (
-                    safe_float(self.inputs["inner_lay_angle"], 20.1, "Inner armour lay angle")
+                    safe_float(self.inputs["inner_lay_angle"], -20.1, "Inner armour lay angle")
                     + safe_float(self.inputs["outer_lay_angle"], 19.6, "Outer armour lay angle")
                 ),
                 "core_input_pitch_length_mm": dg["core_input_pitch_length_mm"],
@@ -2672,13 +2841,29 @@ class SCLASRemoteGUI(QMainWindow):
                 "mesh_algorithm_policy": mesh_req["mesh_algorithm_policy"],
                 "axial_divisions": mesh_counts["axial"],
                 "core_circumferential_divisions": mesh_counts["core_theta"],
+                "bedding_sheath_circumferential_divisions": mesh_counts["bedding_sheath_theta"],
                 "armour_circumferential_divisions": mesh_counts["armour_theta"],
                 "inner_sheath_radial_divisions": mesh_counts["inner_sheath_r"],
                 "bedding_radial_divisions": mesh_counts["bedding_r"],
                 "outer_sheath_radial_divisions": mesh_counts["outer_sheath_r"],
+                "bedding_sheath_radial_divisions": mesh_counts["bedding_r"],
                 "filler_divisions": mesh_counts["axial"],
                 "filler_z_divisions": mesh_counts["axial"],
                 "filler_z_divisions_source": "same_as_axial_divisions",
+                "filler_profile_divisions": {
+                    "short_line": mesh_counts["filler_short_line"],
+                    "long_line": mesh_counts["filler_long_line"],
+                    "short_arc": mesh_counts["filler_short_arc"],
+                    "long_arc": mesh_counts["filler_long_arc"],
+                    "sclas_710_aliases": {"FD1": "short_line", "FD2": "long_line", "FD3": "short_arc", "FD4": "long_arc"},
+                },
+                "sclas_710_aliases": {
+                    "ZAD": "axial_divisions",
+                    "CCD": "core_circumferential_divisions",
+                    "BSCD": "bedding_sheath_circumferential_divisions",
+                    "ACD": "armour_circumferential_divisions",
+                    "BSRD": "bedding_sheath_radial_divisions",
+                },
                 "axial_divisions_scope": "global_all_components",
                 "radial_divisions_per_layer": mesh_counts["bedding_r"],
                 "global_seed_size_mm": mesh_sizes["axial_mm"],
@@ -2701,17 +2886,17 @@ class SCLASRemoteGUI(QMainWindow):
                     },
                     "InnerSheath": {
                         "r": {"mode": mesh_req["basis"], "count": mesh_counts["inner_sheath_r"], "size_mm": mesh_sizes["inner_sheath_radial_mm"]},
-                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["core_theta"], "size_mm": mesh_sizes["core_sheath_circumferential_mm"]},
+                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
                         "z": {"mode": mesh_req["basis"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "Bedding": {
                         "r": {"mode": mesh_req["basis"], "count": mesh_counts["bedding_r"], "size_mm": mesh_sizes["bedding_radial_mm"]},
-                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["core_theta"], "size_mm": mesh_sizes["core_sheath_circumferential_mm"]},
+                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
                         "z": {"mode": mesh_req["basis"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "OuterSheath": {
                         "r": {"mode": mesh_req["basis"], "count": mesh_counts["outer_sheath_r"], "size_mm": mesh_sizes["outer_sheath_radial_mm"]},
-                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["core_theta"], "size_mm": mesh_sizes["core_sheath_circumferential_mm"]},
+                        "theta": {"mode": mesh_req["basis"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
                         "z": {"mode": mesh_req["basis"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "InnerArmour": {
@@ -2726,7 +2911,15 @@ class SCLASRemoteGUI(QMainWindow):
                     },
                     "Filler": {
                         "r": {"mode": "special_profile"},
-                        "theta": {"mode": "special_profile"},
+                        "theta": {
+                            "mode": "special_profile",
+                            "profile_divisions": {
+                                "short_line": mesh_counts["filler_short_line"],
+                                "long_line": mesh_counts["filler_long_line"],
+                                "short_arc": mesh_counts["filler_short_arc"],
+                                "long_arc": mesh_counts["filler_long_arc"],
+                            },
+                        },
                         "z": {
                             "mode": mesh_req["basis"],
                             "count": mesh_counts["axial"],
@@ -2740,11 +2933,14 @@ class SCLASRemoteGUI(QMainWindow):
                 "effective_length_mm": dg["effective_length_mm"],
                 "effective_length_source": dg["effective_length_source"],
                 "pitch_period_design_source": dg["pitch_design_source"],
-                "external_pressure_mpa": safe_float(self.cond["pressure"], 40.0, "External pressure"),
-                "hydrostatic_pressure_mpa": safe_float(self.cond["pressure"], 40.0, "External pressure"),
+                "external_pressure_mpa": safe_float(self.cond["pressure"], 0.3, "External pressure"),
+                "hydrostatic_pressure_mpa": safe_float(self.cond["pressure"], 0.3, "External pressure"),
+                "pressure_mpa": safe_float(self.cond["pressure"], 0.3, "Pressure"),
                 "residual_contact_pressure_mpa": safe_float(self.cond["residual_contact_pressure"], 0.3, "Residual contact pressure"),
-                "friction_coefficient": safe_float(self.cond["friction"], 0.22, "Friction coefficient"),
-                "max_curvature_1_per_m": safe_float(self.cond["curvature"], 0.08, "Max curvature"),
+                "friction_coefficient": safe_float(self.cond["friction"], 0.3, "Friction coefficient"),
+                "contact_stiffness_scale_factor": None,
+                "max_curvature_1_per_m": safe_float(self.cond["curvature"], 5.0e-5, "Max curvature"),
+                "bend_factor": safe_float(self.cond["curvature"], 5.0e-5, "Bend factor"),
                 "curvature_unit": "1_per_m",
                 "curve_factors": [-0.1, -0.05, 0.0, 0.05, 0.1],
                 "max_twist_rad_per_m": safe_float(self.cond["twist"], 0.05, "Max twist"),
@@ -2762,9 +2958,33 @@ class SCLASRemoteGUI(QMainWindow):
                 "step_time": 1.0,
                 "max_wall_time_min": None,
                 "initial_increment": 1.0e-5,
-                "minimum_increment": 1.0e-11,
-                "maximum_increment": 0.001,
+                "minimum_increment": 1.0e-10,
+                "maximum_increment": 0.05,
                 "max_num_increments": 10000,
+                "pressure_step": {
+                    "initial_increment": 1.0e-5,
+                    "minimum_increment": 1.0e-10,
+                    "maximum_increment": 0.1,
+                    "max_num_increments": 10000,
+                },
+                "bending_step": {
+                    "initial_increment": 1.0e-5,
+                    "minimum_increment": 1.0e-10,
+                    "maximum_increment": 0.05,
+                    "max_num_increments": 10000,
+                },
+                "cpu_count": 12,
+                "sclas_710_aliases": {
+                    "inIncP": "pressure_step.initial_increment",
+                    "minIncP": "pressure_step.minimum_increment",
+                    "maxIncP": "pressure_step.maximum_increment",
+                    "maxNumIncP": "pressure_step.max_num_increments",
+                    "inIncB": "bending_step.initial_increment",
+                    "minIncB": "bending_step.minimum_increment",
+                    "maxIncB": "bending_step.maximum_increment",
+                    "maxNumIncB": "bending_step.max_num_increments",
+                    "CPU": "cpu_count",
+                },
                 "nlgeom": False,
                 "stabilization_enabled": True,
                 "stabilization_factor": 0.0002,
@@ -2839,11 +3059,12 @@ class SCLASRemoteGUI(QMainWindow):
                     "filler_z_divisions": "mirrors mesh.axial_divisions; no separate GUI input",
                 },
             },
+            "sclas_710_variable_contract": self.build_sclas710_variable_contract(dg, mesh_req),
         }
         return payload
 
     def build_numerical_model_notes(self) -> dict:
-        friction = safe_float(self.cond["friction"], 0.22, "Friction coefficient")
+        friction = safe_float(self.cond["friction"], 0.3, "Friction coefficient")
         residual_pressure = safe_float(self.cond["residual_contact_pressure"], 0.3, "Residual contact pressure")
         contact_beta = safe_float(self.mesh_inputs["contact_beta"], 0.001, "Contact regularization beta")
         dg = getattr(self, "derived_geom", {})
@@ -3099,19 +3320,21 @@ class SCLASRemoteGUI(QMainWindow):
             f"strategy: {mesh['model_strategy']}",
             f"armour_model: {mesh['armour_model']}",
             f"axial_divisions: {mesh['axial_divisions']}",
-            f"core_circumferential_divisions: {mesh['core_circumferential_divisions']}",
+            f"core_circumferential_divisions CCD: {mesh['core_circumferential_divisions']}",
+            f"bedding_sheath_circumferential_divisions BSCD: {mesh['bedding_sheath_circumferential_divisions']}",
             f"armour_circumferential_divisions: {mesh['armour_circumferential_divisions']}",
             f"inner_sheath_radial_divisions: {mesh['inner_sheath_radial_divisions']}",
             f"bedding_radial_divisions: {mesh['bedding_radial_divisions']}",
             f"outer_sheath_radial_divisions: {mesh['outer_sheath_radial_divisions']}",
             f"filler_z_divisions: {mesh['filler_z_divisions']} ({mesh['filler_z_divisions_source']})",
+            f"filler_profile_divisions FD1/FD2/FD3/FD4: {mesh['filler_profile_divisions']['short_line']}/{mesh['filler_profile_divisions']['long_line']}/{mesh['filler_profile_divisions']['short_arc']}/{mesh['filler_profile_divisions']['long_arc']}",
             f"multiples_of_4_recommended: {mesh['circumferential_division_policy']['multiples_of_4_recommended_for_demo']}",
             f"multiples_of_4_enforced: {mesh['circumferential_division_policy']['multiples_of_4_enforced']}",
             "",
             "[Analysis Conditions]",
             f"effective_length_mm: {analysis['effective_length_mm']:.5g}",
             f"external_pressure_mpa: {analysis['external_pressure_mpa']:.5g}",
-            f"max_curvature_1_per_m: {analysis['max_curvature_1_per_m']:.5g}",
+            f"bend_factor/max_curvature_1_per_m: {analysis['max_curvature_1_per_m']:.5g}",
             f"friction_coefficient: {analysis['friction_coefficient']:.5g}",
             f"loading_cycles: {analysis['loading_cycles']}",
             f"solver_steps: {analysis['solver_steps']}",
@@ -3208,6 +3431,7 @@ class SCLASRemoteGUI(QMainWindow):
 
         return {
             "version": APP_VERSION,
+            "settings_schema": SETTINGS_SCHEMA_VERSION,
             "ui": {"language": self.ui_language},
             "geometry": {key: widget_value(widget) for key, widget in self.inputs.items()},
             "analysis_conditions": {key: widget_value(widget) for key, widget in self.cond.items()},
@@ -3246,18 +3470,32 @@ class SCLASRemoteGUI(QMainWindow):
                 if idx >= 0:
                     widget.setCurrentIndex(idx)
 
+        settings_schema = settings.get("settings_schema")
+        current_schema = settings_schema == SETTINGS_SCHEMA_VERSION
+        if settings and not current_schema:
+            self.log(
+                "[SETTINGS] Legacy settings detected; keeping UI/backend preferences "
+                "and resetting SCLAS 710-controlled geometry, analysis, and mesh defaults."
+            )
+
+        sclas710_geometry_keys = {"core_lay_angle", "inner_lay_angle", "outer_lay_angle"}
+
         for key, value in settings.get("geometry", {}).items():
             if key in self.inputs:
+                if not current_schema and key in sclas710_geometry_keys:
+                    continue
                 set_widget(self.inputs[key], value)
-        for key, value in settings.get("analysis_conditions", {}).items():
-            if key in self.cond:
-                set_widget(self.cond[key], value)
+        if current_schema:
+            for key, value in settings.get("analysis_conditions", {}).items():
+                if key in self.cond:
+                    set_widget(self.cond[key], value)
         for key, value in settings.get("study_scope", {}).items():
             if key in self.study_checks:
                 self.study_checks[key].setChecked(bool(value))
-        for key, value in settings.get("mesh", {}).items():
-            if key in self.mesh_inputs:
-                set_widget(self.mesh_inputs[key], value)
+        if current_schema:
+            for key, value in settings.get("mesh", {}).items():
+                if key in self.mesh_inputs:
+                    set_widget(self.mesh_inputs[key], value)
 
         backend = settings.get("backend", {})
         if backend.get("job_root"):
@@ -3974,7 +4212,7 @@ class SCLASRemoteGUI(QMainWindow):
             f"bedding_thickness_mm: {self.derived_geom.get('bedding_thickness_mm', '-')}",
             f"inner_armour_wire_count: {self.derived_geom.get('inner_armour_wire_count', '-')} ({self.derived_geom.get('inner_armour_wire_count_source', '-')})",
             f"outer_armour_wire_count: {self.derived_geom.get('outer_armour_wire_count', '-')} ({self.derived_geom.get('outer_armour_wire_count_source', '-')})",
-            f"pressure_mpa: {self.cond['pressure'].text()}",
+            f"pressure_mpa P: {self.cond['pressure'].text()}",
             f"armour_model: {self.mesh_value('armour_model')}",
         ]
         self.last_summary_data = {}
@@ -4553,9 +4791,9 @@ class SCLASRemoteGUI(QMainWindow):
         title_font.setBold(True)
         body_font = QFont("Segoe UI", 9)
         small_font = QFont("Segoe UI", 8)
-        pressure_value = self.cond["pressure"].text() if hasattr(self, "cond") else "40.00"
-        curvature_value = self.cond["curvature"].text() if hasattr(self, "cond") else "0.08"
-        friction_value = self.cond["friction"].text() if hasattr(self, "cond") else "0.22"
+        pressure_value = self.cond["pressure"].text() if hasattr(self, "cond") else "0.30"
+        curvature_value = self.cond["curvature"].text() if hasattr(self, "cond") else "5.0e-5"
+        friction_value = self.cond["friction"].text() if hasattr(self, "cond") else "0.30"
 
         painter.setFont(title_font)
         painter.setPen(QColor("#17202a"))
@@ -4696,7 +4934,7 @@ class SCLASRemoteGUI(QMainWindow):
         basis = mesh_req.get("basis", "count")
         z_div = int(counts.get("axial", self.mesh_inputs["z_elem"].value())) if hasattr(self, "mesh_inputs") else 40
         filler_z_div = z_div
-        core_div = int(counts.get("core_theta", self.mesh_inputs["c_elem_core"].value())) if hasattr(self, "mesh_inputs") else 24
+        core_div = int(counts.get("core_theta", self.mesh_inputs["c_elem_core"].value())) if hasattr(self, "mesh_inputs") else 20
         armour_div = int(counts.get("armour_theta", self.mesh_inputs["c_elem_armour"].value())) if hasattr(self, "mesh_inputs") else 8
         r_inner = int(counts.get("inner_sheath_r", self.mesh_inputs["r_elem_inner_sheath"].value())) if hasattr(self, "mesh_inputs") else 3
         r_bedding = int(counts.get("bedding_r", self.mesh_inputs["r_elem_bedding"].value())) if hasattr(self, "mesh_inputs") else 1
@@ -4971,12 +5209,13 @@ class SCLASRemoteGUI(QMainWindow):
             z_rows = int(counts["axial"])
             filler_z_rows = z_rows
             core_cols = int(counts["core_theta"])
+            bedding_sheath_cols = int(counts["bedding_sheath_theta"])
             armour_cols = int(counts["armour_theta"])
             add_ring_mesh(
                 dg["outer_sheath_inner_radius_mm"],
                 dg["outer_sheath_outer_radius_mm"],
                 counts["outer_sheath_r"],
-                core_cols,
+                bedding_sheath_cols,
                 (0.18, 0.50, 0.93, 0.72),
             )
             add_wire_mesh(
@@ -4990,7 +5229,7 @@ class SCLASRemoteGUI(QMainWindow):
                 dg["inner_armour_outer_radius_mm"],
                 dg["bedding_outer_radius_mm"],
                 counts["bedding_r"],
-                core_cols,
+                bedding_sheath_cols,
                 (0.50, 0.75, 0.36, 0.68),
             )
             add_wire_mesh(
@@ -5004,7 +5243,7 @@ class SCLASRemoteGUI(QMainWindow):
                 dg["inner_sheath_inner_radius_mm"],
                 dg["inner_sheath_outer_radius_mm"],
                 counts["inner_sheath_r"],
-                core_cols,
+                bedding_sheath_cols,
                 (0.34, 0.82, 0.82, 0.72),
             )
             add_segments(circle_segments(0.0, 0.0, dg["filler_outer_radius_mm"], core_cols), (0.96, 0.75, 0.16, 0.62))
@@ -5032,8 +5271,10 @@ class SCLASRemoteGUI(QMainWindow):
                     f"Mesh input basis: {basis}",
                     f"Global axial n_z divisions: {z_rows}",
                     f"Filler n_z divisions: {filler_z_rows} (same as global axial n_z)",
-                    f"Core/Sheath n_theta divisions: {core_cols}",
+                    f"Core n_theta divisions CCD: {core_cols}",
+                    f"Bedding/Sheath n_theta divisions BSCD: {bedding_sheath_cols}",
                     f"Armour n_theta divisions: {armour_cols}",
+                    f"Filler FD1/FD2/FD3/FD4: {counts['filler_short_line']}/{counts['filler_long_line']}/{counts['filler_short_arc']}/{counts['filler_long_arc']}",
                     f"Inner/Bedding/Outer radial n_r: {counts['inner_sheath_r']}/{counts['bedding_r']}/{counts['outer_sheath_r']}",
                     "Circumferential multiples of 4 are recommended for demos, not enforced.",
                 ]
@@ -5042,7 +5283,8 @@ class SCLASRemoteGUI(QMainWindow):
                         "",
                         "Target sizes used to resolve counts:",
                         f"Axial: {sizes['axial_mm']} mm",
-                        f"Core/Sheath circumferential: {sizes['core_sheath_circumferential_mm']} mm",
+                        f"Core circumferential: {sizes['core_sheath_circumferential_mm']} mm",
+                        f"Bedding/Sheath circumferential: {sizes['bedding_sheath_circumferential_mm']} mm",
                         f"Armour circumferential: {sizes['armour_circumferential_mm']} mm",
                         f"Inner/Bedding/Outer radial: {sizes['inner_sheath_radial_mm']}/{sizes['bedding_radial_mm']}/{sizes['outer_sheath_radial_mm']} mm",
                     ])
