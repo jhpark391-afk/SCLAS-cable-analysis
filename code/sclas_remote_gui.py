@@ -101,7 +101,7 @@ SCLAS_711_VARIABLE_DEFAULTS = {
     "analysis_input": {
         "P": 0.3,
         "FrCo": 0.3,
-        "conStiff": 0.005,
+        "conStiff": 0.05,
         "BendFac": 5.0e-5,
     },
     "solver_input": {
@@ -124,7 +124,6 @@ SCLAS_711_VARIABLE_DEFAULTS = {
         "CCD": 20,
         "BSCD": 64,
         "ACD": 3,
-        "BSRD": 3,
         "FD1": 2,
         "FD2": 2,
         "FD3": 4,
@@ -224,6 +223,23 @@ def pitch_length_from_angle(center_radius_mm: float, angle_deg: float, fallback_
     if abs(tangent) < 1.0e-9:
         return float(fallback_mm)
     return abs(2.0 * math.pi * float(center_radius_mm) / tangent)
+
+
+def signed_pitch_length_from_angle(center_radius_mm: float, angle_deg: float, fallback_mm: float) -> float:
+    angle_rad = float(angle_deg) * math.pi / 180.0
+    tangent = math.tan(angle_rad)
+    if abs(tangent) < 1.0e-9:
+        return float(fallback_mm)
+    return 2.0 * math.pi * float(center_radius_mm) / tangent
+
+
+def automatic_effective_length_from_pitch(pitch_core: float, pitch_inner: float, pitch_outer: float, no_ia: int, no_oa: int) -> float:
+    no_ia = max(1, int(no_ia))
+    no_oa = max(1, int(no_oa))
+    return (
+        float(pitch_core) / 3.0
+        + ((no_ia + no_oa) / 6.0) * (abs(float(pitch_inner)) / no_ia + abs(float(pitch_outer)) / no_oa)
+    ) / 3.0
 
 
 def lay_angle_from_pitch(center_radius_mm: float, pitch_length_mm: float, fallback_deg: float) -> float:
@@ -633,15 +649,12 @@ Important sections:
 
 Key GUI/backend conventions:
 - Users input helix pitch angles in `armour.*_lay_angle_deg`.
-- Following Menard and Cartraud (2023), Marine Structures 91, Eqs. (2)-(4),
-  the GUI computes raw pitch lengths with `p = 2*pi*R_h/tan(alpha)` and then
-  selects a common period with `l = k_j*p_j/n_j`.
-- `analysis_conditions.effective_length_mm` is the selected common period. The
-  core period `p_core / geometry_mm.core_count` is used as the reference, and
-  armour integer multipliers are automatically selected to match that period.
-- The GUI writes both raw input-angle pitches and period-matched backend
-  pitches. Backends should prefer `armour.*_backend_pitch_length_mm` or the
-  signed `armour.*_pitch_mm` values when generating the Abaqus helix.
+- The GUI computes signed pitch lengths directly from the Abaqus automation
+  formula: `p = 2*pi*R/tan(alpha)`.
+- `analysis_conditions.effective_length_mm` is the automatic.py `Dep` value:
+  `(p_core/3 + ((NoIA+NoOA)/6)*(abs(p_inner)/NoIA + abs(p_outer)/NoOA))/3`.
+- The GUI writes the calculated signed values to `armour.*_pitch_mm` and mirrors
+  them under `armour.*_backend_pitch_length_mm` for backend compatibility.
 - `geometry_mm.core_count` defaults to `3` and is passed for backend job setup.
 - `mesh.axial_divisions` is the single z-direction division count for all cable
   components. Filler profile divisions are provided separately as `FD1` to `FD4`
@@ -1569,13 +1582,11 @@ class SCLASRemoteGUI(QMainWindow):
         derived_grid.setVerticalSpacing(7)
         self.pitch_summary_labels = {}
         derived_rows = [
-            ("Core input pitch p_core", "core_pitch_length_mm"),
-            ("Inner input pitch p_ia", "inner_armour_input_pitch_length_mm"),
-            ("Outer input pitch p_oa", "outer_armour_input_pitch_length_mm"),
-            ("Selected period L_eff", "effective_length_mm"),
-            ("Inner backend pitch", "inner_armour_backend_pitch_summary"),
-            ("Outer backend pitch", "outer_armour_backend_pitch_summary"),
-            ("Period match error", "period_match_error_summary"),
+            ("Calculated pitch p_core", "core_pitch_length_mm"),
+            ("Calculated pitch p_inner", "inner_armour_input_pitch_length_mm"),
+            ("Calculated pitch p_outer", "outer_armour_input_pitch_length_mm"),
+            ("Effective length Dep", "effective_length_mm"),
+            ("Length formula", "effective_length_formula_summary"),
         ]
         for row, (label, key) in enumerate(derived_rows):
             name = QLabel(label)
@@ -1748,9 +1759,6 @@ class SCLASRemoteGUI(QMainWindow):
             "core_theta": self.mesh_field_basis("c_elem_core"),
             "bedding_sheath_theta": self.mesh_field_basis("c_elem_bedding_sheath"),
             "armour_theta": self.mesh_field_basis("c_elem_armour"),
-            "inner_sheath_r": self.mesh_field_basis("r_elem_inner_sheath"),
-            "bedding_r": self.mesh_field_basis("r_elem_bedding"),
-            "outer_sheath_r": self.mesh_field_basis("r_elem_outer_sheath"),
             "filler_short_line": "count",
             "filler_long_line": "count",
             "filler_short_arc": "count",
@@ -1799,9 +1807,6 @@ class SCLASRemoteGUI(QMainWindow):
             "core_theta": int(self.mesh_inputs["c_elem_core"].value()),
             "bedding_sheath_theta": int(self.mesh_inputs["c_elem_bedding_sheath"].value()),
             "armour_theta": int(self.mesh_inputs["c_elem_armour"].value()),
-            "inner_sheath_r": int(self.mesh_inputs["r_elem_inner_sheath"].value()),
-            "bedding_r": int(self.mesh_inputs["r_elem_bedding"].value()),
-            "outer_sheath_r": int(self.mesh_inputs["r_elem_outer_sheath"].value()),
             "filler_short_line": int(self.mesh_inputs["filler_short_line_elem"].value()),
             "filler_long_line": int(self.mesh_inputs["filler_long_line_elem"].value()),
             "filler_short_arc": int(self.mesh_inputs["filler_short_arc_elem"].value()),
@@ -1812,32 +1817,17 @@ class SCLASRemoteGUI(QMainWindow):
             "core_sheath_circumferential_mm": None,
             "bedding_sheath_circumferential_mm": None,
             "armour_circumferential_mm": None,
-            "inner_sheath_radial_mm": None,
-            "bedding_radial_mm": None,
-            "outer_sheath_radial_mm": None,
         }
         axial_size = self.mesh_size_float("z_size", 5.85)
         core_theta_size = self.mesh_size_float("c_size_core", 13.5)
         bedding_sheath_theta_size = self.mesh_size_float("c_size_bedding_sheath", 3.3)
         armour_theta_size = self.mesh_size_float("c_size_armour", 1.6)
-        inner_r_size = self.mesh_size_float("r_size_inner_sheath", 1.5)
-        bedding_r_size = self.mesh_size_float("r_size_bedding", 0.6)
-        outer_r_size = self.mesh_size_float("r_size_outer_sheath", 1.5)
         effective_length = max(float(dg.get("effective_length_mm", 234.2)), axial_size)
         outer_radius = max(float(dg.get("outer_sheath_outer_radius_mm", 51.0)), core_theta_size / (2.0 * math.pi), bedding_sheath_theta_size / (2.0 * math.pi))
         armour_radius = max(
             float(dg.get("inner_armour_wire_radius_mm", 2.0)),
             float(dg.get("outer_armour_wire_radius_mm", 2.0)),
             armour_theta_size / (2.0 * math.pi),
-        )
-        inner_thickness = max(
-            float(dg.get("inner_sheath_outer_radius_mm", 0.0)) - float(dg.get("inner_sheath_inner_radius_mm", 0.0)),
-            inner_r_size,
-        )
-        bedding_thickness = max(float(dg.get("bedding_thickness_mm", 0.6)), bedding_r_size)
-        outer_thickness = max(
-            float(dg.get("outer_sheath_outer_radius_mm", 0.0)) - float(dg.get("outer_sheath_inner_radius_mm", 0.0)),
-            outer_r_size,
         )
         if basis_by_field["axial"] == "size":
             sizes["axial_mm"] = axial_size
@@ -1851,15 +1841,6 @@ class SCLASRemoteGUI(QMainWindow):
         if basis_by_field["armour_theta"] == "size":
             sizes["armour_circumferential_mm"] = armour_theta_size
             counts["armour_theta"] = self.clamp_mesh_count(math.ceil(2.0 * math.pi * armour_radius / armour_theta_size), self.mesh_inputs["c_elem_armour"])
-        if basis_by_field["inner_sheath_r"] == "size":
-            sizes["inner_sheath_radial_mm"] = inner_r_size
-            counts["inner_sheath_r"] = self.clamp_mesh_count(math.ceil(inner_thickness / inner_r_size), self.mesh_inputs["r_elem_inner_sheath"])
-        if basis_by_field["bedding_r"] == "size":
-            sizes["bedding_radial_mm"] = bedding_r_size
-            counts["bedding_r"] = self.clamp_mesh_count(math.ceil(bedding_thickness / bedding_r_size), self.mesh_inputs["r_elem_bedding"])
-        if basis_by_field["outer_sheath_r"] == "size":
-            sizes["outer_sheath_radial_mm"] = outer_r_size
-            counts["outer_sheath_r"] = self.clamp_mesh_count(math.ceil(outer_thickness / outer_r_size), self.mesh_inputs["r_elem_outer_sheath"])
         return {
             "basis": basis,
             "basis_by_field": basis_by_field,
@@ -1879,9 +1860,6 @@ class SCLASRemoteGUI(QMainWindow):
             "c_elem_core": QSpinBox(),
             "c_elem_bedding_sheath": QSpinBox(),
             "c_elem_armour": QSpinBox(),
-            "r_elem_inner_sheath": QSpinBox(),
-            "r_elem_bedding": QSpinBox(),
-            "r_elem_outer_sheath": QSpinBox(),
             "filler_short_line_elem": QSpinBox(),
             "filler_long_line_elem": QSpinBox(),
             "filler_short_arc_elem": QSpinBox(),
@@ -1890,9 +1868,6 @@ class SCLASRemoteGUI(QMainWindow):
             "c_size_core": QLineEdit("13.50"),
             "c_size_bedding_sheath": QLineEdit("3.30"),
             "c_size_armour": QLineEdit("1.60"),
-            "r_size_inner_sheath": QLineEdit("1.50"),
-            "r_size_bedding": QLineEdit("0.60"),
-            "r_size_outer_sheath": QLineEdit("1.50"),
         }
         self.mesh_inputs["elem_type"].addItem("C3D8", "C3D8")
         self.mesh_inputs["elem_type"].setEnabled(False)
@@ -1900,9 +1875,6 @@ class SCLASRemoteGUI(QMainWindow):
         self.mesh_inputs["c_elem_core"].setRange(3, 240); self.mesh_inputs["c_elem_core"].setValue(20)
         self.mesh_inputs["c_elem_bedding_sheath"].setRange(3, 320); self.mesh_inputs["c_elem_bedding_sheath"].setValue(64)
         self.mesh_inputs["c_elem_armour"].setRange(1, 64); self.mesh_inputs["c_elem_armour"].setValue(3)
-        self.mesh_inputs["r_elem_inner_sheath"].setRange(1, 50); self.mesh_inputs["r_elem_inner_sheath"].setValue(3)
-        self.mesh_inputs["r_elem_bedding"].setRange(1, 50); self.mesh_inputs["r_elem_bedding"].setValue(3)
-        self.mesh_inputs["r_elem_outer_sheath"].setRange(1, 50); self.mesh_inputs["r_elem_outer_sheath"].setValue(3)
         self.mesh_inputs["filler_short_line_elem"].setRange(1, 100); self.mesh_inputs["filler_short_line_elem"].setValue(2)
         self.mesh_inputs["filler_long_line_elem"].setRange(1, 100); self.mesh_inputs["filler_long_line_elem"].setValue(2)
         self.mesh_inputs["filler_short_arc_elem"].setRange(1, 100); self.mesh_inputs["filler_short_arc_elem"].setValue(4)
@@ -1913,9 +1885,6 @@ class SCLASRemoteGUI(QMainWindow):
             "c_elem_core": "Core circumferential divisions from SCLAS 711 variable CCD.",
             "c_elem_bedding_sheath": "Bedding and sheath circumferential divisions from SCLAS 711 variable BSCD.",
             "c_elem_armour": "Circumferential n_theta divisions around each armour cross-section.",
-            "r_elem_inner_sheath": "n_r divisions through the inner sheath thickness.",
-            "r_elem_bedding": "n_r divisions through the bedding layer.",
-            "r_elem_outer_sheath": "n_r divisions through the outer sheath thickness.",
             "filler_short_line_elem": "Filler short line divisions from SCLAS 711 variable FD1.",
             "filler_long_line_elem": "Filler long line divisions from SCLAS 711 variable FD2.",
             "filler_short_arc_elem": "Filler short arc divisions from SCLAS 711 variable FD3.",
@@ -1924,9 +1893,6 @@ class SCLASRemoteGUI(QMainWindow):
             "c_size_core": "Target circumferential arc length in mm for core/sheath/bedding; frontend converts this to n_theta.",
             "c_size_bedding_sheath": "Target circumferential arc length in mm for bedding and sheath; frontend converts this to BSCD.",
             "c_size_armour": "Target armour-wire circumferential arc length in mm; frontend converts this to armour n_theta.",
-            "r_size_inner_sheath": "Target radial element thickness in mm for inner sheath; frontend converts this to n_r.",
-            "r_size_bedding": "Target radial element thickness in mm for bedding; frontend converts this to n_r.",
-            "r_size_outer_sheath": "Target radial element thickness in mm for outer sheath; frontend converts this to n_r.",
         }
         for key in ["elem_type"]:
             self.mesh_inputs[key].setMinimumWidth(96)
@@ -1936,9 +1902,6 @@ class SCLASRemoteGUI(QMainWindow):
             "c_elem_core",
             "c_elem_bedding_sheath",
             "c_elem_armour",
-            "r_elem_inner_sheath",
-            "r_elem_bedding",
-            "r_elem_outer_sheath",
             "filler_short_line_elem",
             "filler_long_line_elem",
             "filler_short_arc_elem",
@@ -1951,9 +1914,6 @@ class SCLASRemoteGUI(QMainWindow):
             "c_size_core",
             "c_size_bedding_sheath",
             "c_size_armour",
-            "r_size_inner_sheath",
-            "r_size_bedding",
-            "r_size_outer_sheath",
         ]:
             self.mesh_inputs[key].setMinimumWidth(86)
             self.mesh_inputs[key].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -1978,9 +1938,6 @@ class SCLASRemoteGUI(QMainWindow):
         primary_mesh_layout.addWidget(self.compact_control_row("Core n_theta / size", self.mesh_count_size_stack("c_elem_core", "c_size_core")))
         primary_mesh_layout.addWidget(self.compact_control_row("Bedding/Sheath n_theta / size", self.mesh_count_size_stack("c_elem_bedding_sheath", "c_size_bedding_sheath")))
         primary_mesh_layout.addWidget(self.compact_control_row("Armour n_theta / size", self.mesh_count_size_stack("c_elem_armour", "c_size_armour")))
-        primary_mesh_layout.addWidget(self.compact_control_row("Inner sheath n_r / size", self.mesh_count_size_stack("r_elem_inner_sheath", "r_size_inner_sheath")))
-        primary_mesh_layout.addWidget(self.compact_control_row("Bedding n_r / size", self.mesh_count_size_stack("r_elem_bedding", "r_size_bedding")))
-        primary_mesh_layout.addWidget(self.compact_control_row("Outer sheath n_r / size", self.mesh_count_size_stack("r_elem_outer_sheath", "r_size_outer_sheath")))
         mesh_factors.addWidget(primary_mesh_box)
         filler_box = QFrame()
         filler_layout = QVBoxLayout(filler_box)
@@ -2140,7 +2097,7 @@ class SCLASRemoteGUI(QMainWindow):
             "eff_length": QLineEdit("234.07161"),
             "pressure": QLineEdit("0.30"),
             "friction": QLineEdit("0.30"),
-            "contact_stiffness": QLineEdit("0.005"),
+            "contact_stiffness": QLineEdit("0.05"),
             "curvature": QLineEdit("5.0e-5"),
             "cycles": QSpinBox(),
             "steps": QSpinBox(),
@@ -2621,24 +2578,28 @@ class SCLASRemoteGUI(QMainWindow):
         self.inputs["no_oa"].blockSignals(False)
         nia = nia_input if nia_input > 0 else nia_limit
         noa = noa_input if noa_input > 0 else noa_limit
-        core_pitch_length = pitch_length_from_angle(coc, core_lay_angle, 702.6)
-        inner_input_pitch_length = pitch_length_from_angle(co_ia, inner_lay_angle, 677.94737)
-        outer_input_pitch_length = pitch_length_from_angle(co_oa, outer_lay_angle, 776.55789)
-        period_design = build_menard_period_design(
-            core_pitch_mm=core_pitch_length,
-            inner_pitch_mm=inner_input_pitch_length,
-            outer_pitch_mm=outer_input_pitch_length,
-            core_count=core_count,
-            inner_count=nia,
-            outer_count=noa,
-            inner_center_radius_mm=co_ia,
-            outer_center_radius_mm=co_oa,
-            inner_lay_angle_deg=inner_lay_angle,
-            outer_lay_angle_deg=outer_lay_angle,
+        core_pitch_length = signed_pitch_length_from_angle(coc, core_lay_angle, 702.6)
+        inner_input_pitch_length = signed_pitch_length_from_angle(co_ia, inner_lay_angle, -677.94737)
+        outer_input_pitch_length = signed_pitch_length_from_angle(co_oa, outer_lay_angle, 776.55789)
+        effective_length = automatic_effective_length_from_pitch(
+            core_pitch_length,
+            inner_input_pitch_length,
+            outer_input_pitch_length,
+            nia,
+            noa,
         )
-        effective_length = float(period_design["period_length_mm"])
-        inner_backend_pitch_length = float(period_design["inner_armour"]["backend_pitch_length_mm"])
-        outer_backend_pitch_length = float(period_design["outer_armour"]["backend_pitch_length_mm"])
+        period_design = {
+            "source": "automatic_py_pitch_angle_Dep_formula",
+            "strategy": "direct_angle_pitch_and_Dep_formula",
+            "formula_pitch_core": "pitch_core = 2*pi*CoC/tan(pi/180*CHA)",
+            "formula_pitch_inner": "pitch_inner = 2*pi*CoIA/tan(pi/180*IAHA)",
+            "formula_pitch_outer": "pitch_outer = 2*pi*CoOA/tan(pi/180*OAHA)",
+            "formula_effective_length": "Dep = (pitch_core/3 + ((NoIA+NoOA)/6)*(abs(pitch_inner)/NoIA + abs(pitch_outer)/NoOA))/3",
+            "period_length_mm": round(effective_length, 5),
+            "core": {"input_pitch_length_mm": round(core_pitch_length, 5)},
+            "inner_armour": {"input_pitch_length_mm": round(inner_input_pitch_length, 5)},
+            "outer_armour": {"input_pitch_length_mm": round(outer_input_pitch_length, 5)},
+        }
 
         self.derived_geom = {
             "conductor_radius_mm": rc,
@@ -2679,44 +2640,32 @@ class SCLASRemoteGUI(QMainWindow):
             "inner_armour_input_pitch_length_mm": round(inner_input_pitch_length, 5),
             "outer_armour_input_pitch_length_mm": round(outer_input_pitch_length, 5),
             "core_pitch_length_mm": round(core_pitch_length, 5),
-            "inner_armour_pitch_length_mm": round(inner_backend_pitch_length, 5),
-            "outer_armour_pitch_length_mm": round(outer_backend_pitch_length, 5),
-            "inner_armour_backend_pitch_length_mm": round(inner_backend_pitch_length, 5),
-            "outer_armour_backend_pitch_length_mm": round(outer_backend_pitch_length, 5),
-            "inner_armour_period_multiplier": int(period_design["inner_armour"]["period_multiplier"]),
-            "outer_armour_period_multiplier": int(period_design["outer_armour"]["period_multiplier"]),
-            "inner_armour_input_period_length_mm": period_design["inner_armour"]["input_period_length_mm"],
-            "outer_armour_input_period_length_mm": period_design["outer_armour"]["input_period_length_mm"],
-            "inner_armour_input_period_error_percent": period_design["inner_armour"]["input_period_error_percent"],
-            "outer_armour_input_period_error_percent": period_design["outer_armour"]["input_period_error_percent"],
-            "inner_armour_period_matched_lay_angle_deg": period_design["inner_armour"]["backend_lay_angle_deg"],
-            "outer_armour_period_matched_lay_angle_deg": period_design["outer_armour"]["backend_lay_angle_deg"],
+            "inner_armour_pitch_length_mm": round(abs(inner_input_pitch_length), 5),
+            "outer_armour_pitch_length_mm": round(abs(outer_input_pitch_length), 5),
+            "inner_armour_backend_pitch_length_mm": round(inner_input_pitch_length, 5),
+            "outer_armour_backend_pitch_length_mm": round(outer_input_pitch_length, 5),
+            "inner_armour_period_multiplier": 1,
+            "outer_armour_period_multiplier": 1,
+            "inner_armour_input_period_length_mm": round(abs(inner_input_pitch_length) / max(nia, 1), 5),
+            "outer_armour_input_period_length_mm": round(abs(outer_input_pitch_length) / max(noa, 1), 5),
+            "inner_armour_input_period_error_percent": 0.0,
+            "outer_armour_input_period_error_percent": 0.0,
+            "inner_armour_period_matched_lay_angle_deg": inner_lay_angle,
+            "outer_armour_period_matched_lay_angle_deg": outer_lay_angle,
             "effective_length_mm": round(effective_length, 5),
-            "effective_length_source": "Menard_Cartraud_2023_Eq2_Eq3_core_pitch_divided_by_core_count",
+            "effective_length_source": "automatic_py_Dep_from_pitch_core_inner_outer",
         }
         self.sync_derived_pitch_widgets(self.derived_geom)
         return self.derived_geom
 
     def sync_derived_pitch_widgets(self, dg: Dict[str, float]) -> None:
         if hasattr(self, "pitch_summary_labels"):
-            inner_error = float(dg.get("inner_armour_input_period_error_percent", 0.0))
-            outer_error = float(dg.get("outer_armour_input_period_error_percent", 0.0))
             labels = {
                 "core_pitch_length_mm": f"{format_mm(dg['core_pitch_length_mm'])} mm",
                 "inner_armour_input_pitch_length_mm": f"{format_mm(dg['inner_armour_input_pitch_length_mm'])} mm",
                 "outer_armour_input_pitch_length_mm": f"{format_mm(dg['outer_armour_input_pitch_length_mm'])} mm",
                 "effective_length_mm": f"{format_mm(dg['effective_length_mm'])} mm",
-                "inner_armour_backend_pitch_summary": (
-                    f"k={int(dg['inner_armour_period_multiplier'])}, "
-                    f"p={format_mm(dg['inner_armour_backend_pitch_length_mm'])} mm, "
-                    f"\u03b1={float(dg['inner_armour_period_matched_lay_angle_deg']):.2f}\u00b0"
-                ),
-                "outer_armour_backend_pitch_summary": (
-                    f"k={int(dg['outer_armour_period_multiplier'])}, "
-                    f"p={format_mm(dg['outer_armour_backend_pitch_length_mm'])} mm, "
-                    f"\u03b1={float(dg['outer_armour_period_matched_lay_angle_deg']):.2f}\u00b0"
-                ),
-                "period_match_error_summary": f"inner {inner_error:+.2f}%, outer {outer_error:+.2f}%",
+                "effective_length_formula_summary": "Dep = (p_core/3 + ((NoIA+NoOA)/6)*(|p_inner|/NoIA + |p_outer|/NoOA))/3",
             }
             for key, text in labels.items():
                 if key in self.pitch_summary_labels:
@@ -2733,7 +2682,7 @@ class SCLASRemoteGUI(QMainWindow):
         basis_by_field = mesh_req.get("basis_by_field", {})
         pressure = safe_float(self.cond["pressure"], 0.3, "Pressure")
         friction = safe_float(self.cond["friction"], 0.3, "Friction coefficient")
-        contact_stiffness = safe_float(self.cond["contact_stiffness"], 0.005, "Contact stiffness scale factor")
+        contact_stiffness = safe_float(self.cond["contact_stiffness"], 0.05, "Contact stiffness scale factor")
         bend_fac = safe_float(self.cond["curvature"], 5.0e-5, "Bend factor")
         return {
             "source_file": r"C:\HELIX\Abaqus+_work\SCLAS_변수_정리711.xlsx",
@@ -2771,9 +2720,6 @@ class SCLASRemoteGUI(QMainWindow):
                 "BSMeshType": {
                     "value": {
                         "theta": basis_by_field.get("bedding_sheath_theta", basis),
-                        "inner_sheath_r": basis_by_field.get("inner_sheath_r", basis),
-                        "bedding_r": basis_by_field.get("bedding_r", basis),
-                        "outer_sheath_r": basis_by_field.get("outer_sheath_r", basis),
                     },
                     "json_path": "mesh_controls.components.InnerSheath/Bedding/OuterSheath",
                 },
@@ -2783,7 +2729,6 @@ class SCLASRemoteGUI(QMainWindow):
                 "CCD": {"value": counts["core_theta"], "json_path": "mesh.core_circumferential_divisions"},
                 "BSCD": {"value": counts["bedding_sheath_theta"], "json_path": "mesh.bedding_sheath_circumferential_divisions"},
                 "ACD": {"value": counts["armour_theta"], "json_path": "mesh.armour_circumferential_divisions"},
-                "BSRD": {"value": counts["bedding_r"], "json_path": "mesh.bedding_sheath_radial_divisions"},
                 "FD1": {"value": counts["filler_short_line"], "json_path": "mesh.filler_profile_divisions.short_line"},
                 "FD2": {"value": counts["filler_long_line"], "json_path": "mesh.filler_profile_divisions.long_line"},
                 "FD3": {"value": counts["filler_short_arc"], "json_path": "mesh.filler_profile_divisions.short_arc"},
@@ -2882,10 +2827,10 @@ class SCLASRemoteGUI(QMainWindow):
                 "inner_armour_period_multiplier": dg["inner_armour_period_multiplier"],
                 "outer_armour_period_multiplier": dg["outer_armour_period_multiplier"],
                 "core_pitch_mm": dg["core_pitch_length_mm"],
-                "inner_armour_pitch_mm": -dg["inner_armour_pitch_length_mm"],
-                "outer_armour_pitch_mm": dg["outer_armour_pitch_length_mm"],
+                "inner_armour_pitch_mm": dg["inner_armour_backend_pitch_length_mm"],
+                "outer_armour_pitch_mm": dg["outer_armour_backend_pitch_length_mm"],
                 "pitch_period_design": dg["pitch_period_design"],
-                "pitch_formula": "Menard-Cartraud 2023 Eq. (2): p = 2*pi*R_h/tan(alpha); Eq. (3): l = k_j*p_j/n_j",
+                "pitch_formula": "automatic.py: pitch = 2*pi*R/tan(alpha); Dep from pitch_core, pitch_inner, pitch_outer and armour counts",
                 "pitch_strategy": dg["pitch_design_strategy"],
             },
             "materials": materials,
@@ -2899,10 +2844,6 @@ class SCLASRemoteGUI(QMainWindow):
                 "core_circumferential_divisions": mesh_counts["core_theta"],
                 "bedding_sheath_circumferential_divisions": mesh_counts["bedding_sheath_theta"],
                 "armour_circumferential_divisions": mesh_counts["armour_theta"],
-                "inner_sheath_radial_divisions": mesh_counts["inner_sheath_r"],
-                "bedding_radial_divisions": mesh_counts["bedding_r"],
-                "outer_sheath_radial_divisions": mesh_counts["outer_sheath_r"],
-                "bedding_sheath_radial_divisions": mesh_counts["bedding_r"],
                 "filler_profile_divisions": {
                     "short_line": mesh_counts["filler_short_line"],
                     "long_line": mesh_counts["filler_long_line"],
@@ -2915,7 +2856,6 @@ class SCLASRemoteGUI(QMainWindow):
                     "CCD": "core_circumferential_divisions",
                     "BSCD": "bedding_sheath_circumferential_divisions",
                     "ACD": "armour_circumferential_divisions",
-                    "BSRD": "bedding_sheath_radial_divisions",
                 },
                 "coordinate_basis": "cylindrical_r_theta_z",
             },
@@ -2931,17 +2871,14 @@ class SCLASRemoteGUI(QMainWindow):
                         "z": {"mode": mesh_req["basis_by_field"]["axial"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "InnerSheath": {
-                        "r": {"mode": mesh_req["basis_by_field"]["inner_sheath_r"], "count": mesh_counts["inner_sheath_r"], "size_mm": mesh_sizes["inner_sheath_radial_mm"]},
                         "theta": {"mode": mesh_req["basis_by_field"]["bedding_sheath_theta"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
                         "z": {"mode": mesh_req["basis_by_field"]["axial"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "Bedding": {
-                        "r": {"mode": mesh_req["basis_by_field"]["bedding_r"], "count": mesh_counts["bedding_r"], "size_mm": mesh_sizes["bedding_radial_mm"]},
                         "theta": {"mode": mesh_req["basis_by_field"]["bedding_sheath_theta"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
                         "z": {"mode": mesh_req["basis_by_field"]["axial"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
                     "OuterSheath": {
-                        "r": {"mode": mesh_req["basis_by_field"]["outer_sheath_r"], "count": mesh_counts["outer_sheath_r"], "size_mm": mesh_sizes["outer_sheath_radial_mm"]},
                         "theta": {"mode": mesh_req["basis_by_field"]["bedding_sheath_theta"], "count": mesh_counts["bedding_sheath_theta"], "size_mm": mesh_sizes["bedding_sheath_circumferential_mm"]},
                         "z": {"mode": mesh_req["basis_by_field"]["axial"], "count": mesh_counts["axial"], "size_mm": mesh_sizes["axial_mm"]},
                     },
@@ -2983,8 +2920,8 @@ class SCLASRemoteGUI(QMainWindow):
                 "hydrostatic_pressure_mpa": safe_float(self.cond["pressure"], 0.3, "External pressure"),
                 "pressure_mpa": safe_float(self.cond["pressure"], 0.3, "Pressure"),
                 "friction_coefficient": safe_float(self.cond["friction"], 0.3, "Friction coefficient"),
-                "contact_stiffness_scale_factor": safe_float(self.cond["contact_stiffness"], 0.005, "Contact stiffness scale factor"),
-                "conStiff": safe_float(self.cond["contact_stiffness"], 0.005, "Contact stiffness scale factor"),
+                "contact_stiffness_scale_factor": safe_float(self.cond["contact_stiffness"], 0.05, "Contact stiffness scale factor"),
+                "conStiff": safe_float(self.cond["contact_stiffness"], 0.05, "Contact stiffness scale factor"),
                 "max_curvature_1_per_m": safe_float(self.cond["curvature"], 5.0e-5, "Max curvature"),
                 "bend_factor": safe_float(self.cond["curvature"], 5.0e-5, "Bend factor"),
                 "curvature_unit": "1_per_m",
@@ -3084,9 +3021,8 @@ class SCLASRemoteGUI(QMainWindow):
                     "odb": "*.odb",
                 },
                 "derived_input_policy": {
-                    "pitch_lengths": "computed by GUI from Menard-Cartraud 2023 Eq. (2) using helix pitch angles and layer mean radii",
-                    "period_length": "computed by GUI from Menard-Cartraud 2023 Eq. (3); armour integer multipliers are auto-selected against the core period",
-                    "effective_length_mm": "computed by GUI as the selected common period length L_eff",
+                    "pitch_lengths": "computed by GUI from automatic.py formula p = 2*pi*R/tan(alpha)",
+                    "effective_length_mm": "computed by GUI from automatic.py Dep formula using p_core, p_inner, p_outer, NoIA, and NoOA",
                 },
             },
             "sclas_710_variable_contract": self.build_sclas710_variable_contract(dg, mesh_req),
@@ -3121,9 +3057,9 @@ class SCLASRemoteGUI(QMainWindow):
                 f"Inner armour center radius: {payload['derived_geometry_mm']['inner_armour_center_radius_mm']:.3f} mm\n"
                 f"Outer armour center radius: {payload['derived_geometry_mm']['outer_armour_center_radius_mm']:.3f} mm\n"
                 f"Core pitch length: {payload['derived_geometry_mm']['core_pitch_length_mm']:.3f} mm\n"
-                f"Selected period length: {payload['analysis_conditions']['effective_length_mm']:.3f} mm\n"
-                f"Inner armour backend pitch: {payload['armour']['inner_armour_backend_pitch_length_mm']:.3f} mm\n"
-                f"Outer armour backend pitch: {payload['armour']['outer_armour_backend_pitch_length_mm']:.3f} mm"
+                f"Effective length Dep: {payload['analysis_conditions']['effective_length_mm']:.3f} mm\n"
+                f"Inner armour pitch: {payload['armour']['inner_armour_backend_pitch_length_mm']:.3f} mm\n"
+                f"Outer armour pitch: {payload['armour']['outer_armour_backend_pitch_length_mm']:.3f} mm"
             )
             self.set_badge(self.lbl_model_status, "Model: valid", "good")
             QMessageBox.information(self, "Validation complete", msg)
@@ -3222,9 +3158,6 @@ class SCLASRemoteGUI(QMainWindow):
             f"core_circumferential_divisions CCD: {mesh['core_circumferential_divisions']}",
             f"bedding_sheath_circumferential_divisions BSCD: {mesh['bedding_sheath_circumferential_divisions']}",
             f"armour_circumferential_divisions: {mesh['armour_circumferential_divisions']}",
-            f"inner_sheath_radial_divisions: {mesh['inner_sheath_radial_divisions']}",
-            f"bedding_radial_divisions: {mesh['bedding_radial_divisions']}",
-            f"outer_sheath_radial_divisions: {mesh['outer_sheath_radial_divisions']}",
             f"filler_profile_divisions FD1/FD2/FD3/FD4: {mesh['filler_profile_divisions']['short_line']}/{mesh['filler_profile_divisions']['long_line']}/{mesh['filler_profile_divisions']['short_arc']}/{mesh['filler_profile_divisions']['long_arc']}",
             "",
             "[Analysis Conditions]",
@@ -4899,7 +4832,7 @@ class SCLASRemoteGUI(QMainWindow):
             dg = dict(getattr(self, "derived_geom", {}))
 
         friction_value = self.cond["friction"].text() if hasattr(self, "cond") else "0.30"
-        contact_value = self.cond["contact_stiffness"].text() if hasattr(self, "cond") else "0.005"
+        contact_value = self.cond["contact_stiffness"].text() if hasattr(self, "cond") else "0.05"
 
         painter.setPen(QPen(QColor("#d8e0ea"), 1))
         painter.setBrush(QColor("#ffffff"))
@@ -5166,19 +5099,12 @@ class SCLASRemoteGUI(QMainWindow):
         filler_z_div = z_div
         core_div = int(counts.get("core_theta", self.mesh_inputs["c_elem_core"].value())) if hasattr(self, "mesh_inputs") else 20
         armour_div = int(counts.get("armour_theta", self.mesh_inputs["c_elem_armour"].value())) if hasattr(self, "mesh_inputs") else 8
-        r_inner = int(counts.get("inner_sheath_r", self.mesh_inputs["r_elem_inner_sheath"].value())) if hasattr(self, "mesh_inputs") else 3
-        r_bedding = int(counts.get("bedding_r", self.mesh_inputs["r_elem_bedding"].value())) if hasattr(self, "mesh_inputs") else 1
-        r_outer = int(counts.get("outer_sheath_r", self.mesh_inputs["r_elem_outer_sheath"].value())) if hasattr(self, "mesh_inputs") else 3
+        radial_preview_div = 3
         active_key = getattr(self, "active_mesh_key", "")
         active_z = active_key == "z_elem"
         active_core_theta = active_key == "c_elem_core"
         active_armour_theta = active_key == "c_elem_armour"
         active_filler = False
-        active_r_key = {
-            "r_elem_inner_sheath": "inner",
-            "r_elem_bedding": "bedding",
-            "r_elem_outer_sheath": "outer",
-        }.get(active_key, "")
 
         painter.setPen(QColor("#d8e0ea"))
         painter.setBrush(QColor("#ffffff"))
@@ -5193,7 +5119,7 @@ class SCLASRemoteGUI(QMainWindow):
         label_font = QFont("Segoe UI", 9)
         painter.setFont(label_font)
         painter.setPen(QColor("#64748b"))
-        painter.drawText(22, 50, f"Circumferential/radial mesh setting | basis: {basis}")
+        painter.drawText(22, 50, f"Circumferential mesh setting | basis: {basis}")
 
         summary_x = 28
         summary_y = 96
@@ -5206,7 +5132,7 @@ class SCLASRemoteGUI(QMainWindow):
         painter.setPen(QColor("#475569"))
         painter.drawText(summary_x + 12, summary_y + 52, f"Core theta: {core_div}")
         painter.drawText(summary_x + 12, summary_y + 76, f"Armour theta: {armour_div}")
-        painter.drawText(summary_x + 12, summary_y + 100, f"Radial: {r_inner}/{r_bedding}/{r_outer}")
+        painter.drawText(summary_x + 12, summary_y + 100, "Radial seed: backend fixed")
 
         # Geometry-based section guide. This is generated from GUI values only,
         # not from an Abaqus .inp file.
@@ -5276,10 +5202,10 @@ class SCLASRemoteGUI(QMainWindow):
             draw_ring_mesh(
                 float(dg["outer_sheath_inner_radius_mm"]),
                 float(dg["outer_sheath_outer_radius_mm"]),
-                r_outer,
+                radial_preview_div,
                 core_div,
                 "#2f80ed",
-                radial_highlight=active_r_key == "outer",
+                radial_highlight=False,
                 theta_highlight=active_core_theta,
             )
             draw_wire_ring(
@@ -5292,10 +5218,10 @@ class SCLASRemoteGUI(QMainWindow):
             draw_ring_mesh(
                 float(dg["inner_armour_outer_radius_mm"]),
                 float(dg["bedding_outer_radius_mm"]),
-                r_bedding,
+                radial_preview_div,
                 core_div,
                 "#89bf68",
-                radial_highlight=active_r_key == "bedding",
+                radial_highlight=False,
                 theta_highlight=active_core_theta,
             )
             draw_wire_ring(
@@ -5308,10 +5234,10 @@ class SCLASRemoteGUI(QMainWindow):
             draw_ring_mesh(
                 float(dg["inner_sheath_inner_radius_mm"]),
                 float(dg["inner_sheath_outer_radius_mm"]),
-                r_inner,
+                radial_preview_div,
                 core_div,
                 "#5fd4d4",
-                radial_highlight=active_r_key == "inner",
+                radial_highlight=False,
                 theta_highlight=active_core_theta,
             )
             draw_circle(float(dg["filler_outer_radius_mm"]), "#fbbf24", 2.6 if active_filler else 1.2)
@@ -5338,7 +5264,7 @@ class SCLASRemoteGUI(QMainWindow):
             painter.setPen(QColor("#17202a"))
             painter.drawText(cx - 132, 34, "GUI-value mesh request preview")
             painter.setPen(QColor("#475569"))
-            painter.drawText(cx - 132, height - 28, f"core C={core_div} | armour C={armour_div} | R={r_inner}/{r_bedding}/{r_outer}")
+            painter.drawText(cx - 132, height - 28, f"core C={core_div} | armour C={armour_div}")
 
             painter.setPen(QPen(QColor("#ef4444"), 2.8))
             contact_outer = int(round(float(dg["outer_armour_center_radius_mm"]) * scale))
@@ -5461,7 +5387,7 @@ class SCLASRemoteGUI(QMainWindow):
             add_ring_mesh(
                 dg["outer_sheath_inner_radius_mm"],
                 dg["outer_sheath_outer_radius_mm"],
-                counts["outer_sheath_r"],
+                3,
                 bedding_sheath_cols,
                 (0.18, 0.50, 0.93, 0.72),
             )
@@ -5475,7 +5401,7 @@ class SCLASRemoteGUI(QMainWindow):
             add_ring_mesh(
                 dg["inner_armour_outer_radius_mm"],
                 dg["bedding_outer_radius_mm"],
-                counts["bedding_r"],
+                3,
                 bedding_sheath_cols,
                 (0.50, 0.75, 0.36, 0.68),
             )
@@ -5489,7 +5415,7 @@ class SCLASRemoteGUI(QMainWindow):
             add_ring_mesh(
                 dg["inner_sheath_inner_radius_mm"],
                 dg["inner_sheath_outer_radius_mm"],
-                counts["inner_sheath_r"],
+                3,
                 bedding_sheath_cols,
                 (0.34, 0.82, 0.82, 0.72),
             )
@@ -5522,7 +5448,7 @@ class SCLASRemoteGUI(QMainWindow):
                     f"Bedding/Sheath n_theta divisions BSCD: {bedding_sheath_cols}",
                     f"Armour n_theta divisions: {armour_cols}",
                     f"Filler FD1/FD2/FD3/FD4: {counts['filler_short_line']}/{counts['filler_long_line']}/{counts['filler_short_arc']}/{counts['filler_long_arc']}",
-                    f"Inner/Bedding/Outer radial n_r: {counts['inner_sheath_r']}/{counts['bedding_r']}/{counts['outer_sheath_r']}",
+                    "Sheath/Bedding radial seed: backend fixed",
                     "Circumferential multiples of 4 are recommended for demos, not enforced.",
                 ]
                 if basis == "size":
@@ -5533,7 +5459,6 @@ class SCLASRemoteGUI(QMainWindow):
                         f"Core circumferential: {sizes['core_sheath_circumferential_mm']} mm",
                         f"Bedding/Sheath circumferential: {sizes['bedding_sheath_circumferential_mm']} mm",
                         f"Armour circumferential: {sizes['armour_circumferential_mm']} mm",
-                        f"Inner/Bedding/Outer radial: {sizes['inner_sheath_radial_mm']}/{sizes['bedding_radial_mm']}/{sizes['outer_sheath_radial_mm']} mm",
                     ])
                 self.inp_mesh_summary.setPlainText("\n".join(summary))
             if hasattr(self, "inp_mesh_legend"):

@@ -261,8 +261,6 @@ def automatic_variable_map(data):
         "BSCDMeshType": mesh_basis_code(mesh, "bedding_sheath_circumferential_divisions"),
         "ACD": as_int(mesh.get("armour_circumferential_divisions"), 3),
         "ACDMeshType": mesh_basis_code(mesh, "armour_circumferential_divisions"),
-        "BSRD": as_int(mesh.get("bedding_sheath_radial_divisions"), 3),
-        "BSRDMeshType": mesh_basis_code(mesh, "bedding_sheath_radial_divisions"),
         "FD1": as_int(filler_profile.get("short_line"), 2),
         "FD2": as_int(filler_profile.get("long_line"), 2),
         "FD3": as_int(filler_profile.get("short_arc"), 4),
@@ -274,7 +272,7 @@ def automatic_variable_map(data):
         "pitch_inner": as_float(arm.get("inner_armour_pitch_mm", arm.get("inner_armour_pitch_length_mm")), -677.94737),
         "pitch_outer": as_float(arm.get("outer_armour_pitch_mm", arm.get("outer_armour_pitch_length_mm")), 776.55789),
         "Dep": as_float(ac.get("effective_length_mm", dgeo.get("effective_length_mm")), 234.2),
-        "conStiff": as_float(ac.get("contact_stiffness_scale_factor", ac.get("conStiff")), 0.005),
+        "conStiff": as_float(ac.get("contact_stiffness_scale_factor", ac.get("conStiff")), 0.05),
         "CPU": as_int(solver.get("cpu_count", solver.get("CPU")), 12),
     }
 
@@ -298,6 +296,31 @@ def pitch_from_lay_angle(center_radius, lay_angle_deg, fallback, sign=1.0):
     if abs(tangent) < 1.0e-9:
         return float(fallback)
     return sign * (2.0 * pi * as_float(center_radius, 0.0) / tangent)
+
+
+def helix_pitch_length_system(coc, co_ia, co_oa, no_ia, no_oa, cha, iaha, oaha):
+    def pitch(radius, angle_deg, fallback):
+        tangent = tan(pi / 180 * as_float(angle_deg, 0.0))
+        if abs(tangent) < 1.0e-12:
+            return Decimal(str(fallback))
+        return 2 * Decimal(pi) * Decimal(str(radius)) / Decimal(tangent)
+
+    pitch_core = pitch(coc, cha, 702.6)
+    pitch_inner = pitch(co_ia, iaha, -677.94737)
+    pitch_outer = pitch(co_oa, oaha, 776.55789)
+    no_ia_dec = Decimal(max(1, as_int(no_ia, 55)))
+    no_oa_dec = Decimal(max(1, as_int(no_oa, 63)))
+    depth = float(
+        pitch_core / Decimal(3)
+        + Decimal((float(no_ia_dec) + float(no_oa_dec)) / 6.0)
+        * (abs(pitch_inner) / no_ia_dec + abs(pitch_outer) / no_oa_dec)
+    ) / 3.0
+    return {
+        "pitch_core": pitch_core,
+        "pitch_inner": pitch_inner,
+        "pitch_outer": pitch_outer,
+        "effective_length_mm": depth,
+    }
 
 
 def normalized_geometry(data):
@@ -387,52 +410,29 @@ def normalize_payload(data):
     arm.setdefault("core_lay_angle_deg", 9.0)
     arm.setdefault("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg", arm.get("lay_angle_deg", -20.1)))
     arm.setdefault("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg", arm.get("lay_angle_deg", 19.6)))
-    core_pitch_source = arm.get(
-        "core_backend_pitch_length_mm",
-        arm.get("core_period_matched_pitch_length_mm", arm.get("core_pitch_length_mm", arm.get("core_pitch_mm"))),
+    pitch_system = helix_pitch_length_system(
+        geometry["core_center_radius_mm"],
+        geometry["inner_armour_center_radius_mm"],
+        geometry["outer_armour_center_radius_mm"],
+        geometry["inner_armour_wire_count"],
+        geometry["outer_armour_wire_count"],
+        arm.get("core_lay_angle_deg"),
+        arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")),
+        arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")),
     )
-    inner_pitch_source = arm.get(
-        "inner_armour_backend_pitch_length_mm",
-        arm.get(
-            "inner_armour_period_matched_pitch_length_mm",
-            arm.get("inner_armour_pitch_length_mm", arm.get("inner_armour_pitch_mm")),
-        ),
-    )
-    outer_pitch_source = arm.get(
-        "outer_armour_backend_pitch_length_mm",
-        arm.get(
-            "outer_armour_period_matched_pitch_length_mm",
-            arm.get("outer_armour_pitch_length_mm", arm.get("outer_armour_pitch_mm")),
-        ),
-    )
-    core_pitch_length = abs(as_float(
-        core_pitch_source,
-        pitch_from_lay_angle(geometry["core_center_radius_mm"], arm.get("core_lay_angle_deg"), 702.6, sign=1.0),
-    ))
-    inner_pitch_length = abs(as_float(
-        inner_pitch_source,
-        pitch_from_lay_angle(
-            geometry["inner_armour_center_radius_mm"],
-            arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")),
-            -677.94737,
-            sign=-1.0,
-        ),
-    ))
-    outer_pitch_length = abs(as_float(
-        outer_pitch_source,
-        pitch_from_lay_angle(
-            geometry["outer_armour_center_radius_mm"],
-            arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")),
-            776.55789,
-            sign=1.0,
-        ),
-    ))
+    core_pitch_signed = float(pitch_system["pitch_core"])
+    inner_pitch_signed = float(pitch_system["pitch_inner"])
+    outer_pitch_signed = float(pitch_system["pitch_outer"])
+    core_pitch_length = abs(core_pitch_signed)
+    inner_pitch_length = abs(inner_pitch_signed)
+    outer_pitch_length = abs(outer_pitch_signed)
     arm["core_pitch_length_mm"] = core_pitch_length
     arm["inner_armour_pitch_length_mm"] = inner_pitch_length
     arm["outer_armour_pitch_length_mm"] = outer_pitch_length
-    arm["core_pitch_mm"] = as_float(arm.get("core_pitch_mm"), core_pitch_length)
-    arm["inner_armour_pitch_mm"] = as_float(arm.get("inner_armour_pitch_mm"), -inner_pitch_length)
-    arm["outer_armour_pitch_mm"] = as_float(arm.get("outer_armour_pitch_mm"), outer_pitch_length)
+    arm["core_pitch_mm"] = core_pitch_signed
+    arm["inner_armour_pitch_mm"] = inner_pitch_signed
+    arm["outer_armour_pitch_mm"] = outer_pitch_signed
+    arm["pitch_formula_source"] = "automatic_py_angle_formula"
     arm["inner_wire_count_resolved"] = geometry["inner_armour_wire_count"]
     arm["outer_wire_count_resolved"] = geometry["outer_armour_wire_count"]
     data["armour"] = arm
@@ -443,8 +443,8 @@ def normalize_payload(data):
         merged_dgeo["pitch_period_design"] = arm["pitch_period_design"]
         merged_dgeo.setdefault("pitch_design_source", arm["pitch_period_design"].get("source"))
         merged_dgeo.setdefault("pitch_design_strategy", arm["pitch_period_design"].get("strategy"))
-    merged_dgeo.setdefault("effective_length_mm", core_pitch_length / max(geometry["core_count"], 1))
-    merged_dgeo.setdefault("effective_length_source", "Menard_Cartraud_2023_Eq2_Eq3_core_pitch_divided_by_core_count")
+    merged_dgeo["effective_length_mm"] = float(pitch_system["effective_length_mm"])
+    merged_dgeo["effective_length_source"] = "automatic_py_Dep_from_pitch_core_inner_outer"
     data["derived_geometry_mm"] = merged_dgeo
 
     mesh = dict(data.get("mesh", {}))
@@ -452,10 +452,6 @@ def normalize_payload(data):
     mesh.setdefault("core_circumferential_divisions", mesh.get("CCD", 20))
     mesh.setdefault("bedding_sheath_circumferential_divisions", mesh.get("BSCD", 64))
     mesh.setdefault("armour_circumferential_divisions", mesh.get("ACD", 3))
-    mesh.setdefault("inner_sheath_radial_divisions", mesh.get("radial_divisions_per_layer", 3))
-    mesh.setdefault("bedding_radial_divisions", mesh.get("radial_divisions_per_layer", mesh.get("BSRD", 3)))
-    mesh.setdefault("outer_sheath_radial_divisions", mesh.get("radial_divisions_per_layer", 3))
-    mesh.setdefault("bedding_sheath_radial_divisions", mesh.get("BSRD", mesh.get("bedding_radial_divisions", 3)))
     filler_profile = dict(mesh.get("filler_profile_divisions", {}))
     filler_profile.setdefault("short_line", mesh.get("FD1", 2))
     filler_profile.setdefault("long_line", mesh.get("FD2", 2))
@@ -472,10 +468,6 @@ def normalize_payload(data):
         "core_circumferential_divisions",
         "bedding_sheath_circumferential_divisions",
         "armour_circumferential_divisions",
-        "inner_sheath_radial_divisions",
-        "bedding_radial_divisions",
-        "outer_sheath_radial_divisions",
-        "bedding_sheath_radial_divisions",
         "filler_z_divisions",
     ]:
         basis_by_field.setdefault(key, default_basis)
@@ -485,7 +477,6 @@ def normalize_payload(data):
         "CCDMeshType": mesh_basis_code(mesh, "core_circumferential_divisions"),
         "BSCDMeshType": mesh_basis_code(mesh, "bedding_sheath_circumferential_divisions"),
         "ACDMeshType": mesh_basis_code(mesh, "armour_circumferential_divisions"),
-        "BSRDMeshType": mesh_basis_code(mesh, "bedding_sheath_radial_divisions"),
     }
     if mesh.get("filler_z_divisions_source") == "same_as_axial_divisions":
         mesh["filler_z_divisions"] = mesh["axial_divisions"]
@@ -508,7 +499,7 @@ def normalize_payload(data):
     ac.setdefault("effective_length_source", merged_dgeo.get("effective_length_source", "core_pitch_length_mm_divided_by_core_count"))
     ac.setdefault("residual_contact_pressure_mpa", 0.3)
     ac.setdefault("friction_coefficient", ac.get("FrCo", 0.3))
-    ac.setdefault("contact_stiffness_scale_factor", ac.get("conStiff", 0.005))
+    ac.setdefault("contact_stiffness_scale_factor", ac.get("conStiff", 0.05))
     ac.setdefault("conStiff", ac["contact_stiffness_scale_factor"])
     ac.setdefault("max_curvature_1_per_m", ac.get("bend_factor", ac.get("BendFac", 5.0e-5)))
     ac.setdefault("bend_factor", ac["max_curvature_1_per_m"])
@@ -630,8 +621,8 @@ def fallback_manifest(data):
     if not isinstance(period_design_payload, dict):
         period_design_payload = {}
     pitch_design = {
-        "source": period_design_payload.get("source", "Menard_Cartraud_2023_Eq2_Eq3_Eq4"),
-        "strategy": period_design_payload.get("strategy", "frontend_period_matched_pitch_preferred"),
+        "source": period_design_payload.get("source", "automatic_py_pitch_angle_Dep_formula"),
+        "strategy": period_design_payload.get("strategy", "direct_angle_pitch_and_Dep_formula"),
         "core_lay_angle_deg": as_float(arm.get("core_lay_angle_deg"), 9.0),
         "inner_armour_lay_angle_deg": as_float(arm.get("inner_armour_lay_angle_deg", arm.get("inner_lay_angle_deg")), -20.1),
         "outer_armour_lay_angle_deg": as_float(arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")), 19.6),
@@ -651,7 +642,7 @@ def fallback_manifest(data):
             pitch_from_lay_angle(geom["outer_armour_center_radius_mm"], arm.get("outer_armour_lay_angle_deg", arm.get("outer_lay_angle_deg")), 776.55789, sign=1.0),
         ),
         "effective_length_mm": as_float(ac.get("effective_length_mm"), geom.get("effective_length_mm", 234.2)),
-        "effective_length_source": ac.get("effective_length_source", geom.get("effective_length_source", "core_pitch_length_mm_divided_by_core_count")),
+        "effective_length_source": ac.get("effective_length_source", geom.get("effective_length_source", "automatic_py_Dep_from_pitch_core_inner_outer")),
         "period_multipliers": {
             "inner_armour": arm.get("inner_armour_period_multiplier"),
             "outer_armour": arm.get("outer_armour_period_multiplier"),
@@ -770,18 +761,17 @@ def build_abaqus_model(data, job_dir):
     core_lay_angle = as_float(arm.get('core_lay_angle_deg'), 9.0)
     inner_lay_angle = as_float(arm.get('inner_armour_lay_angle_deg', arm.get('inner_lay_angle_deg')), -20.1)
     outer_lay_angle = as_float(arm.get('outer_armour_lay_angle_deg', arm.get('outer_lay_angle_deg')), 19.6)
-    pitch_core_default = pitch_from_lay_angle(CoC, core_lay_angle, 702.6, sign=1.0)
-    pitch_inner_default = pitch_from_lay_angle(CoIA, inner_lay_angle, -677.94737, sign=-1.0)
-    pitch_outer_default = pitch_from_lay_angle(CoOA, outer_lay_angle, 776.55789, sign=1.0)
-    pitch_core = as_float(arm.get('core_pitch_mm', arm.get('core_pitch_length_mm')), pitch_core_default)
-    pitch_inner = as_float(arm.get('inner_armour_pitch_mm'), -abs(as_float(arm.get('inner_armour_pitch_length_mm'), pitch_inner_default)))
-    pitch_outer = as_float(arm.get('outer_armour_pitch_mm', arm.get('outer_armour_pitch_length_mm')), pitch_outer_default)
+    pitch_system = helix_pitch_length_system(CoC, CoIA, CoOA, int(NoIA), int(NoOA),
+        core_lay_angle, inner_lay_angle, outer_lay_angle)
+    pitch_core = float(pitch_system['pitch_core'])
+    pitch_inner = float(pitch_system['pitch_inner'])
+    pitch_outer = float(pitch_system['pitch_outer'])
 
-    depth          = as_float(ac.get('effective_length_mm'), 234.2)
+    depth          = float(pitch_system['effective_length_mm'])
     pressure       = as_float(ac.get('external_pressure_mpa', ac.get('hydrostatic_pressure_mpa')), 0.0)
     friction       = as_float(ac.get('friction_coefficient'), 0.3)
     contact_beta   = as_float(ac.get('contact_regularization_beta', msh.get('contact_regularization_beta')), 0.001)
-    contact_stiffness_scale = max(as_float(ac.get('contact_stiffness_scale_factor', ac.get('conStiff')), 0.005), 1.0e-6)
+    contact_stiffness_scale = max(as_float(ac.get('contact_stiffness_scale_factor', ac.get('conStiff')), 0.05), 1.0e-6)
     max_curvature  = as_float(ac.get('max_curvature_1_per_m'), 5.0e-5)
     curve_factors  = ac['curve_factors']
     loading_cycles = ac['loading_cycles']
@@ -802,8 +792,7 @@ def build_abaqus_model(data, job_dir):
     axial_div       = msh['axial_divisions']
     core_circ_div   = msh['core_circumferential_divisions']
     armour_circ_div = msh['armour_circumferential_divisions']
-    inner_sheath_radial_div = max(1, as_int(msh.get('inner_sheath_radial_divisions'), 3))
-    outer_sheath_radial_div = max(1, as_int(msh.get('outer_sheath_radial_divisions'), 3))
+    sheath_radial_div = max(1, as_int(msh.get('bedding_sheath_radial_divisions', msh.get('BSRD')), 3))
 
     field_output   = out['field']
     history_output = out['history']
@@ -949,7 +938,7 @@ def build_abaqus_model(data, job_dir):
     p.seedEdgeByNumber(constraint=FIXED,
         edges=p.edges.getSequenceFromMask(('[#8001000 ]', ), ), number=axial_div)
     p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#2000000 ]', ), ), number=inner_sheath_radial_div)
+        edges=p.edges.getSequenceFromMask(('[#2000000 ]', ), ), number=sheath_radial_div)
     p.generateMesh()
 
     ra.Instance(dependent=ON, name='InnerSheath', part=m.parts['InnerSheath'])
@@ -957,7 +946,14 @@ def build_abaqus_model(data, job_dir):
     m.ConstrainedSketch(name='__profile__', sheetSize=235.0)
     sk = m.sketches['__profile__']
     sk.Spot(point=(0.0, 0.0))
-    sk.CircleByCenterPerimeter(center=(0.0, float(CoIA)), point1=(0.0, float(IRB)))
+    sk.ArcByCenterEnds(center=(0.0, float(CoIA)),
+        direction=COUNTERCLOCKWISE,
+        point1=(0.0, float(IRB)),
+        point2=(0.0, float(ORIS)))
+    sk.ArcByCenterEnds(center=(0.0, float(CoIA)),
+        direction=CLOCKWISE,
+        point1=(0.0, float(IRB)),
+        point2=(0.0, float(ORIS)))
     m.Part(dimensionality=THREE_D, name='InnerArmour', type=DEFORMABLE_BODY)
     p = m.parts['InnerArmour']
     p.BaseSolidExtrude(depth=depth, pitch=pitch_inner, sketch=sk)
@@ -966,10 +962,12 @@ def build_abaqus_model(data, job_dir):
         region=p.sets['InnerArmour'], sectionName='InnerArmour', thicknessAssignment=FROM_SECTION)
     del m.sketches['__profile__']
 
+    p.Set(edges=p.edges.getSequenceFromMask(('[#8 ]', ), ), name='IAL')
+    p.Set(edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), name='IAO')
     p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#1 ]', ), ), number=axial_div)
+        edges=p.edges.getSequenceFromMask(('[#11 ]', ), ), number=armour_circ_div)
     p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), number=armour_circ_div)
+        edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), number=axial_div)
     p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
         secondOrderAccuracy=OFF, distortionControl=DEFAULT),
         ElemType(elemCode=C3D6, elemLibrary=STANDARD),
@@ -1019,7 +1017,14 @@ def build_abaqus_model(data, job_dir):
     m.ConstrainedSketch(name='__profile__', sheetSize=235.0)
     sk = m.sketches['__profile__']
     sk.Spot(point=(0.0, 0.0))
-    sk.CircleByCenterPerimeter(center=(0.0, float(CoOA)), point1=(0.0, float(IROS)))
+    sk.ArcByCenterEnds(center=(0.0, float(CoOA)),
+        direction=COUNTERCLOCKWISE,
+        point1=(0.0, float(IROS)),
+        point2=(0.0, float(ORB)))
+    sk.ArcByCenterEnds(center=(0.0, float(CoOA)),
+        direction=CLOCKWISE,
+        point1=(0.0, float(IROS)),
+        point2=(0.0, float(ORB)))
     m.Part(dimensionality=THREE_D, name='OuterArmour', type=DEFORMABLE_BODY)
     p = m.parts['OuterArmour']
     p.BaseSolidExtrude(depth=depth, pitch=pitch_outer, sketch=sk)
@@ -1028,10 +1033,12 @@ def build_abaqus_model(data, job_dir):
         region=p.sets['OuterArmour'], sectionName='OuterArmour', thicknessAssignment=FROM_SECTION)
     del m.sketches['__profile__']
 
+    p.Set(edges=p.edges.getSequenceFromMask(('[#8 ]', ), ), name='OAL')
+    p.Set(edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), name='OAO')
     p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), number=armour_circ_div)
+        edges=p.edges.getSequenceFromMask(('[#11 ]', ), ), number=armour_circ_div)
     p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#1 ]', ), ), number=axial_div)
+        edges=p.edges.getSequenceFromMask(('[#2 ]', ), ), number=axial_div)
     p.setMeshControls(algorithm=MEDIAL_AXIS,
         regions=p.cells.getSequenceFromMask(('[#1 ]', ), ))
     p.setElementType(elemTypes=(ElemType(elemCode=C3D8, elemLibrary=STANDARD,
@@ -1070,7 +1077,7 @@ def build_abaqus_model(data, job_dir):
     p.seedEdgeByNumber(constraint=FIXED,
         edges=p.edges.getSequenceFromMask(('[#4008000 ]', ), ), number=axial_div)
     p.seedEdgeByNumber(constraint=FIXED,
-        edges=p.edges.getSequenceFromMask(('[#80000 ]', ), ), number=outer_sheath_radial_div)
+        edges=p.edges.getSequenceFromMask(('[#80000 ]', ), ), number=sheath_radial_div)
     p.seedEdgeByNumber(constraint=FIXED,
         edges=p.edges.getSequenceFromMask(('[#50554800 ]', ), ), number=axial_div)
     p.seedEdgeByNumber(constraint=FIXED,
@@ -1136,10 +1143,10 @@ def build_abaqus_model(data, job_dir):
     m.parts['Filler'].Surface(name='FO', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#8 ]', ), ))
     m.parts['Filler'].Surface(name='FL', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#20 ]', ), ))
     m.parts['Filler'].Surface(name='FR', side1Faces=m.parts['Filler'].faces.getSequenceFromMask(('[#2 ]', ), ))
-    m.parts['InnerArmour'].Surface(name='IAS', side1Faces=m.parts['InnerArmour'].faces[:])
+    m.parts['InnerArmour'].Surface(name='IAS', side1Faces=m.parts['InnerArmour'].faces.getSequenceFromMask(('[#1 ]', ), ))
     m.parts['InnerSheath'].Surface(name='ISO', side1Faces=m.parts['InnerSheath'].faces.getSequenceFromMask(('[#12088 ]', ), ))
     m.parts['InnerSheath'].Surface(name='IAI', side1Faces=m.parts['InnerSheath'].faces.getSequenceFromMask(('[#28110 ]', ), ))
-    m.parts['OuterArmour'].Surface(name='OAS', side1Faces=m.parts['OuterArmour'].faces[:])
+    m.parts['OuterArmour'].Surface(name='OAS', side1Faces=m.parts['OuterArmour'].faces.getSequenceFromMask(('[#1 ]', ), ))
     m.parts['OuterSheath'].Surface(name='OSI', side1Faces=m.parts['OuterSheath'].faces.getSequenceFromMask(('[#28110 ]', ), ))
     ra.regenerate()
 
@@ -1157,54 +1164,83 @@ def build_abaqus_model(data, job_dir):
         upperQuadraticFactor=0.03)
     ra.regenerate()
 
-    m.StdInitialization(name='CInit-1')
-    m.ContactStd(createStepName='Initial', name='Int-1')
-
-    def part_has_mesh(part_name):
-        try:
-            part = m.parts[part_name]
-            return len(part.elements) > 0 and len(part.faces) > 0
-        except Exception:
-            return False
-
-    inner_armour_contact_available = part_has_mesh('InnerArmour')
-    outer_armour_contact_available = part_has_mesh('OuterArmour')
     armour_contact_pair_status = 'included'
-    if not inner_armour_contact_available or not outer_armour_contact_available:
-        armour_contact_pair_status = 'skipped_empty_armour_surfaces'
-
     contact_pair_status = 'included'
-    contact_pairs = []
     if simple_bending_smoke:
         contact_pair_status = 'skipped_reduced_smoke'
     else:
-        for i in range(1, 4):
-            next1 = i % 3 + 1
-            next2 = (i + 1) % 3 + 1
-            contact_pairs.append((ra.instances['Core-%d' % i].surfaces['CO'],
-                                   ra.instances['Filler-%d' % next1].surfaces['FR']))
-            contact_pairs.append((ra.instances['Core-%d' % i].surfaces['CO'],
-                                   ra.instances['Filler-%d' % next2].surfaces['FL']))
-        for i in range(1, 4):
-            contact_pairs.append((ra.instances['InnerSheath'].surfaces['IAI'],
-                                   ra.instances['Core-%d' % i].surfaces['CO']))
-            contact_pairs.append((ra.instances['InnerSheath'].surfaces['IAI'],
-                                   ra.instances['Filler-%d' % i].surfaces['FO']))
-        if inner_armour_contact_available:
-            for i in range(1, int(NoIA)+1):
-                contact_pairs.append((ra.instances['InnerSheath'].surfaces['ISO'],
-                                       ra.instances['InnerArmour-%d' % i].surfaces['IAS']))
-                contact_pairs.append((ra.instances['Bedding'].surfaces['BeddingI'],
-                                       ra.instances['InnerArmour-%d' % i].surfaces['IAS']))
-        if outer_armour_contact_available:
-            for i in range(1, int(NoOA)+1):
-                contact_pairs.append((ra.instances['Bedding'].surfaces['BeddingO'],
-                                       ra.instances['OuterArmour-%d' % i].surfaces['OAS']))
-                contact_pairs.append((ra.instances['OuterSheath'].surfaces['OSI'],
-                                       ra.instances['OuterArmour-%d' % i].surfaces['OAS']))
+        for i in range(1, int(NoIA) + 1):
+            m.SurfaceToSurfaceContactStd(name='InnerSheath-InnerArmour-%d' % i,
+                createStepName='Initial', master=ra.instances['InnerSheath'].surfaces['ISO'],
+                slave=ra.instances['InnerArmour-%d' % i].sets['IAL'],
+                interactionProperty='IntProp-1', sliding=SMALL,
+                enforcement=NODE_TO_SURFACE, adjustMethod=OVERCLOSED,
+                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
+                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
+            m.SurfaceToSurfaceContactStd(name='Bedding-InnerArmour-%d' % i,
+                createStepName='Initial', master=ra.instances['Bedding'].surfaces['BeddingI'],
+                slave=ra.instances['InnerArmour-%d' % i].sets['IAO'],
+                interactionProperty='IntProp-1', sliding=SMALL,
+                enforcement=NODE_TO_SURFACE, adjustMethod=OVERCLOSED,
+                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
+                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
 
-        m.interactions['Int-1'].includedPairs.setValuesInStep(
-            addPairs=tuple(contact_pairs), stepName='Initial')
+        for i in range(1, int(NoOA) + 1):
+            m.SurfaceToSurfaceContactStd(name='Bedding-OuterArmour-%d' % i,
+                createStepName='Initial', master=ra.instances['Bedding'].surfaces['BeddingO'],
+                slave=ra.instances['OuterArmour-%d' % i].sets['OAL'],
+                interactionProperty='IntProp-1', sliding=SMALL,
+                enforcement=NODE_TO_SURFACE, adjustMethod=OVERCLOSED,
+                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
+                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
+            m.SurfaceToSurfaceContactStd(name='OuterSheath-OuterArmour-%d' % i,
+                createStepName='Initial', master=ra.instances['OuterSheath'].surfaces['OSI'],
+                slave=ra.instances['OuterArmour-%d' % i].sets['OAO'],
+                interactionProperty='IntProp-1', sliding=SMALL,
+                enforcement=NODE_TO_SURFACE, adjustMethod=OVERCLOSED,
+                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
+                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
+
+        for i in range(1, 4):
+            m.SurfaceToSurfaceContactStd(name='InnerSheath-Core-%d' % i,
+                createStepName='Initial', master=ra.instances['InnerSheath'].surfaces['IAI'],
+                slave=ra.instances['Core-%d' % i].surfaces['CO'],
+                interactionProperty='IntProp-1', sliding=SMALL,
+                enforcement=SURFACE_TO_SURFACE, adjustMethod=OVERCLOSED,
+                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
+                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
+            m.SurfaceToSurfaceContactStd(name='InnerSheath-FillerOuter-%d' % i,
+                createStepName='Initial', master=ra.instances['InnerSheath'].surfaces['IAI'],
+                slave=ra.instances['Filler-%d' % i].surfaces['FO'],
+                interactionProperty='IntProp-1', sliding=SMALL,
+                enforcement=SURFACE_TO_SURFACE, adjustMethod=OVERCLOSED,
+                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
+                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
+
+        core_filler_pairs = (
+            (1, 'FL', 2), (1, 'FR', 3),
+            (2, 'FL', 3), (2, 'FR', 1),
+            (3, 'FL', 1), (3, 'FR', 2),
+        )
+        for filler_id, filler_side, core_id in core_filler_pairs:
+            m.SurfaceToSurfaceContactStd(
+                name='Core-%d-Filler-%d-%s' % (core_id, filler_id, filler_side),
+                createStepName='Initial', master=ra.instances['Core-%d' % core_id].surfaces['CO'],
+                slave=ra.instances['Filler-%d' % filler_id].surfaces[filler_side],
+                interactionProperty='IntProp-1', sliding=SMALL,
+                enforcement=SURFACE_TO_SURFACE, adjustMethod=OVERCLOSED,
+                initialClearance=OMIT, clearanceRegion=None, datumAxis=None,
+                smooth=0.2, surfaceSmoothing=NONE, thickness=ON, tied=OFF)
+
+        core_self_faces = None
+        for i in range(1, 4):
+            faces_i = ra.instances['Core-%d' % i].surfaces['CO'].faces
+            core_self_faces = faces_i if core_self_faces is None else core_self_faces + faces_i
+        if core_self_faces is not None:
+            ra.Surface(name='CoreSelfSurf', side1Faces=core_self_faces)
+            m.SelfContactStd(name='Core-SelfContact', createStepName='Initial',
+                surface=ra.surfaces['CoreSelfSurf'], interactionProperty='IntProp-1',
+                thickness=ON)
         ra.regenerate()
 
     front_seq = None
@@ -1272,7 +1308,8 @@ def build_abaqus_model(data, job_dir):
 
     m.StaticStep(adaptiveDampingRatio=0.05,
         continueDampingFactors=False, initialInc=p_initialInc, maxInc=p_maxInc,
-        maxNumInc=p_maxNumInc, minInc=p_minInc, name='Pressure', previous='Initial',
+        maxNumInc=p_maxNumInc, minInc=p_minInc, matrixSolver=DIRECT_UNSYMMETRIC,
+        name='Pressure', previous='Initial',
         stabilizationMagnitude=stabilization,
         stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
 
@@ -1297,7 +1334,8 @@ def build_abaqus_model(data, job_dir):
 
             m.StaticStep(adaptiveDampingRatio=0.05,
                 continueDampingFactors=False, initialInc=b_initialInc, maxInc=b_maxInc,
-                maxNumInc=b_maxNumInc, minInc=b_minInc, name=pos_name, previous=prev_step,
+                maxNumInc=b_maxNumInc, minInc=b_minInc, matrixSolver=DIRECT_UNSYMMETRIC,
+                name=pos_name, previous=prev_step,
                 stabilizationMagnitude=stabilization,
                 stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
             if simple_bending_smoke:
@@ -1316,7 +1354,8 @@ def build_abaqus_model(data, job_dir):
 
             m.StaticStep(adaptiveDampingRatio=0.05,
                 continueDampingFactors=False, initialInc=b_initialInc, maxInc=b_maxInc,
-                maxNumInc=b_maxNumInc, minInc=b_minInc, name=neg_name, previous=pos_name,
+                maxNumInc=b_maxNumInc, minInc=b_minInc, matrixSolver=DIRECT_UNSYMMETRIC,
+                name=neg_name, previous=pos_name,
                 stabilizationMagnitude=stabilization,
                 stabilizationMethod=DISSIPATED_ENERGY_FRACTION)
             if simple_bending_smoke:
@@ -1374,7 +1413,7 @@ def build_abaqus_model(data, job_dir):
     cae_path = os.path.join(path_text(job_dir), job_name + '.cae')
     odb_path = os.path.join(path_text(job_dir), job_name + '.odb')
     try:
-        mdb.Job(atTime=None, contactPrint=OFF, description='', echoPrint=OFF,
+        mdb.Job(atTime=None, contactPrint=ON, description='', echoPrint=OFF,
             explicitPrecision=SINGLE, getMemoryFromAnalysis=True, historyPrint=OFF,
             memory=90, memoryUnits=PERCENTAGE, model='Model-1', modelPrint=OFF,
             multiprocessingMode=DEFAULT, name=job_name, nodalOutputPrecision=SINGLE,

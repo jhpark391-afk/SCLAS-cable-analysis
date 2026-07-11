@@ -159,16 +159,12 @@ def rich_backend_payload() -> dict:
             "axial_divisions": 40,
             "core_circumferential_divisions": 24,
             "armour_circumferential_divisions": 8,
-            "inner_sheath_radial_divisions": 3,
-            "bedding_radial_divisions": 1,
-            "outer_sheath_radial_divisions": 3,
             "contact_regularization_beta": 0.001,
             "mesh_input_basis_by_field": {
                 "axial_divisions": "size",
                 "core_circumferential_divisions": "count",
                 "bedding_sheath_circumferential_divisions": "count",
                 "armour_circumferential_divisions": "count",
-                "bedding_sheath_radial_divisions": "count",
             },
         },
         "analysis_conditions": {
@@ -177,8 +173,8 @@ def rich_backend_payload() -> dict:
             "hydrostatic_pressure_mpa": 40.0,
             "residual_contact_pressure_mpa": 0.3,
             "friction_coefficient": 0.22,
-            "contact_stiffness_scale_factor": 0.005,
-            "conStiff": 0.005,
+            "contact_stiffness_scale_factor": 0.05,
+            "conStiff": 0.05,
             "max_curvature_1_per_m": 0.08,
             "curve_factors": [-0.1, -0.05, 0.0, 0.05, 0.1],
             "max_twist_rad_per_m": 0.05,
@@ -394,8 +390,16 @@ def check_backend_contract() -> None:
     mesh_settings = manifest.get("mesh_settings_from_gui", {})
     if mesh_settings.get("armour_model") != "solid_wire":
         fail("mesh armour_model should default to the currently implemented solid_wire backend")
-    if mesh_settings.get("inner_sheath_radial_divisions") != 3 or mesh_settings.get("outer_sheath_radial_divisions") != 3:
-        fail("sheath radial division controls were not carried into the manifest")
+    removed_radial_keys = [
+        "inner_sheath_radial_divisions",
+        "bedding_radial_divisions",
+        "outer_sheath_radial_divisions",
+        "bedding_sheath_radial_divisions",
+        "BSRD",
+    ]
+    leaked_radial_keys = [key for key in removed_radial_keys if key in mesh_settings]
+    if leaked_radial_keys:
+        fail("removed sheath/bedding radial controls leaked into the manifest: " + ", ".join(leaked_radial_keys))
     auto_map = manifest.get("automatic_variable_map", {})
     expected_auto = {
         "P": 40.0,

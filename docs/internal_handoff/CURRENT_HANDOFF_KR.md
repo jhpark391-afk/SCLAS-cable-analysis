@@ -1,3 +1,13 @@
+# 2026-07-11 automatic.py pitch/Dep and mesh radial cleanup
+
+* `C:\HELIX\Abaqus+_work\automatic.py` formulas are now reflected in `code/abaqus_runner.py` and `code/sclas_remote_gui.py`.
+* Runner/GUI now compute `pitch_core`, `pitch_inner`, `pitch_outer`, and `Dep` from the input helix angles/counts.
+* Derived Pitch/Period GUI panel now displays calculated pitch lengths and effective length `Dep`.
+* `conStiff` / contact stiffness scale factor default is now `0.05`.
+* Removed user-facing mesh radial division variables for inner sheath, bedding, and outer sheath from GUI payload/preview/self-check: `inner_sheath_radial_divisions`, `bedding_radial_divisions`, `outer_sheath_radial_divisions`, `bedding_sheath_radial_divisions`, `BSRD`.
+* Abaqus runner keeps an internal fallback radial seed for legacy payload safety, but this is no longer a GUI/backend contract variable.
+
+---
 # 2026-07-11 SCLAS 711 GUI default cleanup
 
 * SCLAS_변수_정리711.xlsx 기준으로 GUI 시작 기본값을 고정했습니다.
@@ -20,15 +30,14 @@
 # 2026-07-10 Mesh count/size 입력 피드백 반영
 
 * 보광/팀 피드백 캡처 기준으로 Mesh Setting Guide에 `Mesh input basis`를 추가했습니다.
-  * `Division count`: 기존처럼 `n_z`, `n_theta`, `n_r` 개수를 직접 입력합니다.
+  * `Division count`: `n_z`, `n_theta` 개수를 직접 입력합니다.
   * `Target size`: 목표 mesh size(mm)를 입력하면 GUI가 내부에서 division count로 환산합니다.
 * backend 호환성을 위해 `input_data.json`에는 항상 기존 count key를 유지합니다.
   * `mesh.axial_divisions`
   * `mesh.core_circumferential_divisions`
+  * `mesh.bedding_sheath_circumferential_divisions`
   * `mesh.armour_circumferential_divisions`
-  * `mesh.inner_sheath_radial_divisions`
-  * `mesh.bedding_radial_divisions`
-  * `mesh.outer_sheath_radial_divisions`
+* 2026-07-11 기준 inner sheath/bedding/outer sheath radial division 입력은 GUI/backend 계약에서 제거했습니다.
 * size mode에서 입력한 원래 목표 크기는 `mesh.target_sizes_mm`와 `mesh_controls.target_sizes_mm`에 같이 저장합니다.
 * 원주방향 division은 4의 배수를 **강제하지 않고**, 데모/설명용 권장사항으로만 기록합니다.
   * `mesh.circumferential_division_policy.multiples_of_4_recommended_for_demo = true`
@@ -203,8 +212,8 @@ graph TD
 
 * 기준 파일: `C:\HELIX\Abaqus+_work\SCLAS_변수_정리711.xlsx`
 * GUI payload에 변수 계약 블록을 추가해 엑셀 약어와 현재 JSON path를 함께 기록합니다. 기존 호환을 위해 JSON key 이름은 `sclas_710_variable_contract`를 유지합니다.
-* Analysis 기본값을 711 기준으로 조정했습니다: `P=0.30 MPa`, `FrCo=0.30`, `conStiff=0.005`, `BendFac=5.0e-5`.
-* Mesh 입력을 711 약어 구조로 확장했습니다: `ZAD=40`, `CCD=20`, `BSCD=64`, `ACD=3`, `BSRD=3`, `FD1~FD4=2/2/4/6`.
+* Analysis 기본값을 711 기준으로 조정했습니다: `P=0.30 MPa`, `FrCo=0.30`, `conStiff=0.05`, `BendFac=5.0e-5`.
+* Mesh 입력을 711 약어 구조로 확장했습니다: `ZAD=40`, `CCD=20`, `BSCD=64`, `ACD=3`, `FD1~FD4=2/2/4/6`.
 * Mesh 탭의 Count/Size 콤보 폭을 넓혀 `Count`가 `Cou`로 잘리는 문제를 수정했습니다.
 * `code/abaqus_runner.py`는 새 alias를 받아도 기존 backend key로 normalize하도록 보강했습니다.
 * 보광 확인 기준으로 `Roc=4.0 mm`는 conductor radius, `RoI=11.3 mm`는 insulation radius로 매핑합니다.

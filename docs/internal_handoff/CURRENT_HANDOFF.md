@@ -23,13 +23,23 @@ Last updated: 2026-07-11 KST
 - Mapped the hardcoded input variables observed in
   `C:\HELIX\Abaqus+_work\automatic.py` into the existing
   `code/abaqus_runner.py` `input_data.json` normalization flow.
+- The runner now derives `pitch_core`, `pitch_inner`, `pitch_outer`, and
+  effective length `Dep` from the input helix angles using the automatic.py
+  formulas instead of trusting stale precomputed pitch/period values from JSON.
+- The GUI Derived Pitch/Period panel now shows the calculated signed pitch
+  lengths and `Dep` so users can inspect the values before creating a job.
+- Contact stiffness scale factor default is now `0.05`.
+- GUI/payload mesh controls for inner sheath, bedding, and outer sheath radial
+  divisions were removed. The Abaqus runner keeps an internal fallback radial
+  seed for legacy payload safety, but these are no longer user-facing contract
+  variables.
 - `abaqus_mesh_manifest.json` now includes `automatic_variable_map` so
   Bogwang/backend can compare the old script variables with the GUI JSON
   payload: geometry/armour (`Roc`, `RoI`, `RoC`, `TIS`, `TOS`, `TB`,
   `RoIA`, `RoOA`, `NoIA`, `NoOA`), analysis (`P`, `FrCo`, `BendFac`,
   `conStiff`), solver (`inIncP`, `minIncP`, `maxIncP`, `maxNumIncP`,
   `inIncB`, `minIncB`, `maxIncB`, `maxNumIncB`, `CPU`), mesh (`ZAD`,
-  `CCD`, `BSCD`, `ACD`, `BSRD`, `FD1`-`FD4`, `*MeshType`), and helix
+  `CCD`, `BSCD`, `ACD`, `FD1`-`FD4`, `*MeshType`), and helix
   values (`CHA`, `IAHA`, `OAHA`, `pitch_core`, `pitch_inner`,
   `pitch_outer`, `Dep`).
 - Abaqus Pressure steps now read `solver.pressure_step`; bending steps read
@@ -55,15 +65,13 @@ Last updated: 2026-07-11 KST
 ## Mesh Count/Size Input Feedback - 2026-07-10 KST
 
 - Added a `Mesh input basis` control to the FEA Setting tab.
-  `Division count` keeps the previous direct `n_z`, `n_theta`, and `n_r`
-  workflow. `Target size` lets the user enter target mesh sizes in mm.
+  `Division count` keeps the direct `n_z` and `n_theta` workflow. `Target size`
+  lets the user enter target mesh sizes in mm.
 - The GUI resolves target sizes into the existing backend-compatible count
   keys before writing `input_data.json`: `mesh.axial_divisions`,
   `mesh.core_circumferential_divisions`,
-  `mesh.armour_circumferential_divisions`,
-  `mesh.inner_sheath_radial_divisions`,
-  `mesh.bedding_radial_divisions`, and
-  `mesh.outer_sheath_radial_divisions`.
+  `mesh.bedding_sheath_circumferential_divisions`, and
+  `mesh.armour_circumferential_divisions`.
 - The original target sizes are retained under `mesh.target_sizes_mm` and
   `mesh_controls.target_sizes_mm` for review and handoff.
 - Circumferential divisions are now recorded as "multiples of 4 recommended
