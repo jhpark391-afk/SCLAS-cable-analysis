@@ -142,6 +142,10 @@ BACKEND_RUNNER_TEMPLATE = APP_DIR / "abaqus_runner.py"
 ODB_EXTRACTOR_TEMPLATE = APP_DIR / "sclas_odb_extractor.py"
 TEAM_LOGO_PATH = PROJECT_DIR / "assets" / "helix_logo.png"
 TEAM_ICON_PATH = PROJECT_DIR / "assets" / "helix_icon.png"
+MESH_GUIDE_TOP_LEFT_PATH = PROJECT_DIR / "assets" / "mesh_guides" / "top_left.png"
+MESH_GUIDE_TOP_RIGHT_PATH = PROJECT_DIR / "assets" / "mesh_guides" / "top_right.jpg"
+MESH_GUIDE_BOTTOM_LEFT_PATH = PROJECT_DIR / "assets" / "mesh_guides" / "bottom_left.png"
+MESH_GUIDE_BOTTOM_RIGHT_PATH = PROJECT_DIR / "assets" / "mesh_guides" / "bottom_right.png"
 FONT_DIR = PROJECT_DIR / "assets" / "fonts"
 APP_FONT_FAMILY = "Noto Sans KR"
 UI_FONT_QSS = "'Noto Sans KR', 'Malgun Gothic', 'Segoe UI', Arial"
@@ -381,7 +385,7 @@ def read_result_csv(path: Path) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def hysteresis_loss(k: np.ndarray, m_knm: np.ndarray) -> float:
-    """Approximate loop work. k is 1/m, m is kN*m, result is kJ per loop-like path."""
+    """Approximate loop work. k is 1/m, m is kN·m, result is kJ per loop-like path."""
     if len(k) < 2:
         return 0.0
     if hasattr(np, "trapezoid"):
@@ -617,32 +621,6 @@ def is_force_displacement_preview(summary: dict) -> bool:
 
 def is_rp_u1_rf1_moment_curvature(summary: dict) -> bool:
     return result_curve_mode(summary) == "rp_u1_rf1_moment_curvature"
-
-
-def max_bending_stress_from_summary(summary: dict):
-    if not isinstance(summary, dict):
-        return None
-    candidates = [
-        summary.get("odb_local_field_summary"),
-        summary.get("local_field_summary"),
-    ]
-    odb = summary.get("odb_extraction")
-    if isinstance(odb, dict):
-        candidates.append(odb.get("local_field_summary"))
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        metrics = candidate.get("metrics")
-        if not isinstance(metrics, dict):
-            continue
-        for key in ("stress_mises_max", "stress_component_abs_max"):
-            value = metrics.get(key)
-            try:
-                if value is not None:
-                    return float(value)
-            except (TypeError, ValueError):
-                pass
-    return None
 
 
 def create_job_package(job_root: Path, payload: dict) -> Path:
@@ -1028,7 +1006,7 @@ class SCLASRemoteGUI(QMainWindow):
         return {
             "HELIX Cable Analysis": "HELIX 케이블 해석",
             "Helical Element Localised Interaction eXamination": "나선형 유한요소 국부 상호작용 분석",
-            "Submarine cable modelling | mesh bridge | nonlinear response": "해저 케이블 모델링 | 메시 연동 | 비선형 응답",
+            "3D cable geometry | Abaqus workflow | hysteresis response": "3D cable geometry | Abaqus workflow | hysteresis response",
             "Local project": "로컬 프로젝트",
             "Workflow": "작업 흐름",
             "Design": "설계",
@@ -1059,7 +1037,6 @@ class SCLASRemoteGUI(QMainWindow):
             "Layer Legend": "레이어 범례",
             "Section Preview": "단면 프리뷰",
             "Bedding thickness": "베딩 두께",
-            "Reset View": "뷰 초기화",
             "Mesh Setting Guide": "메시 설정 가이드",
             "Abaqus element type": "아바쿠스 요소 타입",
             "Strategy": "전략",
@@ -1200,21 +1177,6 @@ class SCLASRemoteGUI(QMainWindow):
             if status_key:
                 value_label.setText(self.ui_text(str(status_key)))
 
-    def update_language_button(self) -> None:
-        if not hasattr(self, "btn_language"):
-            return
-        if self.ui_language == "EN":
-            self.btn_language.setText("English")
-            self.btn_language.setToolTip("Current language: English. Click to switch to Korean.")
-        else:
-            self.btn_language.setText("한국어")
-            self.btn_language.setToolTip("현재 언어: 한국어. 클릭하면 영어로 전환합니다.")
-
-    def toggle_language(self) -> None:
-        self.ui_language = "KO" if self.ui_language == "EN" else "EN"
-        self.apply_language()
-        self.save_settings()
-
     def apply_language(self) -> None:
         reverse = {ko: en for en, ko in self.translations().items()}
         for widget in self.findChildren(QWidget):
@@ -1236,11 +1198,10 @@ class SCLASRemoteGUI(QMainWindow):
                 widget.setProperty("en_text", english)
             widget.setText(self.ui_text(str(english)))
 
-        self.update_language_button()
         if hasattr(self, "table"):
             self.style_material_headers()
         if hasattr(self, "plot_canvas"):
-            self.plot_canvas.setLabel("left", f"{self.ui_text('Bending Moment M')} (kN.m)")
+            self.plot_canvas.setLabel("left", f"{self.ui_text('Bending Moment M')} (kN·m)")
             self.plot_canvas.setLabel("bottom", f"{self.ui_text('Curvature \u03ba')} (m^-1)")
         if hasattr(self, "summary_text"):
             if self.last_summary_data:
@@ -1276,6 +1237,9 @@ class SCLASRemoteGUI(QMainWindow):
         )
 
     def eventFilter(self, obj, event):
+        if event.type() == QEvent.Wheel and isinstance(obj, QSpinBox):
+            event.ignore()
+            return True
         if event.type() == QEvent.FocusIn and hasattr(self, "mesh_guide_label"):
             key = obj.property("mesh_key") if hasattr(obj, "property") else None
             if key:
@@ -1305,7 +1269,7 @@ class SCLASRemoteGUI(QMainWindow):
         title_block.setSpacing(0)
         title = QLabel("HELIX Cable Analysis")
         title.setObjectName("AppTitle")
-        subtitle = QLabel("Submarine cable modelling | mesh bridge | nonlinear response")
+        subtitle = QLabel("3D cable geometry | Abaqus workflow | hysteresis response")
         subtitle.setObjectName("AppSubtitle")
         title_block.addWidget(title)
         title_block.addWidget(subtitle)
@@ -1317,13 +1281,6 @@ class SCLASRemoteGUI(QMainWindow):
         self.lbl_result_status = QLabel("Result: none")
         self.lbl_result_status.setObjectName("TopbarMeta")
         self.lbl_result_status.setVisible(False)
-        self.btn_language = QPushButton("English")
-        self.btn_language.setObjectName("LangToggle")
-        self.btn_language.setFixedWidth(92)
-        self.btn_language.setToolTip("Current language: English. Click to switch to Korean.")
-        self.btn_language.setProperty("no_translate", True)
-        self.btn_language.clicked.connect(self.toggle_language)
-        topbar.addWidget(self.btn_language)
         content_layout.addLayout(topbar)
 
         self.pages = QStackedWidget()
@@ -1334,6 +1291,8 @@ class SCLASRemoteGUI(QMainWindow):
         self.build_design_tab()
         self.build_mesh_tab()
         self.build_analysis_tab()
+        for spin in self.findChildren(QSpinBox):
+            spin.installEventFilter(self)
         self.show_page(0)
 
     def build_sidebar(self) -> QFrame:
@@ -1704,10 +1663,6 @@ class SCLASRemoteGUI(QMainWindow):
         right.setContentsMargins(18, 16, 18, 16)
         header = QHBoxLayout()
         header.addWidget(self.header("Section Preview"))
-        self.btn_reset_solid = QPushButton("Reset View")
-        self.btn_reset_solid.setToolTip("Return the section preview camera to the default top view.")
-        self.btn_reset_solid.clicked.connect(self.reset_solid_view)
-        header.addWidget(self.btn_reset_solid)
         right.addLayout(header)
         self.view_solid = gl.GLViewWidget()
         self.view_solid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -2003,10 +1958,11 @@ class SCLASRemoteGUI(QMainWindow):
         mesh_cylinder_view.addWidget(self.header("Longitudinal Mesh Setting"))
         self.mesh_cylinder_guide_label = QLabel()
         self.mesh_cylinder_guide_label.setObjectName("MeshGuide")
-        self.mesh_cylinder_guide_label.setFixedHeight(250)
+        self.mesh_cylinder_guide_label.setFixedHeight(300)
         self.mesh_cylinder_guide_label.setMinimumWidth(0)
         self.mesh_cylinder_guide_label.setAlignment(Qt.AlignCenter)
         self.mesh_cylinder_guide_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.mesh_cylinder_guide_label.setProperty("guide_image_path", str(MESH_GUIDE_TOP_LEFT_PATH))
         mesh_cylinder_view.addWidget(self.mesh_cylinder_guide_label)
         mesh_cylinder_view.addStretch()
 
@@ -2017,10 +1973,11 @@ class SCLASRemoteGUI(QMainWindow):
         mesh_view.addWidget(self.header("Cross-Section Mesh Setting"))
         self.mesh_guide_label = QLabel()
         self.mesh_guide_label.setObjectName("MeshGuide")
-        self.mesh_guide_label.setFixedHeight(250)
+        self.mesh_guide_label.setFixedHeight(300)
         self.mesh_guide_label.setMinimumWidth(0)
         self.mesh_guide_label.setAlignment(Qt.AlignCenter)
         self.mesh_guide_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.mesh_guide_label.setProperty("guide_image_path", str(MESH_GUIDE_TOP_RIGHT_PATH))
         mesh_view.addWidget(self.mesh_guide_label)
         self.view_wire = gl.GLViewWidget()
         self.view_wire.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -2064,10 +2021,11 @@ class SCLASRemoteGUI(QMainWindow):
         fe_view.addWidget(self.header("Load Condition"))
         self.fe_condition_guide_label = QLabel()
         self.fe_condition_guide_label.setObjectName("MeshGuide")
-        self.fe_condition_guide_label.setFixedHeight(250)
+        self.fe_condition_guide_label.setFixedHeight(300)
         self.fe_condition_guide_label.setMinimumWidth(0)
         self.fe_condition_guide_label.setAlignment(Qt.AlignCenter)
         self.fe_condition_guide_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.fe_condition_guide_label.setProperty("guide_image_path", str(MESH_GUIDE_BOTTOM_LEFT_PATH))
         fe_view.addWidget(self.fe_condition_guide_label)
         fe_view.addStretch()
 
@@ -2078,58 +2036,56 @@ class SCLASRemoteGUI(QMainWindow):
         contact_view.addWidget(self.header("Contact Condition"))
         self.fe_contact_guide_label = QLabel()
         self.fe_contact_guide_label.setObjectName("MeshGuide")
-        self.fe_contact_guide_label.setFixedHeight(250)
+        self.fe_contact_guide_label.setFixedHeight(300)
         self.fe_contact_guide_label.setMinimumWidth(0)
         self.fe_contact_guide_label.setAlignment(Qt.AlignCenter)
         self.fe_contact_guide_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.fe_contact_guide_label.setProperty("guide_image_path", str(MESH_GUIDE_BOTTOM_RIGHT_PATH))
         contact_view.addWidget(self.fe_contact_guide_label)
         contact_view.addStretch()
 
-        top_splitter = QSplitter(Qt.Horizontal)
-        top_splitter.setObjectName("PanelSplitter")
-        top_splitter.setChildrenCollapsible(False)
-        top_splitter.setHandleWidth(10)
-        top_splitter.addWidget(mesh_cylinder_viewer)
-        top_splitter.addWidget(mesh_viewer)
-        top_splitter.addWidget(self.scroll_panel(mesh_factor_panel, min_width=270, max_width=360))
-        top_splitter.setSizes([520, 520, 300])
-        top_splitter.setStretchFactor(0, 1)
-        top_splitter.setStretchFactor(1, 1)
-        top_splitter.setStretchFactor(2, 0)
+        image_grid_panel = QFrame()
+        image_grid_panel.setObjectName("WorkspaceFrame")
+        image_grid = QGridLayout(image_grid_panel)
+        image_grid.setContentsMargins(0, 0, 0, 0)
+        image_grid.setHorizontalSpacing(10)
+        image_grid.setVerticalSpacing(10)
+        image_grid.addWidget(mesh_cylinder_viewer, 0, 0)
+        image_grid.addWidget(mesh_viewer, 0, 1)
+        image_grid.addWidget(fe_viewer, 1, 0)
+        image_grid.addWidget(contact_viewer, 1, 1)
+        image_grid.setColumnStretch(0, 1)
+        image_grid.setColumnStretch(1, 1)
+        image_grid.setRowStretch(0, 1)
+        image_grid.setRowStretch(1, 1)
 
-        bottom_splitter = QSplitter(Qt.Horizontal)
-        bottom_splitter.setObjectName("PanelSplitter")
-        bottom_splitter.setChildrenCollapsible(False)
-        bottom_splitter.setHandleWidth(10)
-        bottom_splitter.addWidget(fe_viewer)
-        bottom_splitter.addWidget(contact_viewer)
-        bottom_splitter.addWidget(self.scroll_panel(fe_factor_panel, min_width=270, max_width=360))
-        bottom_splitter.setSizes([520, 520, 300])
-        bottom_splitter.setStretchFactor(0, 1)
-        bottom_splitter.setStretchFactor(1, 1)
-        bottom_splitter.setStretchFactor(2, 0)
-        vertical_splitter = QSplitter(Qt.Vertical)
-        vertical_splitter.setObjectName("PanelSplitter")
-        vertical_splitter.setChildrenCollapsible(False)
-        vertical_splitter.setHandleWidth(10)
-        vertical_splitter.addWidget(top_splitter)
-        vertical_splitter.addWidget(bottom_splitter)
-        vertical_splitter.setSizes([420, 420])
-        vertical_splitter.setStretchFactor(0, 1)
-        vertical_splitter.setStretchFactor(1, 1)
-        layout.addWidget(vertical_splitter, 1)
+        control_column = QFrame()
+        control_column.setObjectName("WorkspaceFrame")
+        control_layout = QVBoxLayout(control_column)
+        control_layout.setContentsMargins(0, 0, 0, 0)
+        control_layout.setSpacing(10)
+        control_layout.addWidget(mesh_factor_panel)
+        control_layout.addWidget(fe_factor_panel)
+        control_layout.addStretch()
+
+        mesh_workspace = QHBoxLayout()
+        mesh_workspace.setContentsMargins(0, 0, 0, 0)
+        mesh_workspace.setSpacing(12)
+        mesh_workspace.addWidget(image_grid_panel, 1)
+        mesh_workspace.addWidget(self.scroll_panel(control_column, min_width=300, max_width=390), 0)
+        layout.addLayout(mesh_workspace, 1)
         self.add_page(tab)
         for key, widget in self.mesh_inputs.items():
             widget.setProperty("mesh_key", key)
             widget.installEventFilter(self)
             if isinstance(widget, QSpinBox):
-                widget.valueChanged.connect(lambda _value, k=key: self.activate_mesh_key(k))
+                widget.valueChanged.connect(lambda _value, k=key: setattr(self, "active_mesh_key", k))
             elif isinstance(widget, QComboBox):
-                widget.currentIndexChanged.connect(lambda _index, k=key: self.activate_mesh_key(k))
+                widget.currentIndexChanged.connect(lambda _index, k=key: setattr(self, "active_mesh_key", k))
             elif isinstance(widget, QLineEdit):
-                widget.textChanged.connect(lambda _text, k=key: self.activate_mesh_key(k))
+                widget.textChanged.connect(lambda _text, k=key: setattr(self, "active_mesh_key", k))
         for key in ["pressure", "curvature", "friction", "contact_stiffness"]:
-            self.cond[key].textChanged.connect(lambda _text: self.update_mesh_guide())
+            self.cond[key].textChanged.connect(lambda _text: None)
         self.set_mesh_input_basis()
         self.update_mesh_guide()
 
@@ -2273,10 +2229,10 @@ class SCLASRemoteGUI(QMainWindow):
         self.btn_focus_plot.toggled.connect(self.set_plot_focus)
         right.addLayout(result_header)
         self.plot_canvas = pg.PlotWidget(background="#1e1e1e")
-        self.plot_canvas.setMinimumHeight(640)
+        self.plot_canvas.setMinimumHeight(560)
         self.plot_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.plot_canvas.showGrid(x=True, y=True, alpha=0.13)
-        self.plot_canvas.setLabel("left", "Bending Moment M (kN.m)")
+        self.plot_canvas.setLabel("left", "Bending Moment M (kN·m)")
         self.plot_canvas.setLabel("bottom", "Curvature \u03ba (m^-1)")
         self.plot_canvas.getAxis("left").setTextPen("#a7a7a7")
         self.plot_canvas.getAxis("bottom").setTextPen("#a7a7a7")
@@ -2295,12 +2251,15 @@ class SCLASRemoteGUI(QMainWindow):
         action_row.addWidget(self.btn_plot_hysteresis, 1)
         right.addLayout(action_row)
 
-        right.addWidget(QLabel("System Log"))
-        self.console.setMaximumHeight(150)
-        right.addWidget(self.console)
+        log_box = QFrame()
+        log_layout = QVBoxLayout(log_box)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+        self.console.setMaximumHeight(110)
+        log_layout.addWidget(self.console)
+        right.addWidget(self.collapsible_section("System Log", log_box, expanded=False))
 
-        self.lbl_max_bending_stress = self.metric_box("Maximum Bending Stress", "-")
-        right.addWidget(self.lbl_max_bending_stress)
+        self.lbl_max_bending_moment = self.metric_box("Maximum Bending Moment", "-")
+        right.addWidget(self.lbl_max_bending_moment)
 
         self.metric_panel = QFrame()
         self.metric_panel.setObjectName("MetricStrip")
@@ -2842,7 +2801,7 @@ class SCLASRemoteGUI(QMainWindow):
                 "elastic_modulus": "GPa in materials",
                 "density": "kg/m^3 in materials",
                 "poisson_ratio": "nu, dimensionless",
-                "moment_output_required": "kN.m",
+                "moment_output_required": "kN·m",
             },
             "geometry_mm": {
                 "conductor_radius_mm": safe_float(self.inputs["r_cond"], 4.0, "Conductor radius"),
@@ -3378,8 +3337,7 @@ class SCLASRemoteGUI(QMainWindow):
             "LOCAL_COMMAND": self.radio_local,
         }
         mode_buttons.get(mode, self.radio_fast).setChecked(True)
-        language = settings.get("ui", {}).get("language", "EN")
-        self.ui_language = "KO" if language == "KO" else "EN"
+        self.ui_language = "EN"
         self.apply_language()
 
     def load_settings(self) -> None:
@@ -4224,7 +4182,7 @@ class SCLASRemoteGUI(QMainWindow):
         else:
             if hasattr(self, "result_title_label"):
                 self.result_title_label.setText("Hysteresis Loop Result")
-            moment_unit = "N.m" if is_rp_u1_rf1_moment_curvature(summary or {}) else "kN.m"
+            moment_unit = "N·m" if is_rp_u1_rf1_moment_curvature(summary or {}) else "kN·m"
             self.plot_canvas.setLabel("left", f"Bending Moment M ({moment_unit})")
             self.plot_canvas.setLabel("bottom", "Curvature \u03ba (m^-1)")
             try:
@@ -4243,9 +4201,9 @@ class SCLASRemoteGUI(QMainWindow):
 
     def update_metrics(self, data: dict, summary: dict = None) -> None:
         self.current_metrics = dict(data)
-        if hasattr(self, "lbl_max_bending_stress"):
-            stress = max_bending_stress_from_summary(summary or {})
-            self.lbl_max_bending_stress.value_label.setText("-" if stress is None else f"{stress:.4g} MPa")
+        moment_unit = "N·m" if is_rp_u1_rf1_moment_curvature(summary or {}) else "kN·m"
+        if hasattr(self, "lbl_max_bending_moment"):
+            self.lbl_max_bending_moment.value_label.setText(f"{data['max_abs_moment_kn_m']:.4g} {moment_unit}")
         if is_force_displacement_preview(summary or {}):
             force_summary = force_displacement_summary(summary or {})
             self.lbl_peak.title_label.setText("Peak |RF1|")
@@ -4253,11 +4211,10 @@ class SCLASRemoteGUI(QMainWindow):
             peak = float(force_summary.get("max_abs_rf1_n", 0.0))
             loss = float(force_summary.get("loop_energy_proxy_n_mm", 0.0))
             self.lbl_peak.value_label.setText(f"{peak:.4g} N")
-            self.lbl_loss.value_label.setText(f"{loss:.4g} N.mm")
+            self.lbl_loss.value_label.setText(f"{loss:.4g} N·mm")
         else:
             self.lbl_peak.title_label.setText("Maximum Bending Moment")
             self.lbl_loss.title_label.setText("Loop loss proxy")
-            moment_unit = "N.m" if is_rp_u1_rf1_moment_curvature(summary or {}) else "kN.m"
             self.lbl_peak.value_label.setText(f"{data['max_abs_moment_kn_m']:.4g} {moment_unit}")
             self.lbl_loss.value_label.setText(f"{data['hysteresis_loss_kj_per_m_proxy']:.4g}")
         self.lbl_points.value_label.setText(str(data["num_points"]))
@@ -4392,7 +4349,7 @@ class SCLASRemoteGUI(QMainWindow):
         derived = data.get("derived_placeholder_metrics", {})
         force_summary = force_displacement_summary(data)
         force_preview = is_force_displacement_preview(data)
-        moment_unit = "N.m" if is_rp_u1_rf1_moment_curvature(data) else "kN.m"
+        moment_unit = "N·m" if is_rp_u1_rf1_moment_curvature(data) else "kN·m"
         if self.ui_language == "KO":
             if force_preview:
                 lines = [
@@ -4401,7 +4358,7 @@ class SCLASRemoteGUI(QMainWindow):
                     f"곡선 모드: RP U1-RF1 변위-반력 preview",
                     f"최대 |RF1|: {float(force_summary.get('max_abs_rf1_n', 0.0)):.6g} N",
                     f"U1 범위: {float(force_summary.get('u1_span_mm', 0.0)) * 1000.0:.6g} micrometer",
-                    f"루프 면적 proxy: {float(force_summary.get('loop_energy_proxy_n_mm', 0.0)):.6g} N.mm",
+                    f"루프 면적 proxy: {float(force_summary.get('loop_energy_proxy_n_mm', 0.0)):.6g} N·mm",
                     f"데이터 수: {data.get('num_points', '-')}",
                     "주의: 이 곡선은 모멘트-곡률 연구 곡선이 아니라 ODB 결과 확인용 변위-반력 루프입니다.",
                 ]
@@ -4423,7 +4380,7 @@ class SCLASRemoteGUI(QMainWindow):
                     "Curve mode: RP U1-RF1 force-displacement preview",
                     f"Peak |RF1|: {float(force_summary.get('max_abs_rf1_n', 0.0)):.6g} N",
                     f"U1 span: {float(force_summary.get('u1_span_mm', 0.0)) * 1000.0:.6g} micrometer",
-                    f"Loop area proxy: {float(force_summary.get('loop_energy_proxy_n_mm', 0.0)):.6g} N.mm",
+                    f"Loop area proxy: {float(force_summary.get('loop_energy_proxy_n_mm', 0.0)):.6g} N·mm",
                     f"Points: {data.get('num_points', '-')}",
                     "Note: this is an ODB verification loop, not the final moment-curvature research curve.",
                 ]
@@ -4494,19 +4451,19 @@ class SCLASRemoteGUI(QMainWindow):
                 lines.extend([
                     "",
                     "연구 지표:",
-                    f"- 슬립 강성: {float(derived.get('bending_stiffness_slip_N_m2', 0.0)):.6g} N.m^2",
+                    f"- 슬립 강성: {float(derived.get('bending_stiffness_slip_N_m2', 0.0)):.6g} N·m²",
                     f"- 압력 연화: {float(derived.get('pressure_softening_factor', 0.0)):.4g}",
                     f"- bird-caging 위험: {float(derived.get('bird_caging_risk_index', 0.0)):.4g}",
-                    f"- 비틀림 지표: {float(derived.get('torsion_proxy_N_m2', 0.0)):.6g} N.m^2",
+                    f"- 비틀림 지표: {float(derived.get('torsion_proxy_N_m2', 0.0)):.6g} N·m²",
                 ])
             else:
                 lines.extend([
                     "",
                     "Research proxies:",
-                    f"- slip stiffness: {float(derived.get('bending_stiffness_slip_N_m2', 0.0)):.6g} N.m^2",
+                    f"- slip stiffness: {float(derived.get('bending_stiffness_slip_N_m2', 0.0)):.6g} N·m²",
                     f"- pressure softening: {float(derived.get('pressure_softening_factor', 0.0)):.4g}",
                     f"- bird-caging risk: {float(derived.get('bird_caging_risk_index', 0.0)):.4g}",
-                    f"- torsion proxy: {float(derived.get('torsion_proxy_N_m2', 0.0)):.6g} N.m^2",
+                    f"- torsion proxy: {float(derived.get('torsion_proxy_N_m2', 0.0)):.6g} N·m²",
                 ])
 
         cal_status = data.get("calibration_status")
@@ -4516,8 +4473,8 @@ class SCLASRemoteGUI(QMainWindow):
                     "",
                     "캘리브레이션 비교 보고서:",
                     f"- 상태: {cal_status}",
-                    f"- 탄성 강성: {float(data.get('calibration_elastic_stiffness', 0.0)):.6g} kN.m^2",
-                    f"- 슬립 강성: {float(data.get('calibration_slip_stiffness', 0.0)):.6g} kN.m^2",
+                    f"- 탄성 강성: {float(data.get('calibration_elastic_stiffness', 0.0)):.6g} kN·m²",
+                    f"- 슬립 강성: {float(data.get('calibration_slip_stiffness', 0.0)):.6g} kN·m²",
                     f"- 이력 에너지 손실: {float(data.get('calibration_hysteresis_loss', 0.0)):.6g} kN",
                     f"- 고착-미끄러짐 전이 곡률: {float(data.get('calibration_transition_curvature', 0.0)):.6g} 1/m",
                 ])
@@ -4526,8 +4483,8 @@ class SCLASRemoteGUI(QMainWindow):
                     "",
                     "Calibration Report:",
                     f"- status: {cal_status}",
-                    f"- elastic stiffness: {float(data.get('calibration_elastic_stiffness', 0.0)):.6g} kN.m^2",
-                    f"- slip stiffness: {float(data.get('calibration_slip_stiffness', 0.0)):.6g} kN.m^2",
+                    f"- elastic stiffness: {float(data.get('calibration_elastic_stiffness', 0.0)):.6g} kN·m²",
+                    f"- slip stiffness: {float(data.get('calibration_slip_stiffness', 0.0)):.6g} kN·m²",
                     f"- hysteresis loss: {float(data.get('calibration_hysteresis_loss', 0.0)):.6g} kN",
                     f"- transition curvature: {float(data.get('calibration_transition_curvature', 0.0)):.6g} 1/m",
                 ])
@@ -4765,22 +4722,69 @@ class SCLASRemoteGUI(QMainWindow):
         if not hasattr(self, "mesh_guide_label"):
             return
         if hasattr(self, "mesh_cylinder_guide_label"):
-            cylinder_width = self.mesh_cylinder_guide_label.contentsRect().width()
-            self.set_diagram_pixmap(self.mesh_cylinder_guide_label, self.build_mesh_cylinder_guide_pixmap(width=cylinder_width))
-        mesh_width = self.mesh_guide_label.contentsRect().width()
-        self.set_diagram_pixmap(self.mesh_guide_label, self.build_mesh_generation_guide_pixmap(width=mesh_width))
+            self.set_reference_image_pixmap(self.mesh_cylinder_guide_label)
+        self.set_reference_image_pixmap(self.mesh_guide_label)
         if hasattr(self, "fe_condition_guide_label"):
-            fe_width = self.fe_condition_guide_label.contentsRect().width()
-            self.set_diagram_pixmap(self.fe_condition_guide_label, self.build_fe_condition_guide_pixmap(width=fe_width))
+            self.set_reference_image_pixmap(self.fe_condition_guide_label)
         if hasattr(self, "fe_contact_guide_label"):
-            contact_width = self.fe_contact_guide_label.contentsRect().width()
-            self.set_diagram_pixmap(self.fe_contact_guide_label, self.build_contact_condition_guide_pixmap(width=contact_width))
+            self.set_reference_image_pixmap(self.fe_contact_guide_label)
+
+    def set_reference_image_pixmap(self, label: QLabel) -> None:
+        image_path = str(label.property("guide_image_path") or "")
+        pixmap = QPixmap(image_path)
+        if pixmap.isNull():
+            return
+        if image_path == str(MESH_GUIDE_BOTTOM_RIGHT_PATH):
+            pixmap = self.with_contact_legend(pixmap)
+        self.set_diagram_pixmap(label, pixmap)
 
     def set_diagram_pixmap(self, label: QLabel, pixmap: QPixmap) -> None:
         target = label.contentsRect().size()
-        if target.width() > 0 and target.height() > 0:
-            pixmap = pixmap.scaled(target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        label.setPixmap(pixmap)
+        if target.width() <= 0 or target.height() <= 0:
+            label.setPixmap(pixmap)
+            return
+        canvas = QPixmap(target.width(), target.height())
+        canvas.fill(QColor("#ffffff"))
+        pad = max(18, min(34, int(min(target.width(), target.height()) * 0.06)))
+        fit_width = max(1, target.width() - pad * 2)
+        fit_height = max(1, target.height() - pad * 2)
+        scaled = pixmap.scaled(fit_width, fit_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        x = (target.width() - scaled.width()) // 2
+        y = (target.height() - scaled.height()) // 2
+        painter.drawPixmap(x, y, scaled)
+        painter.end()
+        label.setPixmap(canvas)
+
+    def with_contact_legend(self, pixmap: QPixmap) -> QPixmap:
+        copy = QPixmap(pixmap)
+        painter = QPainter(copy)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        legend_w = 300
+        legend_h = 86
+        margin = 24
+        x = copy.width() - legend_w - margin
+        y = copy.height() - legend_h - margin
+        painter.setPen(QPen(QColor("#d0d7de"), 2))
+        painter.setBrush(QColor(255, 255, 255, 232))
+        painter.drawRoundedRect(x, y, legend_w, legend_h, 10, 10)
+        font = QFont(APP_FONT_FAMILY, 12)
+        font.setWeight(QFont.DemiBold)
+        painter.setFont(font)
+        painter.setPen(QColor("#17202a"))
+        painter.drawText(x + 16, y + 24, "Contact guide")
+        painter.setPen(QPen(QColor("#e60000"), 0))
+        painter.setBrush(QColor("#e60000"))
+        painter.drawEllipse(x + 18, y + 40, 12, 12)
+        painter.setPen(QPen(QColor("#17202a"), 1))
+        painter.drawText(x + 40, y + 52, "Node-to-surface")
+        painter.setPen(QPen(QColor("#e60000"), 5))
+        painter.drawLine(x + 18, y + 70, x + 32, y + 70)
+        painter.setPen(QPen(QColor("#17202a"), 1))
+        painter.drawText(x + 40, y + 76, "Surface-to-surface")
+        painter.end()
+        return copy
 
     def build_mesh_generation_guide_pixmap(self, width: Optional[int] = None) -> QPixmap:
         return self.build_mesh_guide_pixmap(width)
@@ -5917,19 +5921,6 @@ class SCLASRemoteGUI(QMainWindow):
                 padding: 6px 10px;
                 font-size: 12px;
                 font-weight: 650;
-            }
-            QPushButton#LangToggle {
-                color: #0f3a72;
-                background-color: #dfeafb;
-                border: 1px solid #b9cdea;
-                border-radius: 8px;
-                padding: 6px 8px;
-                font-size: 12px;
-                font-weight: 750;
-            }
-            QPushButton#LangToggle:hover {
-                background-color: #d2e4fb;
-                border-color: #9dbde8;
             }
             QPushButton#NavButton {
                 background-color: transparent;

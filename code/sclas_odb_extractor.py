@@ -98,7 +98,7 @@ def write_excel_xml(path, odb_name, rows):
         handle.write("</Row>\n")
         handle.write("<Row>\n")
         handle.write('<Cell><Data ss:Type="String">Curvature[m^-1]</Data></Cell>\n')
-        handle.write('<Cell><Data ss:Type="String">Moment[N*m]</Data></Cell>\n')
+        handle.write('<Cell><Data ss:Type="String">Moment[N·m]</Data></Cell>\n')
         handle.write("</Row>\n")
         for curvature, moment in rows:
             handle.write("<Row>\n")
