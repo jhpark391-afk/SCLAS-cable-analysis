@@ -239,9 +239,37 @@ def runner_helix_pitch_length_system(
     iaha: float,
     oaha: float,
 ) -> dict:
-    from abaqus_runner import helix_pitch_length_system
+    try:
+        from abaqus_runner import helix_pitch_length_system
 
-    return helix_pitch_length_system(coc, co_ia, co_oa, no_ia, no_oa, cha, iaha, oaha)
+        return helix_pitch_length_system(coc, co_ia, co_oa, no_ia, no_oa, cha, iaha, oaha)
+    except (ImportError, SyntaxError):
+        # Abaqus automation scripts may use the legacy Python syntax shipped
+        # with Abaqus. Keep Design preview available in the Python 3 GUI.
+        def pitch(radius: float, angle_deg: float, fallback: float) -> float:
+            tangent = math.tan(math.pi / 180.0 * float(angle_deg))
+            if abs(tangent) < 1.0e-12:
+                return float(fallback)
+            return 2.0 * math.pi * float(radius) / tangent
+
+        pitch_core = pitch(coc, cha, 702.6)
+        pitch_inner = pitch(co_ia, iaha, -677.94737)
+        pitch_outer = pitch(co_oa, oaha, 776.55789)
+        no_ia_int = max(1, int(no_ia))
+        no_oa_int = max(1, int(no_oa))
+        effective_length = (
+            pitch_core / 3.0
+            + round(pitch_core * no_ia_int / (3.0 * abs(pitch_inner)), 0)
+            * (abs(pitch_inner) / no_ia_int)
+            + round(pitch_core * no_oa_int / (3.0 * abs(pitch_outer)), 0)
+            * (abs(pitch_outer) / no_oa_int)
+        ) / 3.0
+        return {
+            "pitch_core": pitch_core,
+            "pitch_inner": pitch_inner,
+            "pitch_outer": pitch_outer,
+            "effective_length_mm": effective_length,
+        }
 
 
 def lay_angle_from_pitch(center_radius_mm: float, pitch_length_mm: float, fallback_deg: float) -> float:
@@ -612,6 +640,18 @@ def force_displacement_summary(summary: dict) -> dict:
     odb = summary.get("odb_extraction", {})
     if isinstance(odb, dict) and isinstance(odb.get("force_displacement_summary"), dict):
         return odb["force_displacement_summary"]
+    return {}
+
+
+def stress_extraction_summary(summary: dict) -> dict:
+    if not isinstance(summary, dict):
+        return {}
+    direct = summary.get("stress_extraction")
+    if isinstance(direct, dict):
+        return direct
+    odb = summary.get("odb_extraction", {})
+    if isinstance(odb, dict) and isinstance(odb.get("stress_extraction"), dict):
+        return odb["stress_extraction"]
     return {}
 
 
@@ -2258,8 +2298,22 @@ class SCLASRemoteGUI(QMainWindow):
         log_layout.addWidget(self.console)
         right.addWidget(self.collapsible_section("System Log", log_box, expanded=False))
 
+        result_metrics = QFrame()
+        result_metrics.setObjectName("MetricStrip")
+        result_metrics_layout = QHBoxLayout(result_metrics)
+        result_metrics_layout.setContentsMargins(0, 0, 0, 0)
+        result_metrics_layout.setSpacing(10)
         self.lbl_max_bending_moment = self.metric_box("Maximum Bending Moment", "-")
-        right.addWidget(self.lbl_max_bending_moment)
+        self.lbl_max_von_mises = self.metric_box("Maximum von Mises Stress", "Not available")
+        self.lbl_max_von_mises_detail = QLabel("Awaiting ODB stress extraction")
+        self.lbl_max_von_mises_detail.setWordWrap(True)
+        self.lbl_max_von_mises_detail.setStyleSheet(
+            f"font-family: {UI_FONT_QSS}; color: #5f6b7a; font-size: 12px; font-weight: 600;"
+        )
+        self.lbl_max_von_mises.layout().addWidget(self.lbl_max_von_mises_detail)
+        result_metrics_layout.addWidget(self.lbl_max_bending_moment, 1)
+        result_metrics_layout.addWidget(self.lbl_max_von_mises, 1)
+        right.addWidget(result_metrics)
 
         self.metric_panel = QFrame()
         self.metric_panel.setObjectName("MetricStrip")
@@ -4218,7 +4272,63 @@ class SCLASRemoteGUI(QMainWindow):
             self.lbl_peak.value_label.setText(f"{data['max_abs_moment_kn_m']:.4g} {moment_unit}")
             self.lbl_loss.value_label.setText(f"{data['hysteresis_loss_kj_per_m_proxy']:.4g}")
         self.lbl_points.value_label.setText(str(data["num_points"]))
+        self.update_stress_metric(summary or {})
         self.update_compare_panel()
+
+    def update_stress_metric(self, summary: dict) -> None:
+        if not hasattr(self, "lbl_max_von_mises"):
+            return
+
+        stress = stress_extraction_summary(summary)
+        status = str(stress.get("final_status", "")).strip().lower() if stress else ""
+        if not stress:
+            self.lbl_max_von_mises.value_label.setText("Not available")
+            self.lbl_max_von_mises_detail.setText("Awaiting ODB stress extraction")
+            return
+
+        if status != "success":
+            status_messages = {
+                "odb_not_found": "ODB file was not found",
+                "odb_empty": "ODB file is empty",
+                "odb_permission_denied": "ODB access was denied",
+                "odb_corrupted": "ODB file could not be read",
+                "odb_read_error": "ODB read failed",
+                "no_steps_found": "No analysis steps were found",
+                "no_frames_found": "No result frames were found",
+                "no_mises_field": "Von Mises stress output is unavailable",
+                "no_stress_values": "No stress values were found",
+                "invalid_stress_values": "Stress values are invalid",
+                "vonmises_error": "Von Mises extraction failed",
+                "extraction_failed": "Stress extraction failed",
+            }
+            self.lbl_max_von_mises.value_label.setText("Unavailable")
+            self.lbl_max_von_mises_detail.setText(status_messages.get(status, status or "Stress extraction failed"))
+            return
+
+        try:
+            max_stress = float(stress["max_stress_mpa"])
+            yield_stress = float(stress.get("mild_steel_yield_mpa", 250.0))
+            margin = float(
+                stress.get(
+                    "safety_margin_percent",
+                    ((yield_stress - max_stress) / yield_stress) * 100.0,
+                )
+            )
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            self.lbl_max_von_mises.value_label.setText("Unavailable")
+            self.lbl_max_von_mises_detail.setText("Stress summary contains invalid values")
+            return
+
+        self.lbl_max_von_mises.value_label.setText(f"{max_stress:.2f} MPa")
+        if margin >= 0.0:
+            comparison = f"{margin:.1f}% below mild steel yield ({yield_stress:.0f} MPa)"
+        else:
+            comparison = f"{abs(margin):.1f}% above mild steel yield ({yield_stress:.0f} MPa)"
+        step_name = str(stress.get("step_name", "")).strip()
+        frame_number = stress.get("frame_number")
+        if step_name and frame_number is not None:
+            comparison += f" | {step_name}, frame {frame_number}"
+        self.lbl_max_von_mises_detail.setText(comparison)
 
     def update_compare_panel(self) -> None:
         if not hasattr(self, "lbl_compare_count"):
@@ -4329,6 +4439,7 @@ class SCLASRemoteGUI(QMainWindow):
             return
         self.last_summary_data = data if isinstance(data, dict) else {}
         self.summary_text.setPlainText(self.format_summary(data))
+        self.update_stress_metric(self.last_summary_data)
 
     def format_summary(self, data: dict) -> str:
         if not data:

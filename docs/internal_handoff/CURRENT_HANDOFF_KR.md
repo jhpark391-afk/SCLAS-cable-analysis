@@ -1,3 +1,14 @@
+# 2026-08-14 GUI von Mises 응력 결과 병합
+
+* `code/sclas_remote_gui.py`의 Analysis Results 탭에 `Maximum von Mises Stress` 결과 카드를 추가했습니다.
+* GUI는 Job 폴더의 `result_summary.json > stress_extraction`을 읽습니다.
+* 성공 시 최대 응력, mild steel 기준 항복응력 대비 여유율 또는 초과율, Step/Frame을 표시합니다.
+* 실패 시 `final_status` 오류코드를 사용자용 상태 문장으로 표시합니다.
+* GUI 표시 로직은 샘플 성공/실패 JSON으로 검증했습니다. 실제 Abaqus ODB 추출 정확도와 steel 영역 제한은 백엔드 실기 검증이 필요합니다.
+* Abaqus Python 2 문법이 포함된 runner를 Python 3 GUI에서 import하지 못해 Design Preview와 파생 피치값이 비던 문제를 수정했습니다. GUI는 runner import가 불가능할 때 동일한 피치/유효길이 수식을 호환 경로로 사용합니다.
+
+---
+
 # 2026-07-11 automatic.py pitch/Dep and mesh radial cleanup
 
 * `C:\HELIX\Abaqus+_work\automatic.py` formulas are now reflected in `code/abaqus_runner.py` and `code/sclas_remote_gui.py`.

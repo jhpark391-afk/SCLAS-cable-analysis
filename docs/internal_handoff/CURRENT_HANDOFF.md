@@ -1,6 +1,19 @@
 # CURRENT_HANDOFF
 
-Last updated: 2026-07-11 KST
+Last updated: 2026-08-14 KST
+
+## GUI von Mises Stress Result - 2026-08-14 KST
+
+- Added a `Maximum von Mises Stress` result card to the Analysis Results tab.
+- The GUI reads `result_summary.json > stress_extraction` from the selected Job folder.
+- Successful extraction shows the maximum stress, percentage below or above the
+  mild-steel reference yield strength, and the source Step/Frame.
+- Failed extraction maps `final_status` codes to readable GUI status messages.
+- GUI parsing was checked with sample success/failure JSON. Real Abaqus ODB
+  extraction accuracy and steel-region filtering still require backend validation.
+- Restored the Design section preview and derived pitch/effective-length values
+  when a legacy Abaqus Python runner cannot be imported by the Python 3 GUI.
+  The compatibility path uses the same runner formula without modifying backend files.
 
 ## SCLAS 711 GUI Defaults Cleanup - 2026-07-11 KST
 
