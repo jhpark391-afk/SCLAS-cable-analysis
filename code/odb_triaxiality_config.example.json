@@ -1,0 +1,51 @@
+{
+  "odb_folder": "D:/path/to/odb_folder",
+  "output_folder": "../outputs/odb_triaxiality",
+  "recursive": false,
+  "position": "NODAL",
+  "steps": null,
+  "max_frames_per_step": null,
+  "mises_zero_tolerance": 0.0,
+  "node_rules": {
+    "SF": {
+      "IP": {
+        "instance": "",
+        "node": null
+      },
+      "OP": {
+        "instance": "",
+        "node": null
+      }
+    },
+    "DF": {
+      "IP": {
+        "instance": "",
+        "node": null
+      },
+      "OP": {
+        "instance": "",
+        "node": null
+      }
+    },
+    "FF": {
+      "IP": {
+        "instance": "",
+        "node": null
+      },
+      "OP": {
+        "instance": "",
+        "node": null
+      }
+    },
+    "SW": {
+      "IP": {
+        "instance": "",
+        "node": null
+      },
+      "OP": {
+        "instance": "",
+        "node": null
+      }
+    }
+  }
+}

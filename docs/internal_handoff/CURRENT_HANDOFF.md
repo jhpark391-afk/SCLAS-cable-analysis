@@ -2746,3 +2746,17 @@ code/sclas_offline_diagnostics.py when deeper .dat/.msg/log context is needed.
 Continue preparing code/abaqus_runner.py for real Abaqus contact, periodic
 boundary conditions, cyclic bending, job submission, and ODB result extraction.
 ```
+
+
+---
+
+# 2026-11-20 Batch ODB stress triaxiality exporter
+
+- Added standalone code/odb_triaxiality_batch.py, Abaqus 2019/2026 PY/BAT launchers, and check_odb_triaxiality.py. Guide: docs/guides/README_ODB_TRIAXIALITY_KR.md. Existing GUI/backend files were not edited.
+- Exact underscore tokens SF/DF/FF/SW select independently configurable IP/OP node labels and Instances. Inventoried 30 user ODBs under D:/LYG/260922 SG Buckling Cases/D15_t15_odb (SF6/DF6/FF9/SW9). Numerical filename components do not affect classification.
+- Local odb_triaxiality_config.json is ignored; versioned .example.json has placeholder paths and unset labels. User node labels/Instances remain pending. No stress extraction from the 30 research ODBs has been performed.
+- Current supported position is Unique Nodal, averaging enabled with 100% threshold over all elements. CAE extracts Pressure/Mises from S, then computes -Pressure/Mises. User GUI Position/settings comparison remains pending. Preserve Riks XY_X without claiming physical time; zero Mises produces a blank plus status.
+- Process one read-only ODB at a time; never save/upgrade sources. Per-ODB XLSX sheets Combined/TP_IP/TP_OP/Metadata, batch inventory/summary/JSON/progress.log. Script release compatibility does not guarantee ODB format compatibility.
+- Five unit checks pass under normal Python3.12 and native Abaqus2019 Python2.7 / Abaqus2026 Python3.10. Both native CAE versions passed extraction, XLSX output and named XY creation on separate synthetic 2-element/2-step/3-frame fixtures. Independent-node ratios IP=1/3 and OP=4/3; shared-node IP=5/6. Independent openpyxl checks and unchanged source SHA256 passed. Synthetic data stays in untracked tmp only.
+- Required scripts/run_self_check.bat still reports pre-existing Python2 print syntax in abaqus_runner.py:1810 and abaqus_runner_V89.py:1598. Preserved all pre-existing user changes.
+- Next: obtain four node/Instance pairs and confirm GUI Position; compare one real ODB against manual XY extraction before batch research use.

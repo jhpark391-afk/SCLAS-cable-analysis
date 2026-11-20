@@ -258,3 +258,17 @@ graph TD
 * FAST GUI preview에 필요했던 EI 추정값은 `equivalent_properties`로 export하지 않고 worker 내부 계산으로만 사용합니다.
 
 ---
+
+
+---
+
+# 2026-11-20 ODB 응력삼축도 일괄 추출 도구
+
+- 새 독립 도구: `code/odb_triaxiality_batch.py`, 2019/2026용 PY/BAT 진입점, `code/check_odb_triaxiality.py`. 사용법 `docs/guides/README_ODB_TRIAXIALITY_KR.md`. 기존 GUI/backend 수정 없음.
+- 파일명의 정확한 밑줄 토큰 SF/DF/FF/SW로 IP/OP 노드 및 Instance를 선택. 현재 폴더 `D:/LYG/260922 SG Buckling Cases/D15_t15_odb`에서 30개(SF6/DF6/FF9/SW9) 목록 분류 확인. 숫자 값은 분류에 무관.
+- 실제 로컬 설정 `code/odb_triaxiality_config.json`은 커밋 제외. `odb_triaxiality_config.example.json`을 제공. 사용자가 유형별 IP/OP 노드/Instance를 아직 제공하지 않아 값은 미설정. 실데이터 응력 추출은 아직 수행하지 않음.
+- 현재 Unique Nodal만 지원. CAE XY API로 S의 Pressure/Mises 추출 후 -Pressure/Mises 계산. 평균화 ON, 임계값100%, 전체 요소. 사용자 GUI Position/평균화 조건과의 대조는 남아 있음. Riks X를 물리적 시간으로 부르지 않고 XY_X 원본으로 저장. Mises=0은 빈칸+상태.
+- 한 번에 ODB 하나를 읽기 전용으로 처리하며 원본 저장/업그레이드 안 함. ODB별 XLSX(Combined/TP_IP/TP_OP/Metadata), 실행별 Inventory/Batch_summary/JSON/progress.log 저장. 코드의 두 버전 호환성과 ODB 포맷 호환성은 별개.
+- 실제 Abaqus 2019 Python2.7 및 2026 Python3.10에서 5개 기본 검사 통과. 각 버전에서 직접 만든 작은 합성 ODB(2요소,2Step,3프레임)로 CAE 추출/엑셀/XY객체 생성 통과. 독립 노드 IP=1/3,OP=4/3; 공유 노드 IP=5/6 확인. 독립 openpyxl 재검증 및 원본 SHA256 불변 확인. 합성 결과는 tmp에만 보관/미커밋.
+- scripts/run_self_check.bat는 기존 abaqus_runner.py:1810 / abaqus_runner_V89.py:1598의 Python2 print 구문으로 compilation 실패. 기존 사용자 변경은 유지했고 이번 도구 범위에서 수정하지 않음.
+- 다음 단계: 사용자의 네 유형 노드/Instance 및 GUI Position 확인 -> 한 실제 ODB에서 수동 XY와 대조 -> 전체 일괄 처리.
